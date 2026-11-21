@@ -116,4 +116,4 @@ Chain Indexer ──► World Engine ──► WorldFrameV1 ◄── Moderated 
 python scripts/validate_devpack.py
 ```
 
-它只检查 Markdown 文档、Demo JSON、稳定哈希、地标包围盒和核心跨文档术语是否一致，**不等同于**后续 Codex 项目的合约单测、端到端测试或真实 Agentic Wallet 钱包验证。
+这条命令检查 Markdown 文档、两个 DEMO 示例、内容哈希、地标边界和跨文档术语。世界帧示例使用与应用相同的 JSON 结构，其中的区块哈希和世界数据仅用于本地测试。

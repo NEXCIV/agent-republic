@@ -17,10 +17,10 @@ for name in REQUIRED:
 for other in ['AGENTS.md','README.md','CHANGELOG.md','.env.example']:
     assert (ROOT/other).is_file(),f'missing {other}'
 
-frame_envelope=json.loads((EXAMPLES/'world-frame.demo.json').read_text(encoding='utf-8'))
+frame=json.loads((EXAMPLES/'world-frame.demo.json').read_text(encoding='utf-8'))
 scene_envelope=json.loads((EXAMPLES/'scene-manifest.demo.json').read_text(encoding='utf-8'))
-assert frame_envelope['demoOnly'] and scene_envelope['demoOnly']
-frame=frame_envelope['frame']; scene=scene_envelope['manifest']
+assert scene_envelope['demoOnly'] is True, 'scene manifest must be marked as DEMO'
+scene=scene_envelope['manifest']
 assert frame['schemaVersion']=='1.1' and scene['schemaVersion']=='1.1'
 assert frame['simulation']['sceneVersion']==scene['sceneVersion']=='district-01@1'
 
@@ -28,9 +28,11 @@ def digest(obj):
     payload=json.dumps(obj,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')
     return '0x'+hashlib.sha256(payload).hexdigest()
 
-assert frame['frameId']==digest({k:v for k,v in frame.items() if k not in ('frameId','generatedAt')})
-assert scene_envelope['manifestHash']==digest(scene)
-assert frame['source']['chainId']==97, 'DEMO fixture must never pose as BSC mainnet'
+assert frame['frameId']==digest({k:v for k,v in frame.items() if k not in ('frameId','generatedAt')}), 'DEMO world frame hash mismatch'
+assert scene_envelope['manifestHash']==digest(scene), 'DEMO scene manifest hash mismatch'
+# The sample follows the production schema, using a synthetic block hash.
+assert frame['source']['chainId'] in (56, 97), 'DEMO world frame must use a supported BSC chainId'
+assert frame['source']['blockHash']=='0x'+'a'*64, 'DEMO world frame must use the synthetic block hash'
 assert frame['facts']['projects'][0]['goalBuild']=='2000'
 assert frame['simulation']['agents'] and all(a['isSimulated'] for a in frame['simulation']['agents'])
 assert all(m['provenance']=='AI_SIMULATED' and m['moderation']=='APPROVED' for m in frame['society']['publicMessages'])
@@ -47,14 +49,16 @@ assert len(scene['waypoints'])==13
 for a,b in scene['edges']:
     assert a in scene['waypoints'] and b in scene['waypoints']
 
-prd=(DOCS/'PRD.md').read_text(); world=(DOCS/'WORLD_ENGINE.md').read_text()
-agent=(DOCS/'AGENT_ENGINE.md').read_text();render=(DOCS/'3D_RENDERING.md').read_text()
+prd=(DOCS/'PRD.md').read_text(encoding='utf-8')
+world=(DOCS/'WORLD_ENGINE.md').read_text(encoding='utf-8')
+agent=(DOCS/'AGENT_ENGINE.md').read_text(encoding='utf-8')
+render=(DOCS/'3D_RENDERING.md').read_text(encoding='utf-8')
 assert 'WorldFrameV1' in prd and 'WorldFrameV1' in world
 assert 'AgentObservationV1' in world and 'AgentObservationV1' in agent
 assert 'deriveProjectStage' in world and 'deriveProjectStage' in render
 assert 'SOCIAL_LOCATION_REQUEST' in agent
 assert 'CHAIN_CONFIRMED' in world and 'SUBMITTED/INCLUDED' in render
-assert 'Pixel AI Town' in (ROOT/'AGENTS.md').read_text()
+assert 'Pixel AI Town' in (ROOT/'AGENTS.md').read_text(encoding='utf-8')
 
 print(f'PASS: {len(REQUIRED)} documents, 2 DEMO JSON fixtures, hashes, scene bounds, cross-doc terms')
 print('NOTE: this checks specification files only; no real app, Solidity, AI, wallet, or rendering implementation has been tested.')
