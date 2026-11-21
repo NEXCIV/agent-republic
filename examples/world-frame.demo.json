@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "1.1",
+  "frameId": "0xb7aea6b985fce768286573d3b455da7478ae2bff5d089cdf4f2fd33ee0b60219",
+  "generatedAt": "2026-11-19T08:00:00.000Z",
+  "source": {
+    "chainId": 56,
+    "blockNumber": "70000000",
+    "blockHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "blockTimestamp": "2026-11-19T07:59:48.000Z",
+    "confirmedDepth": 12,
+    "sync": "LIVE",
+    "provenance": "CHAIN_CONFIRMED"
+  },
+  "epochId": 20776,
+  "facts": {
+    "citizenCount": 2,
+    "projects": [
+      {
+        "id": "1",
+        "titleKey": "GOLDEN_TOILET_TOWER",
+        "goalBuild": "2000",
+        "fundedBuild": "0",
+        "status": "FUNDING",
+        "completedAtBlock": null
+      }
+    ],
+    "proposals": []
+  },
+  "society": {
+    "socialRevision": "0",
+    "publicMessages": [],
+    "agentSummaries": [
+      {
+        "agentId": "agent-01",
+        "owner": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "displayName": "Ada",
+        "persona": "COOPERATIVE",
+        "active": true
+      },
+      {
+        "agentId": "agent-02",
+        "owner": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "displayName": "Borealis",
+        "persona": "PRAGMATIC",
+        "active": true
+      }
+    ]
+  },
+  "simulation": {
+    "tick": "0",
+    "worldSeed": "genesis-2026",
+    "sceneVersion": "district-01@1",
+    "agents": [
+      {
+        "agentId": "agent-01",
+        "position": [0, 0, 0],
+        "facingRadians": 0,
+        "action": "IDLE",
+        "locationId": "PLAZA",
+        "isSimulated": true
+      },
+      {
+        "agentId": "agent-02",
+        "position": [-6, 0, 8],
+        "facingRadians": 1.2,
+        "action": "WALK",
+        "locationId": "PROJECT",
+        "isSimulated": true
+      }
+    ],
+    "visualEvents": []
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "agent-republic",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Agent ID Native Autonomous Society Protocol on BNB Smart Chain",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run build && pnpm -r run typecheck && tsc --noEmit -p tsconfig.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:e2e": "vitest run tests/e2e",
+    "test:world": "vitest run tests/world packages/world-engine/test packages/domain/test/scene.test.ts packages/domain/test/world-v1.test.ts apps/worker/test/world-tick-pg.test.ts apps/worker/test/world-recovery-pg.test.ts apps/api/test/world-routes.test.ts apps/api/test/world-pg.test.ts",
+    "test:a11y": "node tests/a11y-contrast.mjs",
+    "test:responsive": "node tests/responsive-check.mjs",
+    "test:visual": "node tests/visual-check.mjs",
+    "ci": "pnpm lint && pnpm build && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.18.0",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.18.0",
+    "playwright-core": "^1.49.1",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.20.0",
+    "vitest": "^3.0.5"
+  }
+}

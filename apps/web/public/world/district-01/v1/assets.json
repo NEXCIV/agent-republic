@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "1",
+  "sceneVersion": "district-01@1",
+  "license": "original-work",
+  "author": "AGENT REPUBLIC team (procedural bpy scripts in tools/blender/)",
+  "assets": [
+    {
+      "file": "agent-citizen.glb",
+      "license": "original-work",
+      "note": "articulated chibi citizen with a morphable fringe, black gloves and a diamond jacket emblem",
+      "bytes": 34412,
+      "sha256": "6d7421d653af21cfd0b9136a5a2cbb42584a3cbe2e79587d447adde010df43cc"
+    },
+    {
+      "file": "council.glb",
+      "license": "original-work",
+      "note": "Charcoal council hall with a satin-brass dome and cornice",
+      "bytes": 107836,
+      "sha256": "2ce3f623f517ccd6f7675d0b0930a2aca492e2108a2aa748e23506d4c91aff0f"
+    },
+    {
+      "file": "identity.glb",
+      "license": "original-work",
+      "note": "Graphite and bronze identity tower with an ice-blue portrait card",
+      "bytes": 69424,
+      "sha256": "b114538c86562a9e87b14403b58bf664b76fb82f112ee66cbdfb586c0fe04b0c"
+    },
+    {
+      "file": "core.glb",
+      "license": "original-work",
+      "note": "Agent Core with smoked glazing, gold mullions and an amber crystal",
+      "bytes": 307008,
+      "sha256": "3e2321d11edabcf4ac02521b33e38b0ec232e94f3aefc58464a9690eed59014c"
+    },
+    {
+      "file": "project.glb",
+      "license": "original-work",
+      "note": "Charcoal tower with a polished gold monument and four construction stages",
+      "bytes": 205116,
+      "sha256": "1248a5bb582d53864f24b5cd79744be4ce5012cfac40a4f17b2f141f45992eb4"
+    },
+    {
+      "file": "environment.glb",
+      "license": "original-work",
+      "note": "floating basalt island, bridge, waterfalls, civic plaza, streets, trees and airship",
+      "bytes": 654912,
+      "sha256": "f8cbd38e3dfa723d2f1693ecba2bb9fd229a84ba24398c2666edbb8fbab7b69a"
+    }
+  ]
+}

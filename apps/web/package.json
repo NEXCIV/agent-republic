@@ -1,0 +1,26 @@
+{
+  "name": "@agent-republic/web",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agent-republic/chain": "workspace:*",
+    "@agent-republic/domain": "workspace:*",
+    "@agent-republic/world-engine": "workspace:*",
+    "@react-three/fiber": "^9.1.0",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.174.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.8",
+    "@types/react-dom": "^19.0.3",
+    "@types/three": "^0.174.0"
+  }
+}

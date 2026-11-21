@@ -1,0 +1,17 @@
+node_modules/
+.next/
+dist/
+out/
+cache/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+coverage/
+.tools/
+.pnpm-store/
+deployments/*.local.json
+.superpowers/
+__pycache__/
+*.pyc
+*.blend[0-9]*

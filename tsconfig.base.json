@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022"],
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@agent-republic/domain": ["./packages/domain/dist/index.d.ts"],
+      "@agent-republic/chain": ["./packages/chain/dist/index.d.ts"],
+      "@agent-republic/agent-engine": ["./packages/agent-engine/dist/index.d.ts"],
+      "@agent-republic/world-engine": ["./packages/world-engine/dist/index.d.ts"],
+      "@agent-republic/ui": ["./packages/ui/dist/index.d.ts"]
+    }
+  }
+}

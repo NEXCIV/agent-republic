@@ -1,0 +1,10 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+solc_version = "0.8.24"
+verbosity = 3
+# Deploy.s.sol writes deployments/<chainId>.json
+fs_permissions = [{ access = "write", path = "./deployments" }]
+
+# See more config options https://github.com/foundry-rs/foundry/blob/master/crates/config/README.md
