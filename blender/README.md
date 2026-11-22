@@ -1,4 +1,44 @@
-# CIVRUM 城市环境 · 第一阶段灰盒
+# CIVRUM 城市环境
+
+[第二阶段城市工程](CIVRUM_World_Environment.blend) · [Blender 资产库](CIVRUM_Asset_Library.blend) · [总览](../renders/environment/CIVRUM_World_Overview.png) · [研究区街景](../renders/environment/CIVRUM_Street_Detail.png) · [施工区](../renders/environment/CIVRUM_Construction.png)
+
+![中央广场的树池、长椅、导览终端和入口标识](../renders/environment/CIVRUM_Central_Plaza.png)
+
+## 第二阶段 · 公共设施、绿化与施工
+
+这一版从已验收的 300 × 300 米灰盒生成。中央活动圈放置一座金色多面体地标，周围可通行。导览终端、树池和带独立铺装的座椅沿两侧布置。研究区与住宅区的前庭采用错缝地砖、排水格栅和分区灯旗。工坊南侧留出八米出入口，地面箭头指向院内，地基、脚手架和材料架分区摆放。
+
+资产库包含 **29 个原创网格模块**。每个模块都使用米制尺寸、地面原点和内嵌缩略图。将本目录添加到 Blender 的 **Preferences → File Paths → Asset Libraries**，即可从 Asset Browser 拖入模块，也可在 **File → Append → CIVRUM_Asset_Library.blend → Object** 中按名称取用。场景中的重复摆放共享网格。树木、花簇和灌木可随所属树池或绿化带一起移动。
+
+| 集合 | 资产名称（均以 `CIVRUM_` 开头） | 尺寸或拼接约定 |
+| --- | --- | --- |
+| PUBLIC_FACILITIES | `PROP_PLAZA_BEACON_01` | 广场地标高 2.57 米、基座直径 3.94 米，多面体底部嵌入石墨色承座 |
+| PUBLIC_FACILITIES | `PROP_STREETLIGHT_01…03` | 悬臂路灯高 5.89 米、挂旗灯高 5.14 米、步道灯高 3.47 米 |
+| PUBLIC_FACILITIES | `PROP_BENCH_01…02`、`PROP_INFO_KIOSK_01…02` | 两款长椅长 2.45、3.12 米。全高及低位终端的面板朝局部 −Y |
+| PUBLIC_FACILITIES | `PROP_PLANTER_01…03` | 3.50 米宽的多边形树池、4.60 × 1.65 米的长花槽、2.80 × 2.80 米的方形树池 |
+| PUBLIC_FACILITIES | `PROP_BIN_01`、`PROP_WAYFINDER_01`、`PROP_BOLLARD_01`、`PROP_RAIL_01` | 垃圾桶高 0.98 米、指示牌高 2.89 米、隔离柱高 0.87 米。护栏沿局部 X 按 3 米节距排列 |
+| VEGETATION | `TREE_01…03`、`SHRUB_01…02` | 阔叶树、柱形树、伞冠树分别高约 6.46、6.91、5.65 米。两款灌木高约 0.87、1.14 米 |
+| VEGETATION | `GREEN_LAWN_01`、`GREEN_VERGE_01`、`GREEN_FLOWERS_01` | 草地 12 × 8 米，带缘石的绿化带 10 × 3.20 米，花簇宽约 1.32 米 |
+| CONSTRUCTION | `CONSTRUCTION_FOUNDATION_01`、`CONSTRUCTION_FENCE_01`、`CONSTRUCTION_SCAFFOLD_01` | 地基按 6 × 4 米拼接，围挡节距 4 米。脚手架水平节距 3 米，垂直节距 2.40 米 |
+| CONSTRUCTION | `CONSTRUCTION_RACK_01`、`CONSTRUCTION_PRECAST_01`、`CONSTRUCTION_BARRIER_01` | 管材架长 3.68 米，预制梁长 3.80 米、叠放节距 0.75 米，黑黄警示栏宽 2.60 米 |
+
+构筑物沿用六种基础材质。植被额外共用六种哑光材质，分别表现两档叶面亮度、阴面叶片、草皮、土壤和树皮。每棵树为 212–278 个三角面，每簇花为 111 个三角面。
+
+第二阶段场景包含 149 处公共设施、355 处植被和 56 处施工模块。连同第一阶段建筑、道路和地面，833 个网格对象共用 97 份网格数据，按场景中实际摆放累计 104,219 个三角面。统计排除了摄影衬底和字体对象。网页端帧率留待 GLB 导入后实测。
+
+在仓库根目录运行以下命令，可以在一个新目录重新生成城市、资产库和四张 1600 × 900 预览。前三个机位对应第一阶段，第四张近景用于检查施工模块。
+
+```powershell
+& 'G:/blender/blender.exe' -b --factory-startup --python-exit-code 1 -P scripts/detail_civrum_world.py -- --output-root ../civrum-environment-review --render
+```
+
+运行以下命令可重新打开仓库里的两个第二阶段文件，检查道路接缝、模块放置、脚手架支撑、街具间距、建筑及车行道占用，以及资产库中的本地网格与缩略图。
+
+```powershell
+& 'G:/blender/blender.exe' -b --factory-startup --python-exit-code 1 -P scripts/detail_civrum_world.py -- --check
+```
+
+## 第一阶段 · 城市灰盒
 
 [打开 Blender 场景](CIVRUM_World_Blockout.blend) · [城市总览](../renders/CIVRUM_World_Overview.png) · [中央广场](../renders/CIVRUM_Central_Plaza.png) · [研究区街景](../renders/CIVRUM_Street_Detail.png)
 

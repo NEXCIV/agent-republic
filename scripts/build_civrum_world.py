@@ -86,12 +86,12 @@ class Geometry:
             j = (i+1) % len(outer)
             self.surface([outer[i], outer[j], inner[j], inner[i]], z, color)
 
-    def mesh(self, name):
+    def mesh(self, name, palette=PALETTE):
         mesh = bpy.data.meshes.new(name)
         mesh.from_pydata(self.verts, [], self.faces)
         slots = sorted(set(self.colors))
         for idx in slots:
-            mesh.materials.append(bpy.data.materials["MAT_"+PALETTE[idx][0]])
+            mesh.materials.append(bpy.data.materials["MAT_"+palette[idx][0]])
         for poly, color in zip(mesh.polygons, self.colors):
             poly.material_index = slots.index(color)
         mesh.update()
