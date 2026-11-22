@@ -154,6 +154,8 @@ flowchart LR
 | E3-06 | 记忆/复盘与链事件链接 | 不会把 pending 当成功 |
 | E3-07 | `/my-agent` 控制台 / pause / 替换 | owner 受保护，旧记录可查 |
 
+E3-05 的 CIVRUM 双 Agent 扩展先在隔离的 DEMO 数据库验证主动邀请、暂停、回复和重启后记忆回溯。产品规则、Runtime 和运行方法见 [CIVRUM 工程蓝图](civrum/03_ENGINEERING_BLUEPRINT.md)，以及 [世界规则](civrum/01_WORLD_RULES.md) 和 [Runtime](civrum/02_AGENT_RUNTIME.md)。
+
 ### E7 — 集成（新增）
 
 | ID | 任务 | DoD |

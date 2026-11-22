@@ -91,6 +91,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@agent-republic/agent-engine':
+        specifier: workspace:*
+        version: link:../../packages/agent-engine
       '@agent-republic/chain':
         specifier: workspace:*
         version: link:../../packages/chain
