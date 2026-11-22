@@ -801,7 +801,14 @@ def check(world,library):
                 assert o.parent.data["module"].startswith(("PROP_PLANTER","GREEN_VERGE","GREEN_LAWN"))
                 assert abs(o.location.z-o.parent.dimensions.z) < .008, o.name
             else:
-                delta = o.location.z-ground_z(terrain,*o.location.xy)
+                # A solid footing bridges narrow paving joints. The centre can
+                # sit over an 8 mm joint while the surrounding pad is supported.
+                x,y = o.location.xy
+                support = ground_z(terrain,x,y)
+                if o.location.z-support > .006:
+                    support = max(support, *(ground_z(terrain,x+dx,y+dy) for dx,dy in
+                                            ((.02,0),(-.02,0),(0,.02),(0,-.02))))
+                delta = o.location.z-support
                 pitch = {"CONSTRUCTION_SCAFFOLD_01":2.4,"CONSTRUCTION_PRECAST_01":.75}.get(key)
                 if pitch and delta>.01:
                     below = [b for b in bpy.data.collections[WORK].objects if b.data==o.data and

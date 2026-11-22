@@ -14,7 +14,12 @@ const { values } = parseArgs({ options: {
   exports: { type: 'string', default: join(repo, 'exports') },
   output: { type: 'string', default: join(tmpdir(), 'civrum-webgl-' + Date.now()) },
   validator: { type: 'string' },
+  quality: { type: 'string', default: 'standard' },
 } });
+if (!['standard','refined'].includes(values.quality)) throw new Error('--quality must be standard or refined');
+const refined = values.quality === 'refined';
+const preview = refined ? {width:1920,height:1080} : {width:1280,height:720};
+const frames = ['World_Overview','Central_Plaza',...(refined ? ['Street_Detail'] : []),'Road_Assembly'];
 const output = resolve(values.output);
 const folder = resolve(values.exports);
 const requireWeb = createRequire(join(repo, 'apps/web/package.json'));
@@ -22,6 +27,7 @@ const three = dirname(dirname(requireWeb.resolve('three')));
 const catalog = JSON.parse(await readFile(join(folder, 'catalog.json'), 'utf8'));
 const files = new Map(catalog.assets.map((a) => ['/models/' + a.file, join(folder, a.file)]));
 for (const name of ['build/three.module.js', 'build/three.core.js', 'examples/jsm/loaders/GLTFLoader.js',
+  'examples/jsm/environments/RoomEnvironment.js',
   'examples/jsm/utils/BufferGeometryUtils.js']) files.set('/three/' + name, join(three, name));
 const executablePath = [process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/google-chrome',
@@ -42,26 +48,39 @@ const server = createServer(async (req, res) => {
   } catch { res.writeHead(500).end(); }
 });
 
-async function initialize({assets,palette}) {
+async function initialize({assets,palette,quality}) {
   const T = await import('three');
   const { GLTFLoader } = await import('/three/examples/jsm/loaders/GLTFLoader.js');
+  const refined = quality === 'refined';
   const renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(1);
-  renderer.setSize(1280, 720);
+  renderer.setSize(refined ? 1920 : 1280, refined ? 1080 : 720);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = T.PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = false;
-  renderer.toneMapping = T.NeutralToneMapping;
+  renderer.toneMapping = refined ? T.AgXToneMapping : T.NeutralToneMapping;
+  renderer.toneMappingExposure = refined ? 1.15 : 1;
   document.body.appendChild(renderer.domElement);
   const scene = new T.Scene();
   scene.background = new T.Color(0xc2d6e3);
   scene.fog = new T.FogExp2(0xc2d6e3, .00045);
-  const light = new T.DirectionalLight(0xffedd2, 2.2);
+  if (refined) {
+    // Three.js's procedural studio environment supplies broad reflections to dark metal.
+    // It changes lighting only; the loaded GLB materials remain untouched and verified below.
+    const { RoomEnvironment } = await import('/three/examples/jsm/environments/RoomEnvironment.js');
+    const room = new RoomEnvironment();
+    const pmrem = new T.PMREMGenerator(renderer);
+    scene.environment = pmrem.fromScene(room,.04).texture;
+    scene.environmentIntensity = .45;
+    room.dispose();
+    pmrem.dispose();
+  }
+  const light = new T.DirectionalLight(refined ? 0xffeddc : 0xffedd2, refined ? 3.0 : 2.2);
   light.castShadow = true;
-  light.shadow.mapSize.set(2048, 2048);
-  light.shadow.bias = -.00045;
-  light.shadow.normalBias = .085;
-  scene.add(light, light.target, new T.HemisphereLight(0xe5f1ff, 0xc9c1ad, 1.65));
+  light.shadow.mapSize.set(refined ? 4096 : 2048, refined ? 4096 : 2048);
+  light.shadow.bias = refined ? -.00012 : -.00045;
+  light.shadow.normalBias = refined ? .035 : .085;
+  scene.add(light, light.target, new T.HemisphereLight(0xe5f1ff, 0xc9c1ad, refined ? .65 : 1.65));
   const camera = new T.PerspectiveCamera(41, 16/9, .8, 1350);
   const models = new Map();
   const loader = new GLTFLoader();
@@ -176,6 +195,7 @@ async function initialize({assets,palette}) {
     roads.visible = !city.visible;
     if (name === 'Road_Assembly') view([52,95,80],[1,0,5],65,18,42);
     else if (name === 'Central_Plaza') view([7,9.2,56],[0,10,-5],64,2.0,39);
+    else if (name === 'Street_Detail') view([-68.6,2.25,-8],[-84,4.8,-58],48,.15,38);
     else view([49,305,350],[0,0,25],224,110,33);
   }
   function compare() {
@@ -222,24 +242,27 @@ async function initialize({assets,palette}) {
       p95FrameMs:+times[Math.ceil(.95*times.length)-1].toFixed(1),...renderOnce()};
   }
   window.civrumQA = {frame,benchmark};
-  return {threeRevision:T.REVISION,gpu,checked:models.size,...compare()};
+  return {threeRevision:T.REVISION,gpu,checked:models.size,quality,
+    preview:{width:refined?1920:1280,height:refined?1080:720,shadowMap:refined?4096:2048,
+      toneMapping:refined?'AgX':'Neutral',environment:refined?'procedural RoomEnvironment':'hemisphere only'},
+    ...compare()};
 }
 
 let browser;
 try {
   await mkdir(output,{ recursive: true });
-  for (const f of ['World_Overview','Central_Plaza','Road_Assembly','benchmark']) {
+  for (const f of [...frames,'benchmark']) {
     const path = join(output,f+(f==='benchmark'?'.json':'.png'));
     if (existsSync(path)) throw new Error('Choose an empty --output directory: '+path);
   }
   await new Promise((done) => server.listen(0,'127.0.0.1',done));
   browser = await chromium.launch({executablePath,headless:true});
-  const page = await browser.newPage({viewport:{width:1280,height:720},deviceScaleFactor:1});
+  const page = await browser.newPage({viewport:preview,deviceScaleFactor:1});
   const errors = [];
   page.on('pageerror',(err) => errors.push(err.message));
   page.on('console',(msg) => {if (msg.type()==='error') errors.push(msg.text());});
   await page.goto('http://127.0.0.1:'+server.address().port);
-  const report = await page.evaluate(initialize,catalog);
+  const report = await page.evaluate(initialize,{...catalog,quality:values.quality});
   if (values.validator) {
     const validator = requireWeb(resolve(values.validator));
     const messages = {};
@@ -250,7 +273,7 @@ try {
     }
     report.format = {validator:validator.version(),files:catalog.assets.length,errors:0,warnings:0,info:messages};
   }
-  for (const name of ['World_Overview','Central_Plaza','Road_Assembly']) {
+  for (const name of frames) {
     await page.evaluate((n) => window.civrumQA.frame(n),name);
     await page.locator('canvas').screenshot({path:join(output,name+'.png')});
   }

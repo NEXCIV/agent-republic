@@ -1,0 +1,47 @@
+{
+  "task": "E6-07",
+  "author": "NEXCIV",
+  "variant": "refined",
+  "render": {
+    "engine": "Cycles",
+    "resolution": [
+      1920,
+      1080
+    ],
+    "samples": 96
+  },
+  "objects": 829,
+  "uniqueMeshes": 96,
+  "trianglesInstantiated": 965095,
+  "moduleTriangles": {
+    "CONSTRUCTION_BARRIER_01": 374,
+    "CONSTRUCTION_FENCE_01": 580,
+    "CONSTRUCTION_FOUNDATION_01": 908,
+    "CONSTRUCTION_PRECAST_01": 228,
+    "CONSTRUCTION_RACK_01": 992,
+    "CONSTRUCTION_SCAFFOLD_01": 1308,
+    "GREEN_FLOWERS_01": 864,
+    "GREEN_LAWN_01": 12,
+    "GREEN_VERGE_01": 34,
+    "PROP_BENCH_01": 5040,
+    "PROP_BENCH_02": 5040,
+    "PROP_BIN_01": 1926,
+    "PROP_BOLLARD_01": 932,
+    "PROP_INFO_KIOSK_01": 3370,
+    "PROP_INFO_KIOSK_02": 3206,
+    "PROP_PLANTER_01": 1646,
+    "PROP_PLANTER_02": 1900,
+    "PROP_PLANTER_03": 1546,
+    "PROP_PLAZA_BEACON_01": 2416,
+    "PROP_RAIL_01": 2780,
+    "PROP_STREETLIGHT_01": 3704,
+    "PROP_STREETLIGHT_02": 3448,
+    "PROP_STREETLIGHT_03": 3484,
+    "PROP_WAYFINDER_01": 1487,
+    "SHRUB_01": 600,
+    "SHRUB_02": 600,
+    "TREE_01": 1730,
+    "TREE_02": 1442,
+    "TREE_03": 1586
+  }
+}

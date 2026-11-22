@@ -99,9 +99,9 @@ def road_assets():
     return roads
 
 
-def make_road_library(path):
+def make_road_library(path,world=WORLD):
     bpy.ops.wm.read_factory_settings(use_empty=True)
-    with bpy.data.libraries.load(str(WORLD)) as (_,selected):
+    with bpy.data.libraries.load(str(world)) as (_,selected):
         selected.materials = ["MAT_"+row[0] for row in base.PALETTE]
     scene = bpy.context.scene
     scene.name = "CIVRUM • Road Kit"
@@ -248,8 +248,29 @@ class Exporter:
         self.write(CITY,"",copies,instances=True)
 
 
-def export_assets(folder,kit,ports):
-    bpy.ops.wm.open_mainfile(filepath=str(WORLD))
+def scene_palette():
+    """Capture the actual source PBR values before the round-trip resets Blender."""
+    materials = {slot.material for layer in GAME_LAYERS
+                 for obj in bpy.data.collections[layer].all_objects
+                 for slot in obj.material_slots if slot.material}
+    palette = {}
+    for mat in sorted(materials,key=lambda m:m.name):
+        bsdf = next((n for n in mat.node_tree.nodes if n.type=="BSDF_PRINCIPLED"),None)
+        if bsdf is None:
+            raise ValueError(f"Expected Principled material: {mat.name}")
+        color = bsdf.inputs["Base Color"].default_value
+        srgb = [12.92*v if v<=.0031308 else 1.055*v**(1/2.4)-.055 for v in color[:3]]
+        palette[mat.name] = {
+            "sRGB":"".join(f"{round(max(0,min(1,v))*255):02X}" for v in srgb),
+            "metalness":round(bsdf.inputs["Metallic"].default_value,6),
+            "roughness":round(bsdf.inputs["Roughness"].default_value,6),
+        }
+    return palette
+
+
+def export_assets(folder,kit,ports,world=WORLD):
+    bpy.ops.wm.open_mainfile(filepath=str(world))
+    palette = scene_palette()
     exporter = Exporter(folder)
     exporter.city()
     for coll,category in ((detail.PUBLIC,"facilities"),(detail.VEG,"vegetation"),(detail.WORK,"construction")):
@@ -278,7 +299,7 @@ def export_assets(folder,kit,ports):
         if not obj.asset_data or min(obj.preview.image_size)<1:
             raise ValueError(f"Missing Blender road asset or thumbnail: {key}")
         exporter.module(key,"roads",obj,ports=ports[key])
-    return items+exporter.items
+    return items+exporter.items,palette
 
 
 def check_ports(objects, record):
@@ -341,6 +362,7 @@ def verify(folder,items):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root",type=Path,default=base.ROOT)
+    parser.add_argument("--world",type=Path,default=WORLD,help="Source environment .blend; original scene by default")
     parser.add_argument("--check",action="store_true")
     args = parser.parse_args(sys.argv[sys.argv.index("--")+1:] if "--" in sys.argv else [])
     root = args.output_root.resolve()
@@ -353,11 +375,9 @@ def main():
     root.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(dir=root,prefix=".civrum-export-") as tmp:
         staging = Path(tmp)
-        ports = make_road_library(staging/ROAD_LIBRARY)
-        items = export_assets(staging/"exports",staging/ROAD_LIBRARY,ports)
+        ports = make_road_library(staging/ROAD_LIBRARY,args.world.resolve())
+        items,palette = export_assets(staging/"exports",staging/ROAD_LIBRARY,ports,args.world.resolve())
         verify(staging/"exports",items)
-        palette = {"MAT_"+name: {"sRGB":hex_color,"metalness":metal,"roughness":rough}
-                   for name,hex_color,metal,rough in detail.PALETTE}
         catalog = {"version":1,"unit":"metre","boundsAxes":"Blender XYZ (+Z up)","palette":palette,
                    "portsXY":"[x, y, outward degrees from +X, carriageway width], Blender ground plane",
                    "assets":items}

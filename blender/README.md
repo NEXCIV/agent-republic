@@ -1,5 +1,7 @@
 # CIVRUM 城市环境
 
+新增[环境精修版](../art-direction/refined/README.md)：细化设施、植被、铺装、边缘与材质，附 1080p Cycles 预览及独立 GLB。原有各阶段文件继续保留。
+
 ## 第三阶段 · Three.js 游戏资产
 
 [整城 GLB](../exports/CIVRUM_City_Environment.glb) · [独立模块目录及尺寸](../exports/catalog.json) · [可编辑道路库](CIVRUM_Road_Kit.blend) · [浏览器总览](../renders/webgl/World_Overview.png) · [中央广场](../renders/webgl/Central_Plaza.png) · [道路拼接实拍](../renders/webgl/Road_Assembly.png)

@@ -1,0 +1,1823 @@
+{
+  "version": 1,
+  "unit": "metre",
+  "boundsAxes": "Blender XYZ (+Z up)",
+  "palette": {
+    "MAT_BARK": {
+      "sRGB": "675547",
+      "metalness": 0.0,
+      "roughness": 0.82
+    },
+    "MAT_CONCRETE_GRAY": {
+      "sRGB": "C5C6C3",
+      "metalness": 0.0,
+      "roughness": 0.76
+    },
+    "MAT_GRAPHITE_GRAY": {
+      "sRGB": "292D32",
+      "metalness": 0.06,
+      "roughness": 0.7
+    },
+    "MAT_LEAF_SAGE": {
+      "sRGB": "67894E",
+      "metalness": 0.0,
+      "roughness": 0.82
+    },
+    "MAT_LEAF_SHADE": {
+      "sRGB": "466C46",
+      "metalness": 0.0,
+      "roughness": 0.82
+    },
+    "MAT_LEAF_TIP": {
+      "sRGB": "859E57",
+      "metalness": 0.0,
+      "roughness": 0.82
+    },
+    "MAT_METALLIC_GRAY": {
+      "sRGB": "747A80",
+      "metalness": 0.62,
+      "roughness": 0.34
+    },
+    "MAT_OBSIDIAN_BLACK": {
+      "sRGB": "141619",
+      "metalness": 0.22,
+      "roughness": 0.34
+    },
+    "MAT_PLANTING_SOIL": {
+      "sRGB": "4F463A",
+      "metalness": 0.0,
+      "roughness": 0.82
+    },
+    "MAT_TECH_YELLOW": {
+      "sRGB": "F0B90B",
+      "metalness": 0.3,
+      "roughness": 0.32
+    },
+    "MAT_TURF": {
+      "sRGB": "74835C",
+      "metalness": 0.0,
+      "roughness": 0.82
+    },
+    "MAT_WARM_WHITE": {
+      "sRGB": "E7E5DF",
+      "metalness": 0.03,
+      "roughness": 0.53
+    }
+  },
+  "portsXY": "[x, y, outward degrees from +X, carriageway width], Blender ground plane",
+  "assets": [
+    {
+      "id": "CIVRUM_City_Environment",
+      "file": "CIVRUM_City_Environment.glb",
+      "bounds": [
+        [
+          -150.0,
+          -150.0,
+          0.0
+        ],
+        [
+          150.0,
+          150.0,
+          27.0
+        ]
+      ],
+      "triangles": 972718,
+      "materials": {
+        "MAT_BARK": 25810,
+        "MAT_CONCRETE_GRAY": 118658,
+        "MAT_GRAPHITE_GRAY": 118577,
+        "MAT_LEAF_SAGE": 157764,
+        "MAT_LEAF_SHADE": 36228,
+        "MAT_LEAF_TIP": 12816,
+        "MAT_METALLIC_GRAY": 251578,
+        "MAT_OBSIDIAN_BLACK": 86040,
+        "MAT_PLANTING_SOIL": 92,
+        "MAT_TECH_YELLOW": 72839,
+        "MAT_TURF": 462,
+        "MAT_WARM_WHITE": 91854
+      },
+      "bytes": 2873164,
+      "sha256": "5b97c3b1cbe4e2e229ccfbe0bb5cd55ffe0ed26d817d5721234015cbf51fad14"
+    },
+    {
+      "id": "PROP_BENCH_01",
+      "file": "facilities/PROP_BENCH_01.glb",
+      "bounds": [
+        [
+          -1.225,
+          -0.315,
+          0.0
+        ],
+        [
+          1.225,
+          0.395821,
+          0.918
+        ]
+      ],
+      "triangles": 5040,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 1320,
+        "MAT_METALLIC_GRAY": 2636,
+        "MAT_OBSIDIAN_BLACK": 880,
+        "MAT_TECH_YELLOW": 204
+      },
+      "bytes": 96276,
+      "sha256": "27a55feda4ad1f94755ad4028d2fd30727fa26d37cf381692bf3d0de3fc89a5b"
+    },
+    {
+      "id": "PROP_BENCH_02",
+      "file": "facilities/PROP_BENCH_02.glb",
+      "bounds": [
+        [
+          -1.56,
+          -0.402,
+          0.0
+        ],
+        [
+          1.56,
+          0.4,
+          0.8
+        ]
+      ],
+      "triangles": 5040,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 182,
+        "MAT_GRAPHITE_GRAY": 660,
+        "MAT_METALLIC_GRAY": 3516,
+        "MAT_OBSIDIAN_BLACK": 440,
+        "MAT_TECH_YELLOW": 204,
+        "MAT_WARM_WHITE": 38
+      },
+      "bytes": 98176,
+      "sha256": "fa115ff3b261dca88bf3ce3361d4db7391a72f486c7dbf5138edd2d9dd19e9d8"
+    },
+    {
+      "id": "PROP_BIN_01",
+      "file": "facilities/PROP_BIN_01.glb",
+      "bounds": [
+        [
+          -0.33,
+          -0.33,
+          0.0
+        ],
+        [
+          0.33,
+          0.33,
+          0.98
+        ]
+      ],
+      "triangles": 1926,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 188,
+        "MAT_METALLIC_GRAY": 1152,
+        "MAT_OBSIDIAN_BLACK": 202,
+        "MAT_TECH_YELLOW": 384
+      },
+      "bytes": 46200,
+      "sha256": "5a3383661a29b54b264b2dee0950d26bfb211268cb790b995768334359fbc55a"
+    },
+    {
+      "id": "PROP_BOLLARD_01",
+      "file": "facilities/PROP_BOLLARD_01.glb",
+      "bounds": [
+        [
+          -0.18,
+          -0.18,
+          0.0
+        ],
+        [
+          0.18,
+          0.18,
+          0.87
+        ]
+      ],
+      "triangles": 932,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 140,
+        "MAT_METALLIC_GRAY": 280,
+        "MAT_OBSIDIAN_BLACK": 280,
+        "MAT_TECH_YELLOW": 232
+      },
+      "bytes": 22092,
+      "sha256": "79fe1f4a8eaf1ef740e06ce8a81418a1d64630d9f4f5002c113589aa6c9627a1"
+    },
+    {
+      "id": "PROP_INFO_KIOSK_01",
+      "file": "facilities/PROP_INFO_KIOSK_01.glb",
+      "bounds": [
+        [
+          -0.7,
+          -0.395,
+          0.0
+        ],
+        [
+          0.7,
+          0.395,
+          2.37
+        ]
+      ],
+      "triangles": 3370,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_LEAF_SAGE": 24,
+        "MAT_METALLIC_GRAY": 1460,
+        "MAT_OBSIDIAN_BLACK": 848,
+        "MAT_TECH_YELLOW": 438,
+        "MAT_WARM_WHITE": 160
+      },
+      "bytes": 72332,
+      "sha256": "5962c3daeb5ef69092d41083b28c6ca7211de984f9606f24e7febe3a52214fdd"
+    },
+    {
+      "id": "PROP_INFO_KIOSK_02",
+      "file": "facilities/PROP_INFO_KIOSK_02.glb",
+      "bounds": [
+        [
+          -0.525,
+          -0.395,
+          0.0
+        ],
+        [
+          0.525,
+          0.395,
+          1.64
+        ]
+      ],
+      "triangles": 3206,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_METALLIC_GRAY": 1460,
+        "MAT_OBSIDIAN_BLACK": 848,
+        "MAT_TECH_YELLOW": 232,
+        "MAT_WARM_WHITE": 226
+      },
+      "bytes": 66712,
+      "sha256": "906a66df5e183ef4e0931aa031aae4ba829dd8670d892f94148977376c67eee6"
+    },
+    {
+      "id": "PROP_PLANTER_01",
+      "file": "facilities/PROP_PLANTER_01.glb",
+      "bounds": [
+        [
+          -1.75,
+          -1.664349,
+          0.0
+        ],
+        [
+          1.75,
+          1.664349,
+          0.523
+        ]
+      ],
+      "triangles": 1646,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 284,
+        "MAT_METALLIC_GRAY": 480,
+        "MAT_OBSIDIAN_BLACK": 284,
+        "MAT_PLANTING_SOIL": 22,
+        "MAT_WARM_WHITE": 576
+      },
+      "bytes": 35484,
+      "sha256": "a92c6691e5619df4250f6bca402c56e3f9fe629db1bf4de23dcde347ed0823ab"
+    },
+    {
+      "id": "PROP_PLANTER_02",
+      "file": "facilities/PROP_PLANTER_02.glb",
+      "bounds": [
+        [
+          -2.3,
+          -0.825,
+          0.0
+        ],
+        [
+          2.3,
+          0.825,
+          0.523
+        ]
+      ],
+      "triangles": 1900,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_METALLIC_GRAY": 856,
+        "MAT_OBSIDIAN_BLACK": 220,
+        "MAT_PLANTING_SOIL": 6,
+        "MAT_TECH_YELLOW": 150,
+        "MAT_WARM_WHITE": 448
+      },
+      "bytes": 38796,
+      "sha256": "4ac90ca6f2edff78b9abbe63613177ed6b95c184beb424b988469df5fc1881dd"
+    },
+    {
+      "id": "PROP_PLANTER_03",
+      "file": "facilities/PROP_PLANTER_03.glb",
+      "bounds": [
+        [
+          -1.4,
+          -1.4,
+          0.0
+        ],
+        [
+          1.4,
+          1.4,
+          0.683
+        ]
+      ],
+      "triangles": 1546,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_METALLIC_GRAY": 448,
+        "MAT_OBSIDIAN_BLACK": 220,
+        "MAT_PLANTING_SOIL": 6,
+        "MAT_TECH_YELLOW": 204,
+        "MAT_WARM_WHITE": 448
+      },
+      "bytes": 29660,
+      "sha256": "e14e6d315f3c47fdd1d190e79a2e84b7c508c03fb9ec86e23883c11a86cfda06"
+    },
+    {
+      "id": "PROP_PLAZA_BEACON_01",
+      "file": "facilities/PROP_PLAZA_BEACON_01.glb",
+      "bounds": [
+        [
+          -1.966816,
+          -1.966816,
+          0.0
+        ],
+        [
+          1.966816,
+          1.966816,
+          2.566938
+        ]
+      ],
+      "triangles": 2416,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 430,
+        "MAT_GRAPHITE_GRAY": 380,
+        "MAT_METALLIC_GRAY": 458,
+        "MAT_OBSIDIAN_BLACK": 518,
+        "MAT_TECH_YELLOW": 488,
+        "MAT_WARM_WHITE": 142
+      },
+      "bytes": 52656,
+      "sha256": "ae65c82b386fefb7d4d0be1b4d34b505d0dae9208999dd502447bd1777d3fd3b"
+    },
+    {
+      "id": "PROP_RAIL_01",
+      "file": "facilities/PROP_RAIL_01.glb",
+      "bounds": [
+        [
+          -1.49,
+          -0.105,
+          0.0
+        ],
+        [
+          1.49,
+          0.105,
+          1.02
+        ]
+      ],
+      "triangles": 2780,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 1460,
+        "MAT_METALLIC_GRAY": 1320
+      },
+      "bytes": 52656,
+      "sha256": "eea3da5d9978f83e58fe5d98aea882b77277ae41a7748ea4144caf842741d11f"
+    },
+    {
+      "id": "PROP_STREETLIGHT_01",
+      "file": "facilities/PROP_STREETLIGHT_01.glb",
+      "bounds": [
+        [
+          -0.27,
+          -0.27,
+          0.0
+        ],
+        [
+          1.86,
+          0.27,
+          5.89
+        ]
+      ],
+      "triangles": 3704,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_GRAPHITE_GRAY": 660,
+        "MAT_METALLIC_GRAY": 1300,
+        "MAT_OBSIDIAN_BLACK": 644,
+        "MAT_TECH_YELLOW": 220,
+        "MAT_WARM_WHITE": 660
+      },
+      "bytes": 70188,
+      "sha256": "b7ca9bcfe7c36a57889b504a2c137dbf750cb90752c1e342f3511d126b232032"
+    },
+    {
+      "id": "PROP_STREETLIGHT_02",
+      "file": "facilities/PROP_STREETLIGHT_02.glb",
+      "bounds": [
+        [
+          -0.625,
+          -0.27,
+          0.0
+        ],
+        [
+          0.895,
+          0.27,
+          5.14
+        ]
+      ],
+      "triangles": 3448,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_GRAPHITE_GRAY": 608,
+        "MAT_METALLIC_GRAY": 1536,
+        "MAT_OBSIDIAN_BLACK": 424,
+        "MAT_TECH_YELLOW": 220,
+        "MAT_WARM_WHITE": 440
+      },
+      "bytes": 70040,
+      "sha256": "35135a043dd41e693c54130c25a6dcc3606a76f5f3d9cc4e712da7af3943c1f9"
+    },
+    {
+      "id": "PROP_STREETLIGHT_03",
+      "file": "facilities/PROP_STREETLIGHT_03.glb",
+      "bounds": [
+        [
+          -0.27,
+          -0.27,
+          0.0
+        ],
+        [
+          0.27,
+          0.27,
+          3.47
+        ]
+      ],
+      "triangles": 3484,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_METALLIC_GRAY": 1756,
+        "MAT_OBSIDIAN_BLACK": 864,
+        "MAT_TECH_YELLOW": 204,
+        "MAT_WARM_WHITE": 220
+      },
+      "bytes": 67388,
+      "sha256": "a5e6b6397a1a292e3dd83a141e2d9617bd8f37e5c2e7734a01ee92ba944866a9"
+    },
+    {
+      "id": "PROP_WAYFINDER_01",
+      "file": "facilities/PROP_WAYFINDER_01.glb",
+      "bounds": [
+        [
+          -0.26,
+          -0.21,
+          0.0
+        ],
+        [
+          1.02,
+          0.21,
+          2.89
+        ]
+      ],
+      "triangles": 1487,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_METALLIC_GRAY": 660,
+        "MAT_OBSIDIAN_BLACK": 220,
+        "MAT_TECH_YELLOW": 162,
+        "MAT_WARM_WHITE": 5
+      },
+      "bytes": 30364,
+      "sha256": "1d3adf3934e2b7bfbe945ab108e8cef8b5b52427cbd20e6c8a3febbea164735d"
+    },
+    {
+      "id": "GREEN_FLOWERS_01",
+      "file": "vegetation/GREEN_FLOWERS_01.glb",
+      "bounds": [
+        [
+          -0.625717,
+          -0.445301,
+          0.0
+        ],
+        [
+          0.574033,
+          0.314867,
+          0.265367
+        ]
+      ],
+      "triangles": 864,
+      "materials": {
+        "MAT_LEAF_SAGE": 90,
+        "MAT_LEAF_SHADE": 246,
+        "MAT_TECH_YELLOW": 348,
+        "MAT_WARM_WHITE": 180
+      },
+      "bytes": 56016,
+      "sha256": "0f996d3c3794c092312feb976eef70ff069aa28fcbd39d3e26a23023f52ec10d"
+    },
+    {
+      "id": "GREEN_LAWN_01",
+      "file": "vegetation/GREEN_LAWN_01.glb",
+      "bounds": [
+        [
+          -6.0,
+          -4.0,
+          0.0
+        ],
+        [
+          6.0,
+          4.0,
+          0.065
+        ]
+      ],
+      "triangles": 12,
+      "materials": {
+        "MAT_TURF": 12
+      },
+      "bytes": 1716,
+      "sha256": "6073a6c0a95aec9291914a9d2fb00cc2d44b7c845366c1010185849537a32681"
+    },
+    {
+      "id": "GREEN_VERGE_01",
+      "file": "vegetation/GREEN_VERGE_01.glb",
+      "bounds": [
+        [
+          -5.0,
+          -1.6,
+          0.0
+        ],
+        [
+          5.0,
+          1.6,
+          0.162
+        ]
+      ],
+      "triangles": 34,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 28,
+        "MAT_TURF": 6
+      },
+      "bytes": 3432,
+      "sha256": "1d7b09cb58830d78e43bac347209d4d24c5bef75c53ce946aa4a152036af81a7"
+    },
+    {
+      "id": "SHRUB_01",
+      "file": "vegetation/SHRUB_01.glb",
+      "bounds": [
+        [
+          -0.983674,
+          -0.687002,
+          0.0
+        ],
+        [
+          0.929707,
+          0.708899,
+          0.93
+        ]
+      ],
+      "triangles": 600,
+      "materials": {
+        "MAT_LEAF_SAGE": 480,
+        "MAT_LEAF_SHADE": 120
+      },
+      "bytes": 45464,
+      "sha256": "531eb68078f8c0ba7edf9ec1a951b4746213159dbbe971e0091b4ddb0cf33caf"
+    },
+    {
+      "id": "SHRUB_02",
+      "file": "vegetation/SHRUB_02.glb",
+      "bounds": [
+        [
+          -0.771527,
+          -0.538751,
+          0.0
+        ],
+        [
+          0.807872,
+          0.616593,
+          1.1532
+        ]
+      ],
+      "triangles": 600,
+      "materials": {
+        "MAT_LEAF_SAGE": 480,
+        "MAT_LEAF_SHADE": 120
+      },
+      "bytes": 46396,
+      "sha256": "282cb294363134ae19cf20aac5bbf97ae5bd95f0f452fab1afadd5b8cb153634"
+    },
+    {
+      "id": "TREE_01",
+      "file": "vegetation/TREE_01.glb",
+      "bounds": [
+        [
+          -2.118463,
+          -2.484242,
+          0.0
+        ],
+        [
+          2.202193,
+          1.980392,
+          6.455495
+        ]
+      ],
+      "triangles": 1730,
+      "materials": {
+        "MAT_BARK": 290,
+        "MAT_LEAF_SAGE": 1296,
+        "MAT_LEAF_TIP": 144
+      },
+      "bytes": 121968,
+      "sha256": "c9e06ec99568145474aa6324737ff44720c8a9e55e01ff42fe6b54c979ee197f"
+    },
+    {
+      "id": "TREE_02",
+      "file": "vegetation/TREE_02.glb",
+      "bounds": [
+        [
+          -1.0743,
+          -1.219225,
+          0.0
+        ],
+        [
+          1.118315,
+          1.158978,
+          6.909518
+        ]
+      ],
+      "triangles": 1442,
+      "materials": {
+        "MAT_BARK": 290,
+        "MAT_LEAF_SAGE": 1008,
+        "MAT_LEAF_TIP": 144
+      },
+      "bytes": 102088,
+      "sha256": "bf46c2b8d04b9f68c7b745e5a72295e0fe83cb56a5a6ccd8b58716c437988a5e"
+    },
+    {
+      "id": "TREE_03",
+      "file": "vegetation/TREE_03.glb",
+      "bounds": [
+        [
+          -2.705869,
+          -2.093019,
+          0.0
+        ],
+        [
+          2.678581,
+          1.675152,
+          5.650228
+        ]
+      ],
+      "triangles": 1586,
+      "materials": {
+        "MAT_BARK": 290,
+        "MAT_LEAF_SAGE": 1152,
+        "MAT_LEAF_TIP": 144
+      },
+      "bytes": 110780,
+      "sha256": "27e4ac5595fa83222548dd28ad99348bf2c6da2bc00b3ae420fdff973a6f212a"
+    },
+    {
+      "id": "CONSTRUCTION_BARRIER_01",
+      "file": "construction/CONSTRUCTION_BARRIER_01.glb",
+      "bounds": [
+        [
+          -1.3,
+          -0.38,
+          0.0
+        ],
+        [
+          1.3,
+          0.38,
+          1.07
+        ]
+      ],
+      "triangles": 374,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 184,
+        "MAT_METALLIC_GRAY": 88,
+        "MAT_OBSIDIAN_BLACK": 10,
+        "MAT_TECH_YELLOW": 92
+      },
+      "bytes": 13236,
+      "sha256": "52840f68aa17576f4a675a08516fc1186dc7442b0393b281cf51797e47c64494"
+    },
+    {
+      "id": "CONSTRUCTION_FENCE_01",
+      "file": "construction/CONSTRUCTION_FENCE_01.glb",
+      "bounds": [
+        [
+          -2.0,
+          -0.27,
+          0.0
+        ],
+        [
+          2.0,
+          0.27,
+          1.97
+        ]
+      ],
+      "triangles": 580,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 184,
+        "MAT_GRAPHITE_GRAY": 44,
+        "MAT_METALLIC_GRAY": 308,
+        "MAT_TECH_YELLOW": 44
+      },
+      "bytes": 20096,
+      "sha256": "dd49b06979fddf739c928e75d063a2056bae30539cb61330b1e4e5f3fe90e8bf"
+    },
+    {
+      "id": "CONSTRUCTION_FOUNDATION_01",
+      "file": "construction/CONSTRUCTION_FOUNDATION_01.glb",
+      "bounds": [
+        [
+          -3.0,
+          -2.0,
+          0.0
+        ],
+        [
+          3.0,
+          2.0,
+          0.94
+        ]
+      ],
+      "triangles": 908,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 92,
+        "MAT_GRAPHITE_GRAY": 448,
+        "MAT_METALLIC_GRAY": 368
+      },
+      "bytes": 23544,
+      "sha256": "2c534b0c8ad92ae9304da3075e3b9760b6df1979b702c3d63ddbc1b3a29d5648"
+    },
+    {
+      "id": "CONSTRUCTION_PRECAST_01",
+      "file": "construction/CONSTRUCTION_PRECAST_01.glb",
+      "bounds": [
+        [
+          -1.9,
+          -0.35,
+          0.0
+        ],
+        [
+          1.9,
+          0.35,
+          0.75
+        ]
+      ],
+      "triangles": 228,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 228
+      },
+      "bytes": 6748,
+      "sha256": "68349105cec5c78cda2f9f949021c59aaa1bf80892b049b284eda7e26c75dca0"
+    },
+    {
+      "id": "CONSTRUCTION_RACK_01",
+      "file": "construction/CONSTRUCTION_RACK_01.glb",
+      "bounds": [
+        [
+          -1.84,
+          -0.73,
+          0.0
+        ],
+        [
+          1.84,
+          0.73,
+          1.7
+        ]
+      ],
+      "triangles": 992,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 176,
+        "MAT_METALLIC_GRAY": 640,
+        "MAT_TECH_YELLOW": 176
+      },
+      "bytes": 28316,
+      "sha256": "7140b681e25eac0fdccfe18e2f893cd505508720ab85e4f2a64850d7899e90f3"
+    },
+    {
+      "id": "CONSTRUCTION_SCAFFOLD_01",
+      "file": "construction/CONSTRUCTION_SCAFFOLD_01.glb",
+      "bounds": [
+        [
+          -1.4845,
+          -0.681095,
+          0.0
+        ],
+        [
+          1.4845,
+          0.681095,
+          2.4
+        ]
+      ],
+      "triangles": 1308,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 132,
+        "MAT_METALLIC_GRAY": 904,
+        "MAT_TECH_YELLOW": 272
+      },
+      "bytes": 34092,
+      "sha256": "20f096f5f1835653fa8b1e27e24202e07a702e1dbf54b677caf7fcf9780f7704"
+    },
+    {
+      "id": "PH_CENTRAL_NEXUS",
+      "file": "buildings/PH_CENTRAL_NEXUS.glb",
+      "bounds": [
+        [
+          -9.8,
+          -7.545,
+          0.0
+        ],
+        [
+          9.8,
+          6.8,
+          25.083288
+        ]
+      ],
+      "triangles": 2512,
+      "materials": {
+        "MAT_GRAPHITE_GRAY": 842,
+        "MAT_METALLIC_GRAY": 366,
+        "MAT_OBSIDIAN_BLACK": 472,
+        "MAT_TECH_YELLOW": 388,
+        "MAT_WARM_WHITE": 444
+      },
+      "bytes": 56340,
+      "sha256": "3fc2718acabbab8dc1f0062af4a50f9c274779759b5ec0ffa7a81e6f0a0b0fe9"
+    },
+    {
+      "id": "PH_GOVERNANCE_HALL",
+      "file": "buildings/PH_GOVERNANCE_HALL.glb",
+      "bounds": [
+        [
+          -19.0,
+          -11.0,
+          0.0
+        ],
+        [
+          19.0,
+          11.0,
+          11.32
+        ]
+      ],
+      "triangles": 1645,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 402,
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_TECH_YELLOW": 86,
+        "MAT_WARM_WHITE": 937
+      },
+      "bytes": 41416,
+      "sha256": "f8dd9cb76e1d58ae911ef52d2fb88ac7ed7fe42b015a0a37783ae4fc4b1e2db9"
+    },
+    {
+      "id": "PH_RESEARCH_CENTER",
+      "file": "buildings/PH_RESEARCH_CENTER.glb",
+      "bounds": [
+        [
+          -13.6,
+          -10.84,
+          0.0
+        ],
+        [
+          13.6,
+          10.3,
+          13.1
+        ]
+      ],
+      "triangles": 2297,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 220,
+        "MAT_GRAPHITE_GRAY": 140,
+        "MAT_METALLIC_GRAY": 382,
+        "MAT_OBSIDIAN_BLACK": 328,
+        "MAT_TECH_YELLOW": 84,
+        "MAT_WARM_WHITE": 1143
+      },
+      "bytes": 55048,
+      "sha256": "d30ac6cfb42396638e6cfd959067df3e05f170ae7447e36a014bd1a560c17332"
+    },
+    {
+      "id": "PH_RESIDENTIAL_HOUSE",
+      "file": "buildings/PH_RESIDENTIAL_HOUSE.glb",
+      "bounds": [
+        [
+          -11.3,
+          -7.5,
+          0.0
+        ],
+        [
+          11.3,
+          7.5,
+          13.38
+        ]
+      ],
+      "triangles": 1760,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 546,
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_OBSIDIAN_BLACK": 660,
+        "MAT_WARM_WHITE": 334
+      },
+      "bytes": 37248,
+      "sha256": "fe9ef84c13c0196e1c7aca9b4201eb0e0aecd866223aeb98d54410a054a47cf6"
+    },
+    {
+      "id": "PH_BUILD_WORKSHOP",
+      "file": "buildings/PH_BUILD_WORKSHOP.glb",
+      "bounds": [
+        [
+          -14.0,
+          -9.6,
+          0.0
+        ],
+        [
+          14.0,
+          8.5,
+          7.4
+        ]
+      ],
+      "triangles": 1340,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 36,
+        "MAT_GRAPHITE_GRAY": 220,
+        "MAT_METALLIC_GRAY": 240,
+        "MAT_TECH_YELLOW": 108,
+        "MAT_WARM_WHITE": 736
+      },
+      "bytes": 38788,
+      "sha256": "a269cabf00c4101b4768d37f4c2d968f75a841761f0518593baf1039feb0e9fd"
+    },
+    {
+      "id": "ENV_GROUND_MAIN",
+      "file": "ground/ENV_GROUND_MAIN.glb",
+      "bounds": [
+        [
+          -150.0,
+          -150.0,
+          0.0
+        ],
+        [
+          150.0,
+          150.0,
+          0.0
+        ]
+      ],
+      "triangles": 2,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 2
+      },
+      "bytes": 1152,
+      "sha256": "4507358a608e238c9fb630c11555e6724ab9ebe24206d9cd39024670370f91fe"
+    },
+    {
+      "id": "PLAZA_OCTAGON",
+      "file": "plaza/PLAZA_OCTAGON.glb",
+      "bounds": [
+        [
+          -28.549999,
+          -28.549999,
+          0.0
+        ],
+        [
+          28.549999,
+          28.549999,
+          0.212
+        ]
+      ],
+      "triangles": 60,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_METALLIC_GRAY": 38,
+        "MAT_TECH_YELLOW": 16
+      },
+      "bytes": 5784,
+      "sha256": "784fc36a3fe6854efc3f921bbd5c9c3af1ab50d8f8dbd12f7febdfcc03ee566e"
+    },
+    {
+      "id": "PLAZA_TILE_01",
+      "file": "plaza/PLAZA_TILE_01.glb",
+      "bounds": [
+        [
+          -4.98,
+          -4.98,
+          0.0
+        ],
+        [
+          4.98,
+          4.98,
+          0.025
+        ]
+      ],
+      "triangles": 2860,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 2816,
+        "MAT_METALLIC_GRAY": 44
+      },
+      "bytes": 93988,
+      "sha256": "33953bdbd3f64f63f4fa82a300f25f8ce251b848710b82ba59c7418a0fb6d528"
+    },
+    {
+      "id": "PLAZA_FORUM_INLAY",
+      "file": "plaza/PLAZA_FORUM_INLAY.glb",
+      "bounds": [
+        [
+          -11.8,
+          -25.200001,
+          0.214
+        ],
+        [
+          11.8,
+          3.5,
+          0.217
+        ]
+      ],
+      "triangles": 304,
+      "materials": {
+        "MAT_METALLIC_GRAY": 96,
+        "MAT_TECH_YELLOW": 144,
+        "MAT_WARM_WHITE": 64
+      },
+      "bytes": 19196,
+      "sha256": "d1d843e9beec3bb96deb2984f48056080633603e5a613341103867225b317464"
+    },
+    {
+      "id": "PLAZA_SEATING_APRON",
+      "file": "plaza/PLAZA_SEATING_APRON.glb",
+      "bounds": [
+        [
+          -3.05,
+          -1.7,
+          0.0
+        ],
+        [
+          3.05,
+          1.7,
+          0.04
+        ]
+      ],
+      "triangles": 50,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_METALLIC_GRAY": 44
+      },
+      "bytes": 4452,
+      "sha256": "645909761a9fb8661c5476f0aaf9ca567c0e9114770176bb7dbb54eb1114251d"
+    },
+    {
+      "id": "COMMUNITY_OPEN_FORUM",
+      "file": "ground/COMMUNITY_OPEN_FORUM.glb",
+      "bounds": [
+        [
+          -15.5,
+          -11.489055,
+          0.0
+        ],
+        [
+          15.5,
+          10.5,
+          1.09
+        ]
+      ],
+      "triangles": 508,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_GRAPHITE_GRAY": 360,
+        "MAT_METALLIC_GRAY": 22,
+        "MAT_TECH_YELLOW": 48,
+        "MAT_WARM_WHITE": 72
+      },
+      "bytes": 31484,
+      "sha256": "7e5e8343bd9cb61dd4f2c4d14e8f8b35c81e7ca933fa875bbf992312a5bd8098"
+    },
+    {
+      "id": "PLAZA_NEXUS_BASE",
+      "file": "plaza/PLAZA_NEXUS_BASE.glb",
+      "bounds": [
+        [
+          -12.2,
+          -9.2,
+          0.0
+        ],
+        [
+          12.2,
+          9.2,
+          0.64
+        ]
+      ],
+      "triangles": 1520,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 1296,
+        "MAT_WARM_WHITE": 224
+      },
+      "bytes": 29540,
+      "sha256": "0c6742acd45f1bcc27f9effe33053f4c73135908ffc0663fb68b07d843901815"
+    },
+    {
+      "id": "PLAZA_NEXUS_STEP_01",
+      "file": "plaza/PLAZA_NEXUS_STEP_01.glb",
+      "bounds": [
+        [
+          -12.2,
+          -9.2,
+          0.0
+        ],
+        [
+          12.2,
+          9.2,
+          0.16
+        ]
+      ],
+      "triangles": 380,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 324,
+        "MAT_WARM_WHITE": 56
+      },
+      "bytes": 9788,
+      "sha256": "89679c7409b2326e11d448028c45d7fbbbff1fbe2a2a78f75b6c3f9962a34cd8"
+    },
+    {
+      "id": "PLAZA_NEXUS_STEP_02",
+      "file": "plaza/PLAZA_NEXUS_STEP_02.glb",
+      "bounds": [
+        [
+          -11.675,
+          -8.675,
+          0.0
+        ],
+        [
+          11.675,
+          8.675,
+          0.16
+        ]
+      ],
+      "triangles": 380,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 324,
+        "MAT_WARM_WHITE": 56
+      },
+      "bytes": 9792,
+      "sha256": "7168fdfdbeb1bcb2b302708a9156117dad380813acb2552060430dfd44bbb05d"
+    },
+    {
+      "id": "PLAZA_NEXUS_STEP_03",
+      "file": "plaza/PLAZA_NEXUS_STEP_03.glb",
+      "bounds": [
+        [
+          -11.15,
+          -8.15,
+          0.0
+        ],
+        [
+          11.15,
+          8.15,
+          0.16
+        ]
+      ],
+      "triangles": 380,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 324,
+        "MAT_WARM_WHITE": 56
+      },
+      "bytes": 9792,
+      "sha256": "5e11d027b13bf51aa4812a26c5d57b8b5fc370de4c8e62aaae0c371d30a30a4d"
+    },
+    {
+      "id": "PLAZA_NEXUS_STEP_04",
+      "file": "plaza/PLAZA_NEXUS_STEP_04.glb",
+      "bounds": [
+        [
+          -10.625,
+          -7.625,
+          0.0
+        ],
+        [
+          10.625,
+          7.625,
+          0.16
+        ]
+      ],
+      "triangles": 380,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 324,
+        "MAT_WARM_WHITE": 56
+      },
+      "bytes": 9744,
+      "sha256": "ddaad21a8bad4854d52480138cbc1f878c6b17a2f9f233dca10b98d50c26e9b5"
+    },
+    {
+      "id": "LOT_GOVERNANCE",
+      "file": "ground/LOT_GOVERNANCE.glb",
+      "bounds": [
+        [
+          -39.0,
+          -23.5,
+          0.0
+        ],
+        [
+          39.0,
+          23.5,
+          0.182
+        ]
+      ],
+      "triangles": 44,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_METALLIC_GRAY": 28,
+        "MAT_TECH_YELLOW": 2,
+        "MAT_WARM_WHITE": 8
+      },
+      "bytes": 5484,
+      "sha256": "268f350876a1951c4a5bed6914c57d89e5df4331c5ab19965d5daa8aa8998291"
+    },
+    {
+      "id": "LOT_RESEARCH",
+      "file": "ground/LOT_RESEARCH.glb",
+      "bounds": [
+        [
+          -23.0,
+          -31.5,
+          0.0
+        ],
+        [
+          23.0,
+          31.5,
+          0.182
+        ]
+      ],
+      "triangles": 44,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_METALLIC_GRAY": 28,
+        "MAT_TECH_YELLOW": 2,
+        "MAT_WARM_WHITE": 8
+      },
+      "bytes": 5480,
+      "sha256": "ae3a533f214c021fae401b79a12f49b0a2765d15346df0f3cf047fc98f926618"
+    },
+    {
+      "id": "LOT_RESIDENTIAL",
+      "file": "ground/LOT_RESIDENTIAL.glb",
+      "bounds": [
+        [
+          -23.0,
+          -31.5,
+          0.0
+        ],
+        [
+          23.0,
+          31.5,
+          0.182
+        ]
+      ],
+      "triangles": 44,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_METALLIC_GRAY": 28,
+        "MAT_TECH_YELLOW": 2,
+        "MAT_WARM_WHITE": 8
+      },
+      "bytes": 5488,
+      "sha256": "14e1fb1c39fec691ca4389c396eceeb2cd07aa3aae1a6d701a89ff90fdccde0d"
+    },
+    {
+      "id": "LOT_COMMUNITY",
+      "file": "ground/LOT_COMMUNITY.glb",
+      "bounds": [
+        [
+          -23.0,
+          -28.5,
+          0.0
+        ],
+        [
+          23.0,
+          28.5,
+          0.182
+        ]
+      ],
+      "triangles": 44,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_METALLIC_GRAY": 28,
+        "MAT_TECH_YELLOW": 2,
+        "MAT_WARM_WHITE": 8
+      },
+      "bytes": 5484,
+      "sha256": "3daf78dc5314caf6626de0ed1de4551620ec44b2d04cb782a197d6ee703e23ac"
+    },
+    {
+      "id": "LOT_CONSTRUCTION",
+      "file": "ground/LOT_CONSTRUCTION.glb",
+      "bounds": [
+        [
+          -23.0,
+          -28.5,
+          0.0
+        ],
+        [
+          23.0,
+          28.5,
+          0.182
+        ]
+      ],
+      "triangles": 44,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 6,
+        "MAT_METALLIC_GRAY": 28,
+        "MAT_TECH_YELLOW": 2,
+        "MAT_WARM_WHITE": 8
+      },
+      "bytes": 5492,
+      "sha256": "3fec965a0a18a8d0628a411bb61a937b9703f20dc8f44d4361b6d9f2f0ec74c6"
+    },
+    {
+      "id": "ROAD_STRAIGHT_MAIN",
+      "file": "roads/ROAD_STRAIGHT_MAIN.glb",
+      "bounds": [
+        [
+          0.0,
+          -7.75,
+          0.038
+        ],
+        [
+          20.0,
+          7.75,
+          0.183
+        ]
+      ],
+      "triangles": 68,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 24,
+        "MAT_GRAPHITE_GRAY": 2,
+        "MAT_METALLIC_GRAY": 28,
+        "MAT_TECH_YELLOW": 6,
+        "MAT_WARM_WHITE": 8
+      },
+      "bytes": 7852,
+      "sha256": "380f3b6418e629b5961781625966f1c23c457b51d6d136e458d4373d31c43809",
+      "portsXY": [
+        [
+          0,
+          0,
+          180,
+          10
+        ],
+        [
+          20,
+          0,
+          0,
+          10
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_TURN_90_MAIN",
+      "file": "roads/ROAD_TURN_90_MAIN.glb",
+      "bounds": [
+        [
+          0.0,
+          -7.75,
+          0.038
+        ],
+        [
+          27.75,
+          20.0,
+          0.182
+        ]
+      ],
+      "triangles": 272,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 144,
+        "MAT_GRAPHITE_GRAY": 24,
+        "MAT_TECH_YELLOW": 8,
+        "MAT_WARM_WHITE": 96
+      },
+      "bytes": 18116,
+      "sha256": "fbb4170c774a1f2d1859feb83e8e324f2e5b0d7057feb56e8753114991cfd308",
+      "portsXY": [
+        [
+          0,
+          0,
+          180,
+          10
+        ],
+        [
+          20,
+          20,
+          90,
+          10
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_TEE_MAIN",
+      "file": "roads/ROAD_TEE_MAIN.glb",
+      "bounds": [
+        [
+          -8.75,
+          -7.75,
+          0.038
+        ],
+        [
+          8.75,
+          8.75,
+          0.182
+        ]
+      ],
+      "triangles": 55,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 12,
+        "MAT_GRAPHITE_GRAY": 7,
+        "MAT_METALLIC_GRAY": 12,
+        "MAT_WARM_WHITE": 24
+      },
+      "bytes": 6188,
+      "sha256": "68a34f9976389c02219bbd07eb3a71214fe8ffac04e61c9216c76bcd34fbc2f3",
+      "portsXY": [
+        [
+          8.75,
+          0.0,
+          0,
+          10
+        ],
+        [
+          0.0,
+          8.75,
+          90,
+          10
+        ],
+        [
+          -8.75,
+          0.0,
+          180,
+          10
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_CROSS_MAIN",
+      "file": "roads/ROAD_CROSS_MAIN.glb",
+      "bounds": [
+        [
+          -8.75,
+          -8.75,
+          0.038
+        ],
+        [
+          8.75,
+          8.75,
+          0.182
+        ]
+      ],
+      "triangles": 74,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 16,
+        "MAT_GRAPHITE_GRAY": 10,
+        "MAT_METALLIC_GRAY": 16,
+        "MAT_WARM_WHITE": 32
+      },
+      "bytes": 7144,
+      "sha256": "ed7e50435b193211d33c7ff6a7dd10f14431b72b458430c1a4cbf1fe787ea07e",
+      "portsXY": [
+        [
+          0.0,
+          -8.75,
+          -90,
+          10
+        ],
+        [
+          8.75,
+          0.0,
+          0,
+          10
+        ],
+        [
+          0.0,
+          8.75,
+          90,
+          10
+        ],
+        [
+          -8.75,
+          0.0,
+          180,
+          10
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_STRAIGHT_LOCAL",
+      "file": "roads/ROAD_STRAIGHT_LOCAL.glb",
+      "bounds": [
+        [
+          0.0,
+          -6.25,
+          0.038
+        ],
+        [
+          20.0,
+          6.25,
+          0.183
+        ]
+      ],
+      "triangles": 68,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 24,
+        "MAT_GRAPHITE_GRAY": 2,
+        "MAT_METALLIC_GRAY": 28,
+        "MAT_WARM_WHITE": 14
+      },
+      "bytes": 7048,
+      "sha256": "c9fa92d357584f77267c41a54ce0da68f97122946ebb6718218d2fbd1d3229e3",
+      "portsXY": [
+        [
+          0,
+          0,
+          180,
+          7
+        ],
+        [
+          20,
+          0,
+          0,
+          7
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_TURN_90_LOCAL",
+      "file": "roads/ROAD_TURN_90_LOCAL.glb",
+      "bounds": [
+        [
+          0.0,
+          -6.25,
+          0.038
+        ],
+        [
+          26.25,
+          20.0,
+          0.182
+        ]
+      ],
+      "triangles": 272,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 144,
+        "MAT_GRAPHITE_GRAY": 24,
+        "MAT_WARM_WHITE": 104
+      },
+      "bytes": 17308,
+      "sha256": "d3d30f4e3213505fdd3d61677884300f349406ff1d9468bfad3ce931ba243a82",
+      "portsXY": [
+        [
+          0,
+          0,
+          180,
+          7
+        ],
+        [
+          20,
+          20,
+          90,
+          7
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_TEE_LOCAL",
+      "file": "roads/ROAD_TEE_LOCAL.glb",
+      "bounds": [
+        [
+          -7.25,
+          -6.25,
+          0.038
+        ],
+        [
+          7.25,
+          7.25,
+          0.182
+        ]
+      ],
+      "triangles": 55,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 12,
+        "MAT_GRAPHITE_GRAY": 7,
+        "MAT_METALLIC_GRAY": 12,
+        "MAT_WARM_WHITE": 24
+      },
+      "bytes": 6196,
+      "sha256": "ec99f44a2ed1f4e914c6d6a8090c6d209a690cef80db862c8f0037b06a51712b",
+      "portsXY": [
+        [
+          7.25,
+          0.0,
+          0,
+          7
+        ],
+        [
+          0.0,
+          7.25,
+          90,
+          7
+        ],
+        [
+          -7.25,
+          0.0,
+          180,
+          7
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_CROSS_LOCAL",
+      "file": "roads/ROAD_CROSS_LOCAL.glb",
+      "bounds": [
+        [
+          -7.25,
+          -7.25,
+          0.038
+        ],
+        [
+          7.25,
+          7.25,
+          0.182
+        ]
+      ],
+      "triangles": 74,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 16,
+        "MAT_GRAPHITE_GRAY": 10,
+        "MAT_METALLIC_GRAY": 16,
+        "MAT_WARM_WHITE": 32
+      },
+      "bytes": 7144,
+      "sha256": "c2dd8f9ca29bf743c8119896425bc402d232511d17cbc5739f9428c4625b64e4",
+      "portsXY": [
+        [
+          0.0,
+          -7.25,
+          -90,
+          7
+        ],
+        [
+          7.25,
+          0.0,
+          0,
+          7
+        ],
+        [
+          0.0,
+          7.25,
+          90,
+          7
+        ],
+        [
+          -7.25,
+          0.0,
+          180,
+          7
+        ]
+      ]
+    },
+    {
+      "id": "ROAD_SIDEWALK",
+      "file": "roads/ROAD_SIDEWALK.glb",
+      "bounds": [
+        [
+          0.0,
+          0.0,
+          0.038
+        ],
+        [
+          20.0,
+          2.75,
+          0.183
+        ]
+      ],
+      "triangles": 26,
+      "materials": {
+        "MAT_CONCRETE_GRAY": 12,
+        "MAT_METALLIC_GRAY": 14
+      },
+      "bytes": 3284,
+      "sha256": "cb3f0b6bcfaf400fbc5f7f503efc61d4e6006ba9e327e5e91724f8d0f94745ba"
+    },
+    {
+      "id": "ROAD_CURB",
+      "file": "roads/ROAD_CURB.glb",
+      "bounds": [
+        [
+          0.0,
+          0.0,
+          0.038
+        ],
+        [
+          20.0,
+          0.22,
+          0.182
+        ]
+      ],
+      "triangles": 12,
+      "materials": {
+        "MAT_WARM_WHITE": 12
+      },
+      "bytes": 1744,
+      "sha256": "fb6077a5cfb5ea0390a2013d6c4c9c9391e892bfb9aa3cd2cdcbb656e0fe8498"
+    },
+    {
+      "id": "ROAD_MARKINGS_MAIN",
+      "file": "roads/ROAD_MARKINGS_MAIN.glb",
+      "bounds": [
+        [
+          0.0,
+          -4.825,
+          0.041
+        ],
+        [
+          20.0,
+          4.825,
+          0.042
+        ]
+      ],
+      "triangles": 10,
+      "materials": {
+        "MAT_TECH_YELLOW": 6,
+        "MAT_WARM_WHITE": 4
+      },
+      "bytes": 2472,
+      "sha256": "4e82b30f90cb79ce761ee50e954607c987846d85e3e7a3a596637b5c5288ce0f"
+    },
+    {
+      "id": "ROAD_CROSSWALK_MAIN",
+      "file": "roads/ROAD_CROSSWALK_MAIN.glb",
+      "bounds": [
+        [
+          -1.15,
+          -4.465,
+          0.045
+        ],
+        [
+          1.15,
+          4.465,
+          0.045
+        ]
+      ],
+      "triangles": 20,
+      "materials": {
+        "MAT_WARM_WHITE": 20
+      },
+      "bytes": 2244,
+      "sha256": "8963ea0091366123717dc33487f13d09f3c2e7c349afcc00a0691d435a27e136"
+    },
+    {
+      "id": "ROAD_MARKINGS_LOCAL",
+      "file": "roads/ROAD_MARKINGS_LOCAL.glb",
+      "bounds": [
+        [
+          0.0,
+          -3.325,
+          0.041
+        ],
+        [
+          20.0,
+          3.325,
+          0.042
+        ]
+      ],
+      "triangles": 10,
+      "materials": {
+        "MAT_WARM_WHITE": 10
+      },
+      "bytes": 1672,
+      "sha256": "ff288e7fba7f9eb529d742a179ae4a1d278790dc91d5355762a10fedc7b681d0"
+    },
+    {
+      "id": "ROAD_CROSSWALK_LOCAL",
+      "file": "roads/ROAD_CROSSWALK_LOCAL.glb",
+      "bounds": [
+        [
+          -1.15,
+          -2.765,
+          0.045
+        ],
+        [
+          1.15,
+          2.765,
+          0.045
+        ]
+      ],
+      "triangles": 12,
+      "materials": {
+        "MAT_WARM_WHITE": 12
+      },
+      "bytes": 1812,
+      "sha256": "f19adca05c2f14735ed0d64a873e9bd01b030e496b0ab11626c37b9414cd943b"
+    }
+  ]
+}
