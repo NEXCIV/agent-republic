@@ -1,10 +1,48 @@
 # CIVRUM 城市环境
 
+## 第三阶段 · Three.js 游戏资产
+
+[整城 GLB](../exports/CIVRUM_City_Environment.glb) · [独立模块目录及尺寸](../exports/catalog.json) · [可编辑道路库](CIVRUM_Road_Kit.blend) · [浏览器总览](../renders/webgl/World_Overview.png) · [中央广场](../renders/webgl/Central_Plaza.png) · [道路拼接实拍](../renders/webgl/Road_Assembly.png)
+
+需要整城时加载 `CIVRUM_City_Environment.glb`，需要自行拼装时按下表选择单件。整城文件为 950,448 字节，含 111,058 个三角面，尺寸 300 × 300 米，最高点 27 米。文字已转为网格，摄影衬底、灯光、相机和人体比例尺只保留在美术源文件中。网页原有 40 米城区使用独立的场景清单。
+
+| GLB 目录 | 数量 | 内容 |
+| --- | ---: | --- |
+| [roads](../exports/roads) | 14 | 主、次干道各一套直线、90° 弯道、T 字、十字、斑马线和标线，外加独立人行道和路沿 |
+| [ground](../exports/ground) | 7 | 连续地面、五个功能地块和社区活动场 |
+| [plaza](../exports/plaza) | 9 | 八边形广场、地砖、环形镶嵌、座椅区铺装、完整 Nexus 基座及其四级独立台阶 |
+| [facilities](../exports/facilities) · [vegetation](../exports/vegetation) · [construction](../exports/construction) | 15 + 8 + 6 | 第一批公共设施、绿化和施工模块 |
+| [buildings](../exports/buildings) | 5 | 各自带基底中心原点的建筑占位，立面字样随主体移动 |
+
+**拼接。** 以米为单位，Blender 的 `(x,y,z)` 对应 Three.js 的 `(x,z,-y)`。标准直道长 20 米。两种弯道的中心线半径均为 20 米，入口切线朝 Blender +X，出口位于 `(20,20)`，切线朝 +Y。在 Three.js 中把下一段直道置于 `(20,0,-20)` 并绕 Y 轴转 +90° 即可对接。主干车行道宽 10 米，次级宽 7 米，每侧人行道宽 2.75 米。T 字和十字模块原点位于交叉中心。每个端口的位置、向外朝向及对应路宽在目录的 `portsXY` 中。直道和弯道已经包含两侧路沿、步道和标线，单独的配件供自建路面使用。
+
+**加载和替换。** 整城使用 `EXT_mesh_gpu_instancing` 绘制重复设施、绿化和道路。Three.js r174 的 `GLTFLoader` 已实测支持。每个主建筑有独立的 `GAME_CIVRUM_PH_…` 父节点。替换时保留其位置、旋转和比例，将新模型作为子节点放在局部原点。下面的 URL 假设静态服务器将仓库的 `exports/` 映射到同名路径。
+
+```js
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+const { scene: city } = await new GLTFLoader().loadAsync('/exports/CIVRUM_City_Environment.glb');
+scene.add(city);
+const nexus = city.getObjectByName('GAME_CIVRUM_PH_CENTRAL_NEXUS');
+```
+
+**复验记录。** Blender 5.3 将这 65 个 GLB 逐一回导，对照源网格的边界、按材质统计的三角面数，以及道路端口与模块节距。Three.js 独立加载全部文件，检查米制尺寸、PBR 材质、实例矩阵和五个建筑锚点。Khronos glTF Validator 2.0.0-dev.3.10 报告 0 错误、0 警告。该版本的验证器无法检查 GPU 实例扩展，并将部分访问器列为可能未使用；实例的加载与绘制另外经过 Blender 和 Three.js 实测。
+
+**性能。** 在本机 GTX 1070 Ti、Chrome WebGL2 下，整城总览在相同镜头和三角面数下由 2,986 次绘制调用降至 363 次。测试页使用一盏带缓存阴影的方向光、半球光和 DPR 1，测量预热后广场镜头移动的 600 帧。390 × 844 结果来自同一桌面显卡上的窄视口。逐项帧率和 P95 帧耗见[测试记录](../renders/webgl/benchmark.json)。接入网页时，小屏设备可先关闭阴影，再按需加载独立地块或设施。整城的原始三角面数包含导出的文字，测试镜头另有两面摄影地面。
+
+在仓库根目录执行下列命令。第一条向新的目标目录生成道路 Blender 库、全部 GLB 和目录清单。第二条检查仓库中的交付文件。第三条需要已安装项目依赖以及 Chrome 或 Edge，输出预览和性能记录到新的目录。可设置 `CHROME_PATH` 指定浏览器，或用 `--validator` 指向本机安装的 `gltf-validator` 包目录以同时重跑格式验证。
+
+```powershell
+& 'G:/blender/blender.exe' -b --factory-startup --python-exit-code 1 -P scripts/export_civrum_world.py -- --output-root ../civrum-game-export
+& 'G:/blender/blender.exe' -b --factory-startup --python-exit-code 1 -P scripts/export_civrum_world.py -- --check
+node tests/civrum-environment-webgl.mjs --output ../civrum-webgl-review
+```
+
+## 第二阶段 · 公共设施、绿化与施工
+
 [第二阶段城市工程](CIVRUM_World_Environment.blend) · [Blender 资产库](CIVRUM_Asset_Library.blend) · [总览](../renders/environment/CIVRUM_World_Overview.png) · [研究区街景](../renders/environment/CIVRUM_Street_Detail.png) · [施工区](../renders/environment/CIVRUM_Construction.png)
 
 ![中央广场的树池、长椅、导览终端和入口标识](../renders/environment/CIVRUM_Central_Plaza.png)
-
-## 第二阶段 · 公共设施、绿化与施工
 
 这一版从已验收的 300 × 300 米灰盒生成。中央活动圈放置一座金色多面体地标，周围可通行。导览终端、树池和带独立铺装的座椅沿两侧布置。研究区与住宅区的前庭采用错缝地砖、排水格栅和分区灯旗。工坊南侧留出八米出入口，地面箭头指向院内，地基、脚手架和材料架分区摆放。
 
@@ -24,7 +62,7 @@
 
 构筑物沿用六种基础材质。植被额外共用六种哑光材质，分别表现两档叶面亮度、阴面叶片、草皮、土壤和树皮。每棵树为 212–278 个三角面，每簇花为 111 个三角面。
 
-第二阶段场景包含 149 处公共设施、355 处植被和 56 处施工模块。连同第一阶段建筑、道路和地面，833 个网格对象共用 97 份网格数据，按场景中实际摆放累计 104,219 个三角面。统计排除了摄影衬底和字体对象。网页端帧率留待 GLB 导入后实测。
+第二阶段场景包含 149 处公共设施、355 处植被和 56 处施工模块。连同第一阶段建筑、道路和地面，833 个网格对象共用 97 份网格数据，按场景中实际摆放累计 104,219 个三角面。统计排除了摄影衬底和字体对象。
 
 在仓库根目录运行以下命令，可以在一个新目录重新生成城市、资产库和四张 1600 × 900 预览。前三个机位对应第一阶段，第四张近景用于检查施工模块。
 
@@ -92,7 +130,3 @@
 ```
 
 重开核验结果为 59 段连通路网、28 个路口、117 个直线模块，实测车行道接缝最大偏差约 0.0043 毫米。场景内的游戏环境与比例尺共有 266 个网格对象，使用 63 份网格数据，按摆放实例累计 17,544 个三角面。统计排除了摄影衬底和字体对象。
-
-## 后续 GLB 导出
-
-正式模块 GLB 交付和回导验证安排在第三阶段。届时可在 Blender 选中一个道路或广场模块，将副本的位置和旋转归零，保留它的局部原点。通过 **File → Export → glTF 2.0** 选择 **glTF Binary (.glb)**，启用 **Selected Objects** 和 **+Y Up**，保存到仓库的 `exports/`。字体如需随模块交付，先把选中的字体副本转换为网格。对独立模块回导时，核对尺寸、朝向、材质和与相邻模块的接缝。

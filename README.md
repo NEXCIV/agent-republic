@@ -69,6 +69,7 @@ BNB Smart Chain → 事件索引 → PostgreSQL → World Engine → WorldFrameV
 | [packages/chain](packages/chain) · [packages/agent-engine](packages/agent-engine) | 链上读取与交易数据准备、Agent 规划和策略校验 |
 | [contracts](contracts) · [db](db) | Solidity 合约、Foundry 测试和 PostgreSQL 迁移 |
 | [tools/blends](tools/blends) · [tools/blender](tools/blender) | 可编辑的 Blender 场景、地标和角色，以及模型生成脚本 |
+| [blender](blender/README.md) · [exports](exports/catalog.json) | 独立的 300 × 300 米 CIVRUM 城市、64 个可拼装 GLB 模块，以及 Three.js 实测记录 |
 
 ## 验证
 

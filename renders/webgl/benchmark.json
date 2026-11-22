@@ -1,0 +1,47 @@
+{
+  "threeRevision": "174",
+  "gpu": "ANGLE (NVIDIA, NVIDIA GeForce GTX 1070 Ti (0x00001B82) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "checked": 65,
+  "instanced": {
+    "calls": 363,
+    "triangles": 111060
+  },
+  "unbatched": {
+    "calls": 2986,
+    "triangles": 111060
+  },
+  "batches": 202,
+  "format": {
+    "validator": "2.0.0-dev.3.10",
+    "files": 65,
+    "errors": 0,
+    "warnings": 0,
+    "info": {
+      "UNSUPPORTED_EXTENSION": 1,
+      "UNUSED_OBJECT": 118
+    }
+  },
+  "browser": "chrome.exe 157.0.8103.80",
+  "views": [
+    {
+      "width": 1280,
+      "height": 720,
+      "dpr": 1,
+      "frames": 600,
+      "meanFps": 170,
+      "p95FrameMs": 6,
+      "calls": 288,
+      "triangles": 91752
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "dpr": 1,
+      "frames": 600,
+      "meanFps": 170,
+      "p95FrameMs": 6,
+      "calls": 243,
+      "triangles": 90809
+    }
+  ]
+}
