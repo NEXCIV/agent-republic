@@ -1,0 +1,43 @@
+# CIVRUM 06 号商业服务员 · 三视图
+
+| 文件 | 视角 | 分辨率 |
+| --- | --- | --- |
+| [正面](01-front.png) | 自然 A 字姿势，可见围裙餐罩徽记、口袋和斜纹 | 1024 × 1536 |
+| [侧面](02-profile.png) | 右侧 90°，可见遮阳帽檐、盘发和围裙厚度 | 1024 × 1536 |
+| [背面](03-back.png) | 后方 180°，可见两条围裙肩带及腰间蝴蝶结 | 1024 × 1536 |
+
+在三张图中保留橙色遮阳帽、奶油色衬衫、珊瑚橙围裙、青色卷边裤和橙白运动鞋。双臂自然外展，双手离开躯干，双脚平行。侧视图中远侧手脚与近侧手脚自然重叠。
+
+按发髻顶部到鞋底的颜色边界测量，正面、侧面和背面的人物高度分别约为 1455、1462 和 1456 像素。三张图可分别用于 Tripo 多视图建模。
+
+## 生成提示词
+
+使用内置 ImageGen。正面使用原设定图下排第二位人员作为造型参考，侧面和背面沿用同一张正面成图，正面另作局部表情微调。
+
+### 正面基准
+
+```text
+Create one full-length FRONT view modeling reference for CIVRUM 06 Female Service, the SECOND character on the BOTTOM ROW of the supplied eight-character lineup, labeled 06 女·商业服务 / Female · Service. Use only this character as the style and wardrobe reference. Preserve the warm stylized young adult woman: rounded cheeks, warm brown eyes, chestnut-brown hair swept up into a distinct rounded high bun behind the crown, one small loose wavy lock near each ear, soft burnt-coral-orange SUN VISOR with an ivory edge and a SHORT front bill. Open top of the visor, with hair visible above it. No cap crown, no glasses, no earrings unless barely noticeable. Match the face in the source with a relaxed neutral closed mouth.
+
+Wardrobe: light warm ivory buttoned long-sleeve work shirt with soft rolled-up sleeves, orange/coral café-service bib apron hanging to just above the knee, narrow shoulder apron straps, small abstract warm-yellow outlined serving-bowl icon centered on the bib, no writing. Orange apron has a small contrasting ivory patch-front pocket on the model's anatomical RIGHT side (screen LEFT), with three short ivory diagonal bands near the hem on her anatomical LEFT (screen RIGHT). Tied apron is open at the rear with two simple matching shoulder straps and a large orange waist-tie bow at the center back. The orange front skirt panel is one garment with clearly readable borders and only modest fabric folds. Muted teal straight cropped trousers, cuffs rolled at a fixed matching height just above short cream socks. Chunky off-white, burnt-orange and pale amber retro sneakers with cream outsoles and visible laces. No handheld object, tray, bag, extra straps, surrounding cast or decorations.
+
+Use a strict level ORTHOGRAPHIC 0° front camera, with zero pitch, yaw, and roll. Replace all gesturing and hip-handed pose with interchangeable technical neutral A-pose: both relaxed arms angle downward and outward symmetrically, approximately 28 degrees from down vertical, wrists at equal height, hands clear of apron and sides, fingers gently extended with modest visible gaps and free thumb. Both legs straight and neutral, shoes fully parallel, toes toward camera and soles level. Upright head without tilt, eyes straight ahead, mouth closed neutral, neither smiling nor frowning. 1024x1536 2:3 portrait canvas, sole bottom at around y=1467px, hair peak around y=32px. Entire figure visible centered against a clean light neutral-gray studio background, soft diffused light and tiny soft contact shadow. Tactile stylized 3D video-game sculpt as in the source. No labels, text, guides, borders, extra views or camera effects. This reference becomes the fixed pose and style master for exact orthographic side and rear views.
+```
+
+### 右侧 90°
+
+```text
+This exact attached single FRONT master is a fixed 3D character, CIVRUM 06 Female Service. Make exactly one full-length orthographic picture by rotating ONLY the camera. Preserve identity, proportions, bun shape, orange hair tie, chin-level loose curls, orange visor with ivory trim, ivory collared shirt and rolled cuffs, coral orange apron, teal cuffed trousers, cream socks and the same cream-orange-amber sneakers. No redesign. The chest has the small original yellow cloche emblem, the FRONT orange skirt panel has only one ivory pocket on the character's anatomical right and only three angled ivory bars on the character's anatomical left. Those markings appear only if the FRONT surfaces are visible. Apron straps are orange and waist tie form a bow centered on the back. Rear open apron shows the teal pants under it. Don't add props or duplicate pockets, patches, stripes, limbs, or bows. Full body in portrait 2:3 1024x1536, gray neutral background, same light and soft contact shadow. Exact same A-pose, arms out and down at the same angles with relaxed wrists and fingers clear of hips in three dimensions. Legs straight and feet parallel, place all landmarks at the master's vertical pixel levels: crown about y=21, soles at y=1477, fingertips y=827, apron hem y=960, trouser cuffs at y=1276. Face neutral without curled-up lip corners. Center the figure and preserve framing. No typography, labels, extra views, lines or borders. STRICT RIGHT SIDE PROFILE 90°, nose and toes toward SCREEN RIGHT. Orthographic and level, show only the near profile of her face and one eye and ear. Same turn on the entire figure. Open-topped visor follows forehead, bun is at the back/top and the visor brim projects toward screen right. Loose curl near ear remains visible. Shoulder-side strap wraps cream shirt and the orange apron front sits ahead of the teal trousers. Her small ivory pocket is on the near/right front edge of the apron, only as visible in profile. The different left-side hem stripes are hidden. Small projection of the orange waist bow near rear edge, no giant trailing ribbons. Natural superimposition of feet and arms, with one dominant shoe silhouette, no staggered feet. Near arm hangs diagonally outward in depth from shoulder in same A pose, near hand seen over the trouser and apron silhouette from this side, fingertips slightly parted and well-defined. No quarter-view perspective.
+```
+
+### 背面 180°
+
+```text
+This exact attached single FRONT master is a fixed 3D character, CIVRUM 06 Female Service. Make exactly one full-length orthographic picture by rotating ONLY the camera. Preserve identity, proportions, bun shape, orange hair tie, chin-level loose curls, orange visor with ivory trim, ivory collared shirt and rolled cuffs, coral orange apron, teal cuffed trousers, cream socks and the same cream-orange-amber sneakers. No redesign. The chest has the small original yellow cloche emblem, the FRONT orange skirt panel has only one ivory pocket on the character's anatomical right and only three angled ivory bars on the character's anatomical left. Those markings appear only if the FRONT surfaces are visible. Apron straps are orange and waist tie form a bow centered on the back. Rear open apron shows the teal pants under it. Don't add props or duplicate pockets, patches, stripes, limbs, or bows. Full body in portrait 2:3 1024x1536, gray neutral background, same light and soft contact shadow. Exact same A-pose, arms out and down at the same angles with relaxed wrists and fingers clear of hips in three dimensions. Legs straight and feet parallel, place all landmarks at the master's vertical pixel levels: crown about y=21, soles at y=1477, fingertips y=827, apron hem y=960, trouser cuffs at y=1276. Face neutral without curled-up lip corners. Center the figure and preserve framing. No typography, labels, extra views, lines or borders. EXACT BACK VIEW 180 degrees. Face, visor front bill, chest icon, front apron pocket, front apron stripes and front apron panel are out of view. Show the back of the original centered chestnut bun high on the head, orange elastic tie, around-the-back visor band with cream upper piping, no cap. Shirt back cream with the two flat orange shoulder straps running to the back waist. At center waist show one tidy coral-orange tied bow with two short ends. Below that the teal trousers are visible at the back, with only narrow orange apron sides visible at the outside edges. No solid apron panel over the seat, no orange shorts, no second bow. Keep both cuffed cream sleeves, hands well away from sides, plain pant back with true central seam, rolled cuffs exactly the same heights. Show actual shoe heels with warm ivory soles and no laces at the rear. Horizontal level rear camera, keep master silhouette unchanged.
+```
+
+### 正面表情微调
+
+```text
+Localized edit to this exact attached head-on full body master for CIVRUM 06. Change ONLY her small smile: the two corners of the closed mouth relax to a very gently closed neutral horizontal mouth line, calm expression, not angry. Keep cheeks and face the same. Keep all other pixels as close as possible, including hair bun and visor, outfit, apron icon and pockets, shoes, pose, all heights, and identical attitude, studio lighting, pale gray background and image square-pixel dimensions 1024x1536. Do not crop.
+```
