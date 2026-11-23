@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import type {
   AgentActionView,
   AgentConfigSaveResult,
@@ -74,6 +74,16 @@ function decodeConfig(row: ConfigRow): AgentConfigVersionView {
     paused: parsed.paused,
     createdAt: row.created_at.toISOString(),
   };
+}
+
+async function endCommandsForConfig(client: PoolClient, agentId: string, version: number): Promise<void> {
+  await client.query(
+    `UPDATE agent_commands
+        SET status = 'FAILED', report = 'The agent configuration changed before this task finished.',
+            revision = revision + 1, updated_at = clock_timestamp()
+      WHERE agent_id = $1 AND config_version = $2 AND status IN ('RUNNING', 'PAUSED')`,
+    [agentId, version],
+  );
 }
 
 export class PostgresAgentConsoleRepository implements AgentConsoleRepository {
@@ -181,6 +191,7 @@ export class PostgresAgentConsoleRepository implements AgentConsoleRepository {
         agentId = row.id;
         version = row.config_version + 1;
         status = row.status;
+        await endCommandsForConfig(client, agentId, row.config_version);
         await client.query(
           `UPDATE agents SET name = $2, persona = $3, goal = $4, config_version = $5, updated_at = now()
              WHERE owner = $1`,
@@ -238,6 +249,7 @@ export class PostgresAgentConsoleRepository implements AgentConsoleRepository {
       }
 
       const version = row.config_version + 1;
+      await endCommandsForConfig(client, row.id, row.config_version);
       await client.query(
         'UPDATE agents SET status = $2, config_version = $3, updated_at = now() WHERE owner = $1',
         [owner, desired, version],

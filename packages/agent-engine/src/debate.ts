@@ -221,6 +221,20 @@ function replyDraft(
   };
 }
 
+/** A private, single exchange uses the same persona policy as public debate.
+ * It consumes public facts only and never publishes either line. */
+export function privateDebateExchange(
+  observation: AgentObservationV1,
+  inviter: AgentProfile['persona'],
+  recipient: AgentProfile['persona'],
+): readonly [string, string] | null {
+  const topic = chooseTopic(observation);
+  if (!topic) return null;
+  const opening = firstDraft(inviter, topic, observation.sourceBlock);
+  const reply = replyDraft(recipient, topic, observation.sourceBlock, opening.stance);
+  return [opening.text, reply.text];
+}
+
 function draft(
   speaker: AgentProfile,
   opponent: AgentProfile,

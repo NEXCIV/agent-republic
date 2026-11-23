@@ -172,6 +172,23 @@ describe('buildAgentObservation', () => {
     ]);
   });
 
+  it('exposes only public names of other active citizens and caps the private contact list', () => {
+    const frame = makeFrame();
+    const other = '0x' + 'cd'.repeat(20);
+    frame.society.agentSummaries = [
+      { agentId: 'self', owner: OWNER, displayName: 'Self', persona: 'COOPERATIVE', active: true },
+      { agentId: 'paused', owner: other, displayName: 'Paused', persona: 'COOPERATIVE', active: false },
+      ...Array.from({ length: 32 }, (_, index) => ({
+        agentId: 'peer-' + index, owner: other, displayName: 'Peer ' + index, persona: 'PRAGMATIC', active: true,
+      })),
+    ];
+    const view = buildAgentObservation(frame, self, { networkBlockNumber: '1000' });
+    expect(view.publicContacts).toHaveLength(30);
+    expect(view.publicContacts?.[0]).toEqual({ agentId: 'peer-0', displayName: 'Peer 0' });
+    expect(view.publicContacts?.some((contact) => contact.agentId === 'paused' || contact.agentId === 'self')).toBe(false);
+    expect(buildAgentObservation(makeFrame(), self, { networkBlockNumber: '1000' })).not.toHaveProperty('publicContacts');
+  });
+
   it('rejects owner state read at another block or hash', () => {
     expect(
       expectError(() =>

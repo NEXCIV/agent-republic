@@ -19,6 +19,9 @@
       }
     ],
     "paths": {
+      "@agent-republic/agent-engine": [
+        "../../packages/agent-engine/dist/index.d.ts"
+      ],
       "@/*": [
         "./src/*"
       ],

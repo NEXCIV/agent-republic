@@ -63,6 +63,8 @@ const EXPECTED_TABLES = [
   'identity_bindings',
   'agents',
   'agent_configs',
+  'agent_commands',
+  'agent_command_locations',
   'epochs',
   'proposals',
   'projects',
@@ -102,7 +104,7 @@ describe('db/migrations files', () => {
 
   it('only contains known DDL statement types', () => {
     const allowed =
-      /^(BEGIN|COMMIT|CREATE (TABLE|INDEX|DOMAIN|TYPE|VIEW|EXTENSION)|ALTER TABLE)/;
+      /^(BEGIN|COMMIT|CREATE (TABLE|(?:UNIQUE )?INDEX|DOMAIN|TYPE|VIEW|EXTENSION)|ALTER TABLE)/;
     for (const [name, sql] of fileContents) {
       for (const statement of statements(sql)) {
         expect(

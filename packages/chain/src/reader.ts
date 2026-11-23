@@ -19,6 +19,15 @@ export type CitizenChainState = {
   readonly registered: boolean;
 };
 
+export interface CommandIdentityReader {
+  readCanonicalHash(block: bigint): Promise<string>;
+  readCommandIdentity(owner: EvmAddress, block: bigint): Promise<CitizenChainState & {
+    eligibleNow: boolean;
+    networkBlockNumber: bigint;
+    blockHash: string;
+  }>;
+}
+
 export interface ChainReadPort {
   readCitizenState(owner: EvmAddress): Promise<CitizenChainState>;
   /**
@@ -56,7 +65,7 @@ const CORE_ABI = parseAbi([
 
 const asAddress = (value: EvmAddress): Address => value as Address;
 
-export function createViemChainReader(config: ChainConfig, rpcUrl: string): ChainReadPort {
+export function createViemChainReader(config: ChainConfig, rpcUrl: string): ChainReadPort & CommandIdentityReader {
   if (rpcUrl.trim() === '') {
     throw new ChainConfigError('an RPC URL is required for chain reads');
   }
@@ -70,31 +79,49 @@ export function createViemChainReader(config: ChainConfig, rpcUrl: string): Chai
     transport: http(rpcUrl, { timeout: 10_000, retryCount: 1 }),
   });
 
-  return {
-    async readCitizenState(owner: EvmAddress): Promise<CitizenChainState> {
-      try {
-        const [agentIdBalance, citizenState] = await Promise.all([
-          client.readContract({
-            address: asAddress(config.agentIdAddress),
-            abi: AGENT_ID_ABI,
-            functionName: 'balanceOf',
-            args: [asAddress(owner)],
-          }),
-          client.readContract({
-            address: asAddress(coreAddress),
-            abi: CORE_ABI,
-            functionName: 'getCitizenState',
-            args: [asAddress(owner)],
-          }),
-        ]);
+  async function readCitizenState(owner: EvmAddress, blockNumber?: bigint): Promise<CitizenChainState> {
+    try {
+      const [agentIdBalance, citizenState] = await Promise.all([
+        client.readContract({
+          blockNumber, address: asAddress(config.agentIdAddress), abi: AGENT_ID_ABI,
+          functionName: 'balanceOf', args: [asAddress(owner)],
+        }),
+        client.readContract({
+          blockNumber, address: asAddress(coreAddress), abi: CORE_ABI,
+          functionName: 'getCitizenState', args: [asAddress(owner)],
+        }),
+      ]);
+      const [build, rep, registered] = citizenState;
+      return { hasAgentId: agentIdBalance > 0n, build, rep, registered };
+    } catch (error) {
+      throw new ChainReadError(
+        'RPC_DOWN',
+        `failed to read citizen state for ${owner}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 
-        const [build, rep, registered] = citizenState;
-        return { hasAgentId: agentIdBalance > 0n, build, rep, registered };
-      } catch (error) {
-        throw new ChainReadError(
-          'RPC_DOWN',
-          `failed to read citizen state for ${owner}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+  return {
+    readCitizenState,
+    async readCanonicalHash(blockNumber) {
+      const block = await client.getBlock({ blockNumber });
+      if (!block.hash) throw new ChainReadError('BAD_RESPONSE', 'Missing canonical block hash.');
+      return block.hash;
+    },
+    async readCommandIdentity(owner, blockNumber) {
+      try {
+        const [chainId, before, current] = await Promise.all([
+          client.getChainId(), client.getBlock({ blockNumber }), readCitizenState(owner),
+        ]);
+        if (chainId !== config.chainId) throw new Error('unexpected chain');
+        const state = await readCitizenState(owner, blockNumber);
+        const [after, networkBlockNumber] = await Promise.all([
+          client.getBlock({ blockNumber }), client.getBlockNumber({ cacheTime: 0 }),
+        ]);
+        if (!after.hash || before.hash !== after.hash) throw new Error('block changed during identity read');
+        return { ...state, eligibleNow: current.hasAgentId && current.registered, networkBlockNumber, blockHash: after.hash };
+      } catch {
+        throw new ChainReadError('RPC_DOWN', 'could not verify command identity at the observed block');
       }
     },
 

@@ -20,6 +20,7 @@ export { createViemChainReader, ChainReadError } from './reader.js';
 export type {
   ChainReadErrorCode,
   ChainReadPort,
+  CommandIdentityReader,
   CitizenChainState,
   TransactionReceipt,
 } from './reader.js';

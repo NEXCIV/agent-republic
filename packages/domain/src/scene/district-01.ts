@@ -104,6 +104,10 @@ export const WAYPOINT_IDS = [
   'P12',
 ] as const;
 export type WaypointId = (typeof WAYPOINT_IDS)[number];
+/** The shared entrance graph is used by both private trips and world simulation. */
+export const LANDMARK_WAYPOINTS = {
+  PLAZA: 'P0', COUNCIL: 'P9', IDENTITY: 'P10', PROJECT: 'P11', CORE: 'P12',
+} as const satisfies Record<LandmarkId, WaypointId>;
 
 export const DISTRICT_01_WAYPOINTS: Readonly<Record<WaypointId, readonly [number, number, number]>> = {
   P0: [0, 0, 0],

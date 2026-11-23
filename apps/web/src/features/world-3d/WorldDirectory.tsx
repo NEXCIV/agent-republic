@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { buildBuildingLinks } from './webgl';
+import { commandLink } from '../agent-commands/world-command';
 
 /**
  * E6-01 — accessible, always-available equivalent of the 3D district.
@@ -28,6 +29,7 @@ export function WorldDirectory() {
               Open {building.route}
             </Link>
           )}
+          <p className="hint"><Link href={commandLink('visit', building.id)} prefetch={false}>Draft a visit command</Link></p>
         </li>
       ))}
     </ul>

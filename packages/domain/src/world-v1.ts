@@ -211,6 +211,8 @@ export const agentObservationV1Schema = z
     facts: worldFactsSchema,
     self: agentSelfSchema,
     approvedPublicMessages: z.array(publicMessageSchema).max(MAX_PUBLIC_MESSAGES),
+    /** Public names for addressing an invitation. These carry no location or wallet authority. */
+    publicContacts: z.array(agentSummarySchema.pick({ agentId: true, displayName: true })).max(MAX_VISIBLE_AGENTS).optional(),
     /** Ids of confirmed chain events the agent may cite as evidence. */
     chainRecentEventIds: z.array(z.string().min(1).max(96)).max(200),
   })

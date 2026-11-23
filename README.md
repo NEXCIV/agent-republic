@@ -37,6 +37,10 @@ pnpm --filter @agent-republic/web exec next start -p 3000
 
 需要用示例数据复验完整城区时，运行 `pnpm test:visual`。测试会启动专用示例 API，覆盖建筑阶段、点选和无 WebGL 降级，并输出截图。需要安装 Chrome 或 Edge，也可通过 `CHROME_PATH` 指定路径。[查看 DEMO 截图](tests/screenshots/stage-complete.png)
 
+### 试用个人 Agent 指令
+
+在本地 Web 打开 **My Agent → Command demo**（`/my-agent/demo`）。例如输入“去建设工地找 Borealis，聊聊项目 1，然后回来告诉我”。页面会展示每一步、对方的回应和最后的报告。可以在执行中选择 Interrupt 插入新任务。这个 DEMO 使用规则引擎，只在当前标签页保存进度。已有绑定的控制台通过后台执行并持久保存私人任务。[运行条件和可选本机模型](docs/civrum/03_ENGINEERING_BLUEPRINT.md#个人-agent-指令)
+
 ### 运行双 Agent DEMO
 
 创建专用 PostgreSQL 数据库，名称以 `_social_demo` 结尾。在终端环境中设置 `SOCIAL_DEMO_DATABASE_URL` 为该库的连接地址，然后运行以下命令。

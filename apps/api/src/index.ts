@@ -8,6 +8,10 @@ import { PostgresWorldReader } from './world/world-reader.js';
 import { WorldService } from './world/world-service.js';
 import { AgentConsoleService } from './agents/agent-console.js';
 import { PostgresAgentConsoleRepository } from './agents/postgres-repository.js';
+import { CommandService, readCommandContext } from './agents/commands.js';
+import { PgCommandStore } from './agents/command-store.js';
+import { LocalCommandModel } from './agents/command-model.js';
+import { ApiError } from './errors.js';
 import { buildApiServer, type ApiDeps } from './server.js';
 import { PostgresProjectionReader } from './repositories/postgres.js';
 
@@ -99,6 +103,20 @@ export function createApiFromEnv(env: Record<string, string | undefined>) {
   const reader = new PostgresProjectionReader(databaseUrl);
   const rpcUrl = env.BSC_RPC_URL ?? env.RPC_URL ?? '';
   const chain = rpcUrl.trim() === '' ? null : createViemChainReader(config, rpcUrl);
+  const agents = new AgentConsoleService(new PostgresAgentConsoleRepository(databaseUrl));
+  const world = new WorldService({
+    reader: new PostgresWorldReader(databaseUrl),
+    chainId: config.chainId,
+    confirmedDepth: parseConfirmations(env.CONFIRMATIONS_REQUIRED),
+    worldSeedFallback: env.WORLD_SEED,
+  });
+  const store = new PgCommandStore(databaseUrl);
+  const model = env.COMMAND_LOCAL_MODEL?.trim();
+  const localModel = model ? new LocalCommandModel(
+    model, Number(env.COMMAND_MODEL_DAILY_CALLS ?? 30), (call) => store.reserveModelCall(call),
+  ) : undefined;
+  const commands = new CommandService(agents, store, (agent) => readCommandContext(agent, world, chain),
+    localModel, chain?.readCanonicalHash);
   const deps: ApiDeps = {
     chainId: config.chainId,
     reader,
@@ -114,18 +132,32 @@ export function createApiFromEnv(env: Record<string, string | undefined>) {
       coreAddress: config.coreAddress,
       chain,
     }),
-    world: new WorldService({
-      reader: new PostgresWorldReader(databaseUrl),
-      chainId: config.chainId,
-      confirmedDepth: parseConfirmations(env.CONFIRMATIONS_REQUIRED),
-      worldSeedFallback: env.WORLD_SEED,
-    }),
-    agents: new AgentConsoleService(new PostgresAgentConsoleRepository(databaseUrl)),
+    world, agents, commands,
     // No passkey/email session layer exists yet. The default resolver denies
     // every request; a local demo may opt into a fixed identity through
     // DEV_SESSION_APP_USER_ID, which is forbidden in production.
     session: createDevSessionResolver(env),
     logger: env.NODE_ENV !== 'test',
   };
-  return buildApiServer(deps);
+  const app = buildApiServer(deps);
+  let timer: ReturnType<typeof setInterval> | undefined;
+  let batch: Promise<void> | undefined;
+  const onError = (error: unknown) => {
+    const code = error instanceof ApiError ? error.code : 'UNAVAILABLE';
+    app.log.warn({ code }, 'Command dispatch deferred');
+  };
+  app.addHook('onListen', async () => {
+    if (!chain) return;
+    timer = setInterval(() => {
+      if (batch) return;
+      batch = commands.dispatch(onError).catch(onError).finally(() => { batch = undefined; });
+    }, 4000);
+    timer.unref();
+  });
+  app.addHook('onClose', async () => {
+    clearInterval(timer);
+    await batch;
+    await store.close();
+  });
+  return app;
 }

@@ -1,5 +1,6 @@
 import {
   agentObservationV1Schema,
+  MAX_VISIBLE_AGENTS,
   chainHashSchema,
   decimalStringSchema,
   evmAddressSchema,
@@ -194,6 +195,10 @@ export function buildAgentObservation(
     );
   }
 
+  const publicContacts = frame.society.agentSummaries
+    .filter((summary) => summary.active && summary.owner.toLowerCase() !== trustedSelf.owner)
+    .slice(0, MAX_VISIBLE_AGENTS)
+    .map(({ agentId, displayName }) => ({ agentId, displayName }));
   const candidate: AgentObservationV1 = {
     worldFrameId: frame.frameId,
     sourceBlock: frame.source.blockNumber,
@@ -210,6 +215,7 @@ export function buildAgentObservation(
       (message) => message.moderation === 'APPROVED',
     ),
     chainRecentEventIds: recentChainEventIds(frame),
+    ...(publicContacts.length ? { publicContacts } : {}),
   };
 
   const parsed = agentObservationV1Schema.safeParse(candidate);

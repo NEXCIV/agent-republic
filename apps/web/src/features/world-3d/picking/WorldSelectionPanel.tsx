@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { AgentMarker } from '../agents/toAgentMarkers';
 import type { WorldSelection } from './selection';
 import type { WorldBuildingLink } from '../webgl';
+import { commandLink } from '../../agent-commands/world-command';
 
 /**
  * E6-05 — semantic details for a picked object. All text that matters is in
@@ -41,6 +42,7 @@ export function WorldSelectionPanel({
             </Link>
           )}
         </div>
+        <Link href={commandLink('visit', building.id)} prefetch={false}>Draft a visit command</Link>
         <p className="hint" style={{ marginBottom: 0 }}>
           <button type="button" onClick={onClear}>
             Clear selection (Esc)
@@ -64,6 +66,7 @@ export function WorldSelectionPanel({
           Simulated presentation only. No verified Agent ID binding is displayed for this marker, and its position
           never proves an on-chain fact.
         </p>
+        <Link href={commandLink('meet', agent.id)} prefetch={false}>Draft a conversation command</Link>{' '}
         <button type="button" onClick={onClear}>
           Clear selection (Esc)
         </button>

@@ -14,6 +14,7 @@ const nextConfig = {
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
+      '@agent-republic/agent-engine': path.resolve(here, '../../packages/agent-engine/dist/index.js'),
       '@agent-republic/chain': path.resolve(here, '../../packages/chain/dist/index.js'),
       '@agent-republic/domain': path.resolve(here, '../../packages/domain/dist/index.js'),
       '@agent-republic/world-engine': path.resolve(here, '../../packages/world-engine/dist/index.js'),

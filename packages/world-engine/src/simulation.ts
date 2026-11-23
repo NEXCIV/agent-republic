@@ -1,6 +1,7 @@
 import {
   DISTRICT_01_WAYPOINTS,
   DISTRICT_01_EDGES,
+  LANDMARK_WAYPOINTS,
   MAX_VISIBLE_AGENTS,
   type AgentAction,
   type AgentLocation,
@@ -25,10 +26,10 @@ export const MAX_AGENTS_PER_STEP = MAX_VISIBLE_AGENTS;
 const HOP_PROBABILITY = 0.7;
 
 const ENTRANCE_LOCATIONS: Readonly<Partial<Record<WaypointId, AgentLocation>>> = {
-  P9: 'COUNCIL',
-  P10: 'IDENTITY',
-  P11: 'PROJECT',
-  P12: 'CORE',
+  [LANDMARK_WAYPOINTS.COUNCIL]: 'COUNCIL',
+  [LANDMARK_WAYPOINTS.IDENTITY]: 'IDENTITY',
+  [LANDMARK_WAYPOINTS.PROJECT]: 'PROJECT',
+  [LANDMARK_WAYPOINTS.CORE]: 'CORE',
 };
 
 export type SimAgentState = {

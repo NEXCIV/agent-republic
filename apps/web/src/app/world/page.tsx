@@ -6,6 +6,7 @@ import { EmptyState, Unavailable } from '@/components/States';
 import { WorldCanvas } from '@/features/world-3d/WorldCanvas';
 import { WorldDirectory } from '@/features/world-3d/WorldDirectory';
 import { toAgentMarkers } from '@/features/world-3d/agents/toAgentMarkers';
+import { commandLink } from '@/features/agent-commands/world-command';
 import { PROJECT_STAGE_LABELS, toProjectStageView } from '@/features/world-3d/adapters/projectStage';
 
 export const dynamic = 'force-dynamic';
@@ -180,7 +181,11 @@ export default async function WorldPage({
               <tbody>
                 {agents.map((agent) => (
                   <tr key={agent.id}>
-                    <td className="hash">{agent.id}</td>
+                    <td className="hash">
+                      <Link href={commandLink('meet', agent.id)} prefetch={false} aria-label={`Draft a conversation command for ${agent.id}`}>
+                        {agent.id}
+                      </Link>
+                    </td>
                     <td>{agent.action}</td>
                     <td>{agent.locationId}</td>
                     <td className="hash">

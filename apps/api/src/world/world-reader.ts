@@ -1,4 +1,4 @@
-import { Pool } from 'pg';
+import { Pool, type PoolClient } from 'pg';
 import type { VerifiedChainEvent } from '@agent-republic/world-engine';
 
 /**
@@ -76,7 +76,22 @@ export class PostgresWorldReader implements WorldReader {
   }
 
   async loadRaw(chainId: 56 | 97, sceneVersion: string): Promise<WorldRawData> {
-    const cursorResult = await this.pool.query<{
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
+      const raw = await this.readSnapshot(client, chainId, sceneVersion);
+      await client.query('COMMIT');
+      return raw;
+    } catch (error) {
+      await client.query('ROLLBACK').catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async readSnapshot(client: PoolClient, chainId: 56 | 97, sceneVersion: string): Promise<WorldRawData> {
+    const cursorResult = await client.query<{
       finalized_block: string | null;
       updated_at: Date | null;
     }>(
@@ -95,13 +110,13 @@ export class PostgresWorldReader implements WorldReader {
     const blockResult =
       cursor === null
         ? { rows: [] as { block_number: string; block_hash: string; block_timestamp: Date }[] }
-        : await this.pool.query<{ block_number: string; block_hash: string; block_timestamp: Date }>(
+        : await client.query<{ block_number: string; block_hash: string; block_timestamp: Date }>(
             `SELECT block_number::text AS block_number, block_hash, block_timestamp
                FROM chain_block_hashes
               WHERE chain_id = $1
                 AND block_timestamp IS NOT NULL
                 AND block_number <= $2
-              ORDER BY block_number DESC
+              ORDER BY chain_block_hashes.block_number DESC
               LIMIT 1`,
             [chainId, cursor.finalizedBlock.toString()],
           );
@@ -111,7 +126,7 @@ export class PostgresWorldReader implements WorldReader {
         ? null
         : { number: blockRow.block_number, hash: blockRow.block_hash, timestamp: blockRow.block_timestamp };
 
-    const events = await this.pool.query<{
+    const events = await client.query<{
       event_name: string;
       tx_hash: string;
       log_index: number;
@@ -123,13 +138,14 @@ export class PostgresWorldReader implements WorldReader {
       `SELECT event_name, tx_hash, log_index, block_number::text AS block_number, block_hash, owner, payload
          FROM chain_events
         WHERE chain_id = $1
+          AND block_number <= $2
           AND status = 'INCLUDED'
           AND confirmed_at_block IS NOT NULL
-        ORDER BY block_number, log_index`,
-      [chainId],
+        ORDER BY chain_events.block_number, log_index`,
+      [chainId, block?.number ?? null],
     );
 
-    const tickResult = await this.pool.query<{
+    const tickResult = await client.query<{
       tick: string;
       frame_id: string;
       base_block: string;
@@ -160,7 +176,7 @@ export class PostgresWorldReader implements WorldReader {
 
     let visualEvents: WorldVisualEventRow[] = [];
     if (tick !== null) {
-      const visual = await this.pool.query<{
+      const visual = await client.query<{
         origin: 'CHAIN_CONFIRMED' | 'OFFCHAIN_APPROVED' | 'SYSTEM_SIMULATED';
         source_id: string;
         kind: string;
@@ -182,7 +198,7 @@ export class PostgresWorldReader implements WorldReader {
       }));
     }
 
-    const messages = await this.pool.query<{
+    const messages = await client.query<{
       id: string;
       agent_id: string;
       owner: string;
@@ -198,7 +214,7 @@ export class PostgresWorldReader implements WorldReader {
       [],
     );
 
-    const agents = await this.pool.query<{
+    const agents = await client.query<{
       id: string;
       owner: string;
       name: string;
@@ -206,11 +222,11 @@ export class PostgresWorldReader implements WorldReader {
       status: 'ACTIVE' | 'PAUSED';
     }>(`SELECT id::text AS id, owner, name, persona, status FROM agents ORDER BY created_at ASC LIMIT 30`);
 
-    const revisions = await this.pool.query<{ revision: string | null }>(
+    const revisions = await client.query<{ revision: string | null }>(
       `SELECT max(revision)::text AS revision FROM social_revisions`,
     );
 
-    const recovery = await this.pool.query<{ pending: boolean }>(
+    const recovery = await client.query<{ pending: boolean }>(
       `SELECT EXISTS (
          SELECT 1
            FROM world_visual_events v

@@ -1,9 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 import { GOALS, PERSONAS } from '@agent-republic/domain';
 import { PageHeader } from '@/components/PageHeader';
 import { EmptyState } from '@/components/States';
+import { OwnerCommands } from '@/features/agent-commands/OwnerCommands';
 import { formatDateTime } from '@/lib/format';
 import type { AgentGoal, AgentPersona, MyAgentView } from '@/lib/types';
 
@@ -144,11 +146,12 @@ export default function MyAgentPage() {
             My <em>agent</em>
           </>
         }
-        lede="This console controls the off-chain AI that acts for your Agent ID. The owner wallet is always taken from your
-        verified binding — it is never typed or overridden here. Every save creates an immutable configuration version
-        so earlier records remain auditable."
+        lede="Give your agent a task, follow its progress and read its report. Your verified owner binding also gives you
+        access to its goals, personality and configuration history."
         meta={['Owner from verified binding', 'Immutable versions', 'Never holds keys']}
-      />
+      >
+        <Link className="button" href="/my-agent/demo">Try the command demo</Link>
+      </PageHeader>
 
       {notice !== null ? <div className="panel hint">{notice}</div> : null}
       {error !== null ? <div className="error-banner">{error}</div> : null}
@@ -193,6 +196,7 @@ export default function MyAgentPage() {
 
       {state === 'ready' && view !== null ? (
         <>
+          <OwnerCommands key={`${view.agentId}:${view.configVersion}`} name={view.name} paused={view.status === 'PAUSED'} />
           <div className="row" style={{ marginBottom: 16 }}>
             <span className={`badge ${view.status === 'ACTIVE' ? 'confirmed' : 'pending'}`}>{view.status}</span>
             <span className="hint">agent {view.agentId} · updated {formatDateTime(view.updatedAt)}</span>

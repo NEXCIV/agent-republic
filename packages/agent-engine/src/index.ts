@@ -4,6 +4,10 @@
  */
 
 export const AGENT_ENGINE_VERSION = '0.0.1';
+export { makeCommandRecord, advanceCommandRecord } from './command-journal.js';
+export { commandTravelRoute, planCommand, performCommandStep, withCommandOrigin } from './command.js';
+export type { CommandContext, CommandPeer, CommandPlan } from './command.js';
+export { buildCommandPlanPrompt, buildCommandReplyPrompt, parseCommandModelPlan, parseCommandModelReply } from './command-model.js';
 
 export {
   AgentOutputError,

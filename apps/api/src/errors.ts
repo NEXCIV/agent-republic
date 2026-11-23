@@ -30,6 +30,7 @@ export type ApiErrorCode =
   | 'OWNER_NOT_ALLOWED'
   | 'NO_AGENT'
   | 'VERSION_CONFLICT'
+  | 'COMMAND_BUSY'
   | 'INTERNAL';
 
 export class ApiError extends Error {

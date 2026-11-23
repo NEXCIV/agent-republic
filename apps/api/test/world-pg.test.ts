@@ -233,6 +233,57 @@ describeWithDb('PostgresWorldReader + WorldService (PostgreSQL)', () => {
     expect(second.frameId).toBe(first.frameId);
   });
 
+  it('reports facts only through the newest timestamped finalized block', async () => {
+    await client.query('UPDATE chain_sync_cursors SET finalized_block = 1510 WHERE chain_id = 56');
+    await client.query(
+      `INSERT INTO chain_block_hashes (chain_id, block_number, block_hash, parent_hash, block_timestamp)
+       VALUES (56, 999, $1, $2, '2026-11-19T07:40:00Z'), (56, 1510, $3, $4, NULL)`,
+      [H(999), H(998), H(1510), H(1509)],
+    );
+    await client.query(
+      `INSERT INTO chain_events
+        (chain_id, tx_hash, log_index, block_number, block_hash, event_name, owner, payload, status, confirmed_at_block)
+       VALUES (56, $1, 0, 1505, $2, 'ContributionMade', $3, $4, 'INCLUDED', 1510)`,
+      [H(5), H(1505), OWNER, { owner: OWNER, projectId: '1', amount: '250', fundedAfter: '350' }],
+    );
+    const earlier = await service().getFrame();
+    expect(earlier.source.blockNumber).toBe('1500');
+    expect(earlier.facts.projects[0]?.fundedBuild).toBe('100');
+
+    await client.query("UPDATE chain_block_hashes SET block_timestamp = '2026-11-19T08:00:00Z' WHERE chain_id = 56 AND block_number = 1510");
+    const later = await service().getFrame();
+    expect(later.source.blockNumber).toBe('1510');
+    expect(later.facts.projects[0]?.fundedBuild).toBe('350');
+  });
+
+  it('uses one database snapshot while other sessions update the world', async () => {
+    await client.query('BEGIN');
+    let read: ReturnType<typeof reader.loadRaw> | undefined;
+    try {
+      await client.query('LOCK TABLE world_ticks IN ACCESS EXCLUSIVE MODE');
+      read = reader.loadRaw(56, SCENE);
+      // Reading the tick happens after selecting the chain block, but before reading society.
+      await expect.poll(async () => {
+        const waiting = await client.query<{ found: boolean }>(
+          `SELECT EXISTS(
+             SELECT 1 FROM pg_locks WHERE relation = 'world_ticks'::regclass
+               AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+               AND mode = 'AccessShareLock' AND NOT granted
+           ) AS found`,
+        );
+        return waiting.rows[0]?.found;
+      }).toBe(true);
+      await client.query("UPDATE agents SET name = 'Updated Ada' WHERE owner = $1", [OWNER]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      await read?.catch(() => {});
+      throw error;
+    }
+    expect((await read).society.agents[0]?.displayName).toBe('Ada');
+    expect((await reader.loadRaw(56, SCENE)).society.agents[0]?.displayName).toBe('Updated Ada');
+  });
+
   it('flags REORG_RECOVERY while withdrawn chain visuals remain', async () => {
     await client.query(
       `INSERT INTO world_visual_events (scene_version, tick, origin, source_id, kind, payload)

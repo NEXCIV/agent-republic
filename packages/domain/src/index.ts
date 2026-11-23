@@ -6,6 +6,8 @@
 
 export { evmAddressSchema } from './address.js';
 export type { EvmAddress } from './address.js';
+export { COMMAND_MODES, COMMAND_STATUSES, commandModelPlanSchema, commandModelReplySchema, commandRecordSchema, commandRequestSchema, commandStepSchema } from './command-v1.js';
+export type { CommandMode, CommandStatus, CommandRecord, CommandRequest, CommandStep } from './command-v1.js';
 export {
   AGENT_ACTIONS,
   AGENT_LOCATIONS,
@@ -39,6 +41,7 @@ export {
   DISTRICT_01_EDGES,
   DISTRICT_01_WAYPOINTS,
   LANDMARK_IDS,
+  LANDMARK_WAYPOINTS,
   LANDMARK_ROUTES,
   landmarkSchema,
   projectBindingSchema,

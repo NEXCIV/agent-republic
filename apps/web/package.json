@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@agent-republic/agent-engine": "workspace:*",
     "@agent-republic/chain": "workspace:*",
     "@agent-republic/domain": "workspace:*",
     "@agent-republic/world-engine": "workspace:*",

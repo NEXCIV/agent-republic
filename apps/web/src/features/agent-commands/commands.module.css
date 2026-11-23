@@ -1,0 +1,168 @@
+.console {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: 32px;
+  align-items: start;
+  margin: 24px 0 40px;
+}
+
+.composer, .journal {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.composer {
+  background: var(--paper-raised);
+  border: 1px solid var(--rule-strong);
+  padding: 24px;
+}
+
+.console h2 {
+  margin: 16px 0 8px;
+  font-size: 30px;
+  line-height: 1.2;
+}
+
+.composer form {
+  margin-top: 24px;
+}
+
+.composer label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.composer textarea, .composer select {
+  width: 100%;
+  padding: 8px 12px;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--ink);
+  border-radius: 0;
+  font: inherit;
+}
+
+.composer textarea {
+  display: block;
+  resize: vertical;
+  min-height: 80px;
+}
+
+.examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 24px;
+}
+
+.console :focus-visible {
+  outline-color: var(--teal);
+}
+
+.composer button, .journal button {
+  min-height: 36px;
+}
+
+.journal h2 {
+  margin-top: 0;
+}
+
+.journal > p {
+  margin: 8px 0;
+}
+
+.status {
+  color: var(--ink-soft);
+  font: 12px/1.5 var(--font-mono-stack);
+}
+
+.entry {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px dashed var(--rule-strong);
+  background: var(--paper-raised);
+}
+
+.entry summary {
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.summaryText {
+  margin-right: 8px;
+  font-weight: 600;
+}
+
+.steps {
+  margin: 16px 0;
+  padding-left: 24px;
+}
+
+.steps li + li {
+  margin-top: 8px;
+}
+
+.steps p, .report p {
+  margin: 4px 0 0;
+  white-space: pre-line;
+}
+
+.route {
+  display: grid;
+  grid-template-columns: minmax(64px, 104px) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.route svg {
+  display: block;
+  width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--rule);
+}
+
+.route figcaption {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  font-size: 14px;
+}
+
+.route figcaption > span:last-child {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+
+.stillDot { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .movingDot { display: none; }
+  .stillDot { display: block; }
+}
+
+.current {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--teal);
+  font-size: 12px;
+}
+
+.report {
+  padding: 12px;
+  background: var(--paper-sunk);
+}
+
+.report h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+@media (max-width: 760px) {
+  .console {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .composer { padding: 16px; }
+}

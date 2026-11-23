@@ -9,6 +9,7 @@ import type { BindingPort } from './auth/binding.js';
 import type { IntentService } from './intents/intents.js';
 import type { WorldService } from './world/world-service.js';
 import type { AgentConsoleService } from './agents/agent-console.js';
+import type { CommandService } from './agents/commands.js';
 
 /**
  * E2-03 read-only API.
@@ -34,6 +35,7 @@ export type ApiDeps = {
   readonly world?: WorldService | null;
   /** null/undefined => agent console endpoints return NOT_CONFIGURED. */
   readonly agents?: AgentConsoleService | null;
+  readonly commands?: Pick<CommandService, 'list' | 'submit'>;
   /** No Web2 auth system exists yet; default resolver denies every request. */
   readonly session?: SessionResolver;
   readonly now?: () => Date;
@@ -72,6 +74,15 @@ export function buildApiServer(deps: ApiDeps): FastifyInstance {
   });
 
   app.setErrorHandler((error, request, reply) => {
+    if (typeof error === 'object' && error !== null && 'code' in error) {
+      if (error.code === 'FST_ERR_CTP_BODY_TOO_LARGE' || error.code === 'FST_ERR_CTP_INVALID_JSON_BODY') {
+        const oversized = error.code === 'FST_ERR_CTP_BODY_TOO_LARGE';
+        reply.status(oversized ? 413 : 400).send({ error: {
+          code: 'INVALID_BODY', message: oversized ? 'Request body is too large.' : 'Invalid JSON body.', requestId: request.id,
+        } });
+        return;
+      }
+    }
     if (error instanceof ApiError) {
       reply.status(error.statusCode).send({
         error: {
@@ -531,6 +542,21 @@ export function buildApiServer(deps: ApiDeps): FastifyInstance {
     const session = await requireSession(request);
     const agents = requireAgents();
     return agents.setPaused(session.appUserId, asBody(request.body));
+  });
+
+  const requireCommands = () => {
+    if (!deps.commands) throw new ApiError(503, 'NOT_CONFIGURED', 'Agent commands are unavailable.');
+    return deps.commands;
+  };
+  app.get('/api/v1/my-agent/commands', async (request, reply) => {
+    reply.header('cache-control', 'private, no-store');
+    const { appUserId } = await requireSession(request);
+    return { source: 'AI_SIMULATED', data: await requireCommands().list(appUserId) };
+  });
+  app.post('/api/v1/my-agent/commands', { bodyLimit: 4096 }, async (request, reply) => {
+    reply.header('cache-control', 'private, no-store');
+    const { appUserId } = await requireSession(request);
+    return { source: 'AI_SIMULATED', data: await requireCommands().submit(appUserId, request.body) };
   });
 
   app.get('/api/v1/world', async () => {

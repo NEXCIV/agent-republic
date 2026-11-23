@@ -116,9 +116,12 @@ export type AgentObservationV1 = {
   self: { owner: `0x${string}`; hasAgentId: boolean;
           registered: boolean; build: string; rep: string };
   approvedPublicMessages: WorldFrameV1['society']['publicMessages'];
+  publicContacts?: Array<{ agentId: string; displayName: string }>;
   chainRecentEventIds: string[];
 };
 ```
+
+个人指令从本帧社会摘要中读取其他活跃 Agent 的公开 ID 和名称，最多 30 项。为空时省略 `publicContacts`，已有 observation 可以继续读取。联系人仅用于寻址，接收方在执行时独立决定是否回应。
 
 AI 不应把世界图像的位置、演示动画当治理证据，也不应直接使用未确认的 mempool/pending transaction 结果。
 
