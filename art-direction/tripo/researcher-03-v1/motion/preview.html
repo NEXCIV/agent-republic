@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CIVRUM · 03 号研究员动作预览</title>
+<link rel="icon" href="data:,">
 <style>
   html,body { margin:0; height:100%; background:#c0c8ca; font:15px system-ui,sans-serif }
   canvas { display:block; width:100%; height:100% }
@@ -19,7 +20,14 @@
   import { createReview } from './preview.mjs';
   const button = document.querySelector('button');
   try {
-    const review = await createReview(document.querySelector('canvas'));
+    const character = new URLSearchParams(location.search).get('character') ?? 'researcher';
+    const canvas = document.querySelector('canvas');
+    if (character === 'builder') {
+      document.title = 'CIVRUM · 02 号建设工人动作预览';
+      canvas.setAttribute('aria-label','02 号建设工人从广场走到 Agent 中心台阶前');
+      document.querySelector('footer span').textContent = 'DEMO · 02 号建设工人';
+    }
+    const review = await createReview(canvas, character);
     const preference = matchMedia('(prefers-reduced-motion: reduce)');
     let running = !preference.matches;
     let time = 0;

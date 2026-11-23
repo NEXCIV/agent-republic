@@ -6,10 +6,12 @@ const clamp = THREE.MathUtils.clamp;
 const smooth = (t) => t*t*(3-2*t);
 const modelUrl = (path) => new URL(path, import.meta.url).href;
 
-export async function createReview(canvas) {
+export async function createReview(canvas, character = 'researcher') {
   const loader = new GLTFLoader();
+  const builder = character === 'builder';
+  const file = builder ? '../../builder-02-v1/motion/CIVRUM_Builder_02.glb' : './CIVRUM_Researcher_03.glb';
   const [agent, core] = await Promise.all([
-    loader.loadAsync(modelUrl('./CIVRUM_Researcher_03.glb')),
+    loader.loadAsync(modelUrl(file)),
     loader.loadAsync(modelUrl('../../agent-center-v3/benchmark/CIVRUM_Agent_Center_Street.glb')),
   ]);
   const renderer = new THREE.WebGLRenderer({canvas, antialias:true});
@@ -62,6 +64,33 @@ export async function createReview(canvas) {
     root.traverse(o=>{ if (o.isMesh) { o.castShadow=true; o.receiveShadow=true; } });
   }
   scene.add(actor,core.scene);
+  // The street sample uses a broad sun shadow. A soft contact patch under
+  // each boot makes the planted foot readable at a close camera distance.
+  const shadowCanvas = document.createElement('canvas');
+  shadowCanvas.width = shadowCanvas.height = 64;
+  const context = shadowCanvas.getContext('2d');
+  const gradient = context.createRadialGradient(32,32,3,32,32,32);
+  gradient.addColorStop(0,'rgba(42,34,27,0.80)');
+  gradient.addColorStop(.52,'rgba(59,47,36,0.42)');
+  gradient.addColorStop(1,'rgba(59,47,36,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0,0,64,64);
+  const shadowMap = new THREE.CanvasTexture(shadowCanvas);
+  shadowMap.colorSpace = THREE.SRGBColorSpace;
+  scene.updateMatrixWorld(true);
+  const contacts = [];
+  actor.traverse(bone => {
+    if (!bone.isBone || !bone.name.startsWith('Foot')) return;
+    const material = new THREE.MeshBasicMaterial({map:shadowMap,transparent:true,depthWrite:false});
+    const patch = new THREE.Mesh(new THREE.PlaneGeometry(.26,.39),material);
+    patch.rotation.order='YXZ';
+    patch.rotation.x=-Math.PI/2;
+    scene.add(patch);
+    contacts.push({bone,patch,restHeight:bone.getWorldPosition(new THREE.Vector3()).y,
+      restRotation:bone.getWorldQuaternion(new THREE.Quaternion()).invert()});
+  });
+  const footPosition = new THREE.Vector3(), footRotation = new THREE.Quaternion();
+  const forward = new THREE.Vector3();
   const mixer = new THREE.AnimationMixer(agent.scene);
   const actions = Object.fromEntries(agent.animations.map(clip => {
     const action = mixer.clipAction(clip);
@@ -70,7 +99,7 @@ export async function createReview(canvas) {
     return [clip.name,action];
   }));
   const walkPeriod = actions.Walk.getClip().duration;
-  const stride = agent.scene.getObjectByName('Researcher03').userData.walk_stride_m;
+  const stride = agent.scene.getObjectByName(builder ? 'Builder02' : 'Researcher03').userData.walk_stride_m;
   const speed = stride/walkPeriod;
   const ramp = .24;
   let end = 0;
@@ -121,6 +150,14 @@ export async function createReview(canvas) {
     actor.rotation.y=part.heading;
     mixer.update(0);
     scene.updateMatrixWorld(true);
+    for (const {bone,patch,restHeight,restRotation} of contacts) {
+      bone.getWorldPosition(footPosition);
+      bone.getWorldQuaternion(footRotation).multiply(restRotation);
+      forward.set(0,0,1).applyQuaternion(footRotation);
+      patch.position.set(footPosition.x+.022*forward.x,-.001,footPosition.z+.022*forward.z);
+      patch.rotation.y=Math.atan2(forward.x,forward.z);
+      patch.material.opacity=.68*(1-clamp((footPosition.y-restHeight)/.135,0,1));
+    }
     const finish = smooth(clamp((actor.position.x-3.3)/5.7,0,1));
     const angle=THREE.MathUtils.degToRad(30+122*finish);
     const distance=3.85+2.0*finish;

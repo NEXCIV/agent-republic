@@ -97,15 +97,17 @@ def identify(mesh, p):
     return regions
 
 
-def skeleton(scale):
-    data = bpy.data.armatures.new("Researcher · skeleton")
-    rig = bpy.data.objects.new("Researcher03", data)
+def skeleton(scale, name="Researcher03", map_joint=None):
+    data = bpy.data.armatures.new(name + " · skeleton")
+    rig = bpy.data.objects.new(name, data)
     bpy.context.collection.objects.link(rig)
     bpy.context.view_layer.objects.active = rig
     rig.select_set(True)
     bpy.ops.object.mode_set(mode='EDIT')
     def bone(name, start, end, parent=None):
         b = data.edit_bones.new(name)
+        if map_joint:
+            start, end = map_joint(start), map_joint(end)
         b.head, b.tail = Vector(start) * scale, Vector(end) * scale
         if parent:
             b.parent = data.edit_bones[parent]
@@ -319,7 +321,7 @@ def foot_target(ankle, t):
     return ankle + Vector((0,-forward,lift))
 
 
-def author_action(rig, scale, name, duration, direction=0):
+def author_action(rig, scale, name, duration, direction=0, *, arm_lower_degrees=20):
     bones=rig.data.bones
     pose=rig.pose.bones
     rest={b.name:b.matrix_local.to_quaternion() for b in bones}
@@ -362,7 +364,7 @@ def author_action(rig, scale, name, duration, direction=0):
             arm_phase=cos(tau*offset)
             clav=chest @ Quaternion(Y,radians(sign*.6*breath))
             orient("Clavicle"+side,clav)
-            arm=clav @ Quaternion(X,radians(12*gait*arm_phase+1)) @ Quaternion(Y,radians(20*sign))
+            arm=clav @ Quaternion(X,radians(12*gait*arm_phase+1)) @ Quaternion(Y,radians(arm_lower_degrees*sign))
             fore=arm @ Quaternion(X,radians(-9-3*gait*(1-arm_phase)))
             orient("UpperArm"+side,arm)
             orient("Forearm"+side,fore)
@@ -407,11 +409,19 @@ def main():
         raise ValueError("This rig's landmarks are calibrated to the original 03 GLB.")
     args.output.mkdir(parents=True,exist_ok=True)
     bpy.ops.wm.read_factory_settings(use_empty=True)
+    rig,scale=build_surface(args.source.resolve())
+    save_motion_asset(rig, scale, args.output.resolve()/"CIVRUM_Researcher_03")
+
+
+def save_motion_asset(rig, scale, dest, *, arm_lower_degrees=20, viewport_color='VERTEX'):
     scene=bpy.context.scene
     scene.render.fps=FPS
-    rig,scale=build_surface(args.source.resolve())
-    actions=[author_action(rig,scale,"Idle",90),author_action(rig,scale,"Walk",CYCLE),
-             author_action(rig,scale,"TurnLeft90",30,1),author_action(rig,scale,"TurnRight90",30,-1)]
+    actions = [
+        author_action(rig, scale, name, duration, turn, arm_lower_degrees=arm_lower_degrees)
+        for name, duration, turn in (
+            ("Idle", 90, 0), ("Walk", CYCLE, 0), ("TurnLeft90", 30, 1), ("TurnRight90", 30, -1)
+        )
+    ]
     rig.animation_data.action=actions[0]
     scene.frame_start=0
     scene.frame_end=90
@@ -426,11 +436,10 @@ def main():
             space.region_3d.view_distance=3.4
             space.region_3d.view_location=(0,0,.87)
             space.region_3d.view_rotation=Quaternion(X,pi/2)
-            space.shading.color_type='VERTEX'
+            space.shading.color_type=viewport_color
             space.overlay.show_overlays=False
     bpy.context.preferences.filepaths.save_version=0
     bpy.data.orphans_purge(do_recursive=True)
-    dest=args.output.resolve()/"CIVRUM_Researcher_03"
     bpy.ops.wm.save_as_mainfile(filepath=str(dest.with_suffix(".blend")),compress=True)
     bpy.ops.export_scene.gltf(filepath=str(dest.with_suffix(".glb")),export_format='GLB',
         export_animations=True,export_animation_mode='ACTIONS',export_frame_range=False,

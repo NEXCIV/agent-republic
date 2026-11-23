@@ -13,7 +13,7 @@ from rig_researcher import FPS, identify
 FRAMES = {"Idle": 90, "Walk": 36, "TurnLeft90": 30, "TurnRight90": 30}
 
 
-def inspect_rig():
+def inspect_rig(expected_triangles=22193):
     rig, = (o for o in bpy.context.scene.objects if o.type == "ARMATURE")
     mesh, = (o for o in bpy.context.scene.objects if o.type == "MESH" and o.find_armature() == rig)
     assert len(rig.data.bones) == 20
@@ -26,7 +26,7 @@ def inspect_rig():
         start, last = bpy.data.actions[name].frame_range
         assert abs(start) < .01 and abs(last - end) < .01, (name, start, last)
     mesh.data.calc_loop_triangles()
-    assert len(mesh.data.loop_triangles) == 22193
+    assert len(mesh.data.loop_triangles) == expected_triangles
     return rig, mesh
 
 
