@@ -1,0 +1,125 @@
+{
+  "blender": "5.3.0",
+  "backup_sha256": "feb85425fe241a240a8f07c55117fe45e211ac06c2a3c23c152c147fcd80f386",
+  "unchanged_road_objects": 172,
+  "matched_cameras": [
+    "CIVRUM_CAM_WORLD_OVERVIEW",
+    "CIVRUM_CAM_CENTRAL_PLAZA",
+    "CIVRUM_CAM_STREET_DETAIL"
+  ],
+  "validated_slots": 4,
+  "tested_bounds": "World bounds versus furniture, vegetation, construction, active buildings and street retrofit meshes; 0.46 m x 1.75 m clearance for each actor",
+  "actors": [
+    {
+      "name": "ACTOR_01_Citizen",
+      "activity": "Nexus welcome",
+      "anchor_m": [
+        -4.5,
+        -14.7,
+        0.20699
+      ]
+    },
+    {
+      "name": "ACTOR_02_Builder",
+      "activity": "Visitor entrance",
+      "anchor_m": [
+        98.0,
+        -69.0,
+        0.172
+      ]
+    },
+    {
+      "name": "ACTOR_03_Researcher",
+      "activity": "Agent services",
+      "anchor_m": [
+        -89.5,
+        64.0,
+        0.172
+      ]
+    },
+    {
+      "name": "ACTOR_04_Creator",
+      "activity": "Public gallery",
+      "anchor_m": [
+        7.0,
+        -12.0,
+        0.20701
+      ]
+    },
+    {
+      "name": "ACTOR_05_Citizen",
+      "activity": "Council portico",
+      "anchor_m": [
+        3.0,
+        82.0,
+        0.172
+      ]
+    },
+    {
+      "name": "ACTOR_06_Service",
+      "activity": "Registration queue",
+      "anchor_m": [
+        81.0,
+        12.8,
+        0.158
+      ]
+    },
+    {
+      "name": "ACTOR_07_Creator",
+      "activity": "Community forum",
+      "anchor_m": [
+        -92.0,
+        -71.2,
+        0.172
+      ]
+    },
+    {
+      "name": "ACTOR_08_Technician",
+      "activity": "Works yard",
+      "anchor_m": [
+        99.0,
+        -92.5,
+        0.172
+      ]
+    }
+  ],
+  "before": {
+    "all_visible_meshes": {
+      "mesh_instances": 834,
+      "unique_meshes": 98,
+      "drawn_triangles": 965881
+    },
+    "streetlights": {
+      "mesh_instances": 99,
+      "unique_meshes": 3,
+      "drawn_triangles": 362376
+    },
+    "benches": {
+      "mesh_instances": 14,
+      "unique_meshes": 2,
+      "drawn_triangles": 70560
+    }
+  },
+  "after": {
+    "all_visible_meshes": {
+      "mesh_instances": 905,
+      "unique_meshes": 113,
+      "drawn_triangles": 874464
+    },
+    "streetlights": {
+      "mesh_instances": 99,
+      "unique_meshes": 3,
+      "drawn_triangles": 73932
+    },
+    "benches": {
+      "mesh_instances": 14,
+      "unique_meshes": 2,
+      "drawn_triangles": 7840
+    }
+  },
+  "render_pixels": [
+    1920,
+    1080
+  ],
+  "samples": 96
+}

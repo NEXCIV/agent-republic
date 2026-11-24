@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "collection": "03_Hero_Landmarks",
+  "coordinates": "Blender world XYZ in metres, Z up, +Y north",
+  "anchor": "World horizontal bounding-box centre at the lowest mesh vertex; local base Z = 0",
+  "fit": "Rotate the imported entrance to entrance_world_xy, uniformly fit width across entrance, then centre bottom. Recheck height and overhang against bounds.",
+  "base_band": "XY bounds of vertices in the lowest 0.35 m; includes steps and plinth if present",
+  "landmarks": [
+    {
+      "name": "HERO_01_Governance_Hall",
+      "anchor_world_m": [
+        0.0,
+        95.0,
+        0.172
+      ],
+      "entrance_world_xy": [
+        0,
+        -1
+      ],
+      "yaw_deg_from_south_ccw": 0.0,
+      "width_across_entrance_m": 33,
+      "support_object": "CIVRUM_LOT_GOVERNANCE",
+      "clay_source": "CIVRUM original dome and portico blockout",
+      "source_front_blender_xy": [
+        0,
+        -1
+      ],
+      "source_sha256": null,
+      "aabb_world_m": [
+        [
+          -16.5,
+          85.5,
+          0.172
+        ],
+        [
+          16.5,
+          104.5,
+          13.852
+        ]
+      ],
+      "dimensions_world_xyz_m": [
+        33.0,
+        19.0,
+        13.68
+      ],
+      "base_band_world_xy_m": [
+        [
+          -16.5,
+          85.5
+        ],
+        [
+          16.5,
+          104.5
+        ]
+      ]
+    },
+    {
+      "name": "HERO_02_Agent_Center",
+      "anchor_world_m": [
+        -95.0,
+        65.0,
+        0.172
+      ],
+      "entrance_world_xy": [
+        1,
+        0
+      ],
+      "yaw_deg_from_south_ccw": 90.0,
+      "width_across_entrance_m": 7,
+      "support_object": "CIVRUM_LOT_RESEARCH",
+      "clay_source": "CIVRUM_Agent_Center_Street.glb",
+      "source_front_blender_xy": [
+        0,
+        1
+      ],
+      "source_sha256": "196feaf6dde0b580aecf8e4c62c70749d2aba8235ce201bcb1b6b8134bae1d6d",
+      "aabb_world_m": [
+        [
+          -97.53224,
+          61.5,
+          0.172
+        ],
+        [
+          -92.46776,
+          68.5,
+          6.91648
+        ]
+      ],
+      "dimensions_world_xyz_m": [
+        5.06448,
+        7.0,
+        6.74449
+      ],
+      "base_band_world_xy_m": [
+        [
+          -97.48779,
+          61.5
+        ],
+        [
+          -92.46776,
+          68.5
+        ]
+      ]
+    },
+    {
+      "name": "HERO_03_Citizen_Registration",
+      "anchor_world_m": [
+        80.0,
+        21.0,
+        0.158
+      ],
+      "entrance_world_xy": [
+        0,
+        -1
+      ],
+      "yaw_deg_from_south_ccw": 0.0,
+      "width_across_entrance_m": 13,
+      "support_object": "CIVRUM_PAVED_FORECOURT.001",
+      "clay_source": "citizens registration center 3d model.glb",
+      "source_front_blender_xy": [
+        0,
+        -1
+      ],
+      "source_sha256": "2fbed252f8550fbbd84165066f0dd1c2c29fe03018c5cb39a1b8ff8047917df9",
+      "aabb_world_m": [
+        [
+          73.5,
+          15.60186,
+          0.158
+        ],
+        [
+          86.5,
+          26.39814,
+          8.48385
+        ]
+      ],
+      "dimensions_world_xyz_m": [
+        13.0,
+        10.79629,
+        8.32584
+      ],
+      "base_band_world_xy_m": [
+        [
+          73.5,
+          15.78603
+        ],
+        [
+          86.5,
+          25.88373
+        ]
+      ]
+    },
+    {
+      "name": "HERO_04_Public_Construction",
+      "anchor_world_m": [
+        95.0,
+        -82.0,
+        0.172
+      ],
+      "entrance_world_xy": [
+        0,
+        1
+      ],
+      "yaw_deg_from_south_ccw": 180.0,
+      "width_across_entrance_m": 23,
+      "support_object": "CIVRUM_LOT_CONSTRUCTION",
+      "clay_source": "public construction center 3d model.glb",
+      "source_front_blender_xy": [
+        0,
+        -1
+      ],
+      "source_sha256": "5654df96a0b704ccdc1033d44ce39b94e31ca27cb0aad87f7596bd2dec14cf90",
+      "aabb_world_m": [
+        [
+          83.5,
+          -90.61236,
+          0.172
+        ],
+        [
+          106.5,
+          -73.38764,
+          15.08211
+        ]
+      ],
+      "dimensions_world_xyz_m": [
+        23.0,
+        17.22472,
+        14.91011
+      ],
+      "base_band_world_xy_m": [
+        [
+          84.32022,
+          -90.61236
+        ],
+        [
+          106.02809,
+          -73.38764
+        ]
+      ]
+    }
+  ]
+}
