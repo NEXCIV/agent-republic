@@ -2,7 +2,7 @@
 
 用 Blender 5.3 打开 [CIVRUM_World_300m_Lakeside.blend](CIVRUM_World_300m_Lakeside.blend)。随场景移动时，一并带上 [landmark-masters/buildings](../landmark-masters/buildings/) 和 [Hi3D](../../hi3d/) 各资产子目录中的 Blender 资产库，并保持相对位置。贴图内嵌在各自的 Blender 文件里。
 
-城市地块为 300 × 300 米，+Y 向北。湖位于北边界之外，湖面 Z = −1.34 米。滨水步道沿 Y ≈ 165 米贯通，两个栈桥和自然岸坡可独立编辑。场景用 18.5° 的暖色西斜阳照明，冷色天空补光。湖面纹理由颜色属性、噪声凹凸和反射节点生成。
+城市地块为 300 × 300 米，+Y 向北。湖位于北边界之外，湖面 Z = −1.34 米。滨水步道沿 Y ≈ 165 米贯通，两个栈桥和自然岸坡可独立编辑。西南侧 25° 的斜阳照亮临街立面，冷色天空为阴影补光。湖面纹理由颜色属性、噪声凹凸和反射节点生成。
 
 | 固定机位 | 渲染 |
 | --- | --- |
@@ -12,22 +12,32 @@
 | 西北湖畔摩天楼，检查首层入口和天际线 | [摩天楼](renders/CIVRUM_Lakeside_Tower.png) |
 | 南入口，观察两栋商业楼和盆栽 | [商业街](renders/CIVRUM_South_Commercial_Corner.png) |
 | 东南工地，观察塔吊和围挡 | [塔吊](renders/CIVRUM_Construction_Crane.png) |
+| 西侧水景街道，观察喷泉、行道树和塔间连廊 | [水景街道](renders/CIVRUM_West_Garden_Avenue.png) |
 
-渲染使用 Cycles，1920 × 1080，最高 36 采样并降噪。Blender 中可通过 `07 | Lakeside atmosphere` 调整岸线、湖面、步道、植被、灯光和机位。西北角摩天楼位于 `08 | Lakeside tower`，两栋新商业楼和盆栽位于 `09 | South commercial corner`，塔吊位于 `10 | Construction crane`。三个被替换地块的原建筑体块及外立面已隐藏。
+[同机位前后对照](renders/CIVRUM_Lakeside_Comparison.jpg) 左侧是上版湖畔城区，右侧是本版。两张图使用相同的相机位置、朝向和焦距。
+
+渲染使用 Cycles，1920 × 1080，最高 36 采样并降噪。`07 | Lakeside atmosphere` 汇集本版可编辑内容。集合 08–10 放置首批 Hi3D 楼、树和工地塔吊。集合 11–14 分别存放沿街建筑、水景和剧场、公共露台、静态车辆。56 个沿街地块的旧体块和外立面均保留在原集合中并隐藏。中央广场、四处地标、路网和八名原有角色沿用母版位置。
+
+东西主街用七栋 Hi3D 塔楼和七栋退台办公楼围合视野，西侧设空中连廊。中央辐射街区和南入口采用较低的商铺。西南社区的六层露天剧场面向中央舞台。东西两侧各有一条喷泉步道，东侧分成两个水池，为原有绿地留出空间。城区用咖啡亭、遮阳桌、花池和盆栽构成步行停留点。沿街车辆仅用于 Blender 场景比例展示。
 
 ## Hi3D 街区资产
 
 原始 GLB 分开归档。场景链接独立 Blender 资产库，沿用原纹理布局并简化网格。商业楼和塔吊的贴图为 4K，两棵盆栽为 2K。楼顶广告牌沿用源 GLB 的图案。
 
-| 资产目录 | 市内位置 | 高度 | 场景三角面 |
+| 资产目录 | 市内位置 | 实例数 | 共享源网格三角面 |
 | --- | --- | ---: | ---: |
-| [屋顶花园商业楼](../../hi3d/garden-roof-retail-v1/) | 南入口西侧 | 10.3 m | 396,036 |
-| [屋顶广告牌商业楼（原 Untitled）](../../hi3d/billboard-commercial-v1/) | 南入口东侧 | 18 m | 384,674 |
-| [绿叶盆栽](../../hi3d/green-planter-tree-v1/) | 西侧街角 | 3.45 m | 199,886 |
-| [秋叶盆栽](../../hi3d/autumn-planter-tree-v1/) | 东侧街角 | 3.65 m | 199,607 |
-| [塔式起重机](../../hi3d/tower-crane-v1/) | 东南施工围挡内 | 22 m | 425,482 |
+| [湖畔摩天楼](../../hi3d/lakeside-tower-v1/) | 东西两翼和北岸 | 7 | 1,967,990 |
+| [屋顶花园商业楼](../../hi3d/garden-roof-retail-v1/) | 中心支路、南入口和外街 | 29 | 396,036 |
+| [屋顶广告牌商业楼（原 Untitled）](../../hi3d/billboard-commercial-v1/) | 临街转角和北岸 | 13 | 384,674 |
+| [绿叶盆栽](../../hi3d/green-planter-tree-v1/) | 步道、社区院落和商业露台 | 80 | 199,886 |
+| [秋叶盆栽](../../hi3d/autumn-planter-tree-v1/) | 喷泉、街角和公共活动区 | 18 | 199,607 |
+| [塔式起重机](../../hi3d/tower-crane-v1/) | 东南施工围挡内 | 1 | 425,482 |
 
-已在 Blender 5.3 重新打开场景，对比道路、地标、沿街建筑和角色站位共 268 个对象的变换。三栋链接地标均可读取内嵌 8K 底色贴图。新版包含 1,264 个湖面四边形，南侧道路与既有主街道端点对齐。
+在 Blender 5.3 重新打开场景后，可用下面的命令检查全部楼位、道路占地、相对资产链接和内嵌贴图。建筑包围盒在水平面上的投影须彼此分离，并避开车道和模块化人行道。此处的实例数用于离线美术场景统计。
+
+```powershell
+& 'G:/blender/blender.exe' -b --factory-startup --disable-autoexec art-direction/world-upgrade-v1/lakeside-study/CIVRUM_World_300m_Lakeside.blend --python-exit-code 2 -P scripts/verify_civrum_lakeside.py
+```
 
 在仓库根目录用以下命令重建本样板。附加 `-- --draft` 时只生成临时的 960 × 540 校样。
 

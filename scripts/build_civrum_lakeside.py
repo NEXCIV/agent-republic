@@ -5,12 +5,23 @@ import math
 import random
 import sys
 import tempfile
+from itertools import pairwise
 from pathlib import Path
 
 import bpy
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from civrum_lakeside_blocks import (
+    avenue_trees,
+    facades,
+    garden_paving,
+    public_spaces,
+    replace_infill,
+    service_vehicles,
+    street_walls,
+    terraces,
+)
 from prepare_civrum_hi3d import ASSETS, HI3D
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,7 +144,7 @@ def band(group, name, low, high, surface):
 
 
 def interpolate(samples, x):
-    for (start, low), (end, high) in zip(samples, samples[1:]):
+    for (start, low), (end, high) in pairwise(samples):
         if start <= x <= end:
             ratio = (x - start) / (end - start)
             smooth = ratio * ratio * (3 - 2 * ratio)
@@ -205,7 +216,7 @@ def build_landscape(parent):
     seam = material("LAKE_Paving joints", "555044")
     drive = textured("LAKE_Connector asphalt", "343942", "42444A", .33, 5)
 
-    shore_x = sorted(set([-309, 313, -150, 150, *range(-305, 313, 4)]))
+    shore_x = sorted({-309, 313, -150, 150, *range(-305, 313, 4)})
     shore = [(x, interpolate(NEAR_BANK, x), interpolate(FAR_BANK, x)) for x in shore_x]
     make_water(water, shore)
     terrain_x = [-570, -400, *shore_x, 410, 570]
@@ -289,6 +300,22 @@ def build_landscape(parent):
             distance = radius * math.sqrt(rng.random())
             tree_at(anchor_x + math.cos(angle) * distance, anchor_y + math.sin(angle) * distance,
                     rng.uniform(.60, 1.25))
+    for side in (-1, 1):
+        for x,y,rx,ry in ((184,-102,18,33),(204,-35,21,28),(178,49,15,38),(188,109,19,13),
+                          (86,-188,49,11),(140,-197,21,12),(210,310,24,12)):
+            for _ in range(65):
+                a=rng.uniform(0,math.tau)
+                r=math.sqrt(rng.random())
+                px=side*(x+rx*r*math.cos(a))
+                py=y+ry*r*math.sin(a)
+                if py < interpolate(NEAR_BANK,px)-5 or py > interpolate(FAR_BANK,px)+5:
+                    tree_at(px,py,rng.uniform(.94,1.85))
+        box(ground,"Park perimeter lane",side*156.8,-5,-.016,5.6,314,.05,drive)
+        for y in (-126,0,126):
+            box(ground,"West and east street approach",side*152.1,y,-.016,5,7,.05,drive)
+        for y in range(-153,149,9):
+            if min(abs(y-v) for v in (-126,0,126))>5:
+                box(ground,"Park lane marking",side*156.8,y,.012,.10,2.65,.008,paving)
     for x in (-126, -101, -68, -33, 29, 61, 102, 129):
         bench = bpy.data.objects.new("Quay bench", bpy.data.objects["CIVRUM_PROP_BENCH_01"].data)
         promenade.objects.link(bench)
@@ -317,7 +344,7 @@ def tune_city():
     sweep.hide_render = True
     sweep.hide_viewport = True
     base = bpy.data.objects["CIVRUM_ENV_GROUND_MAIN"]
-    base.data.materials[0] = textured("LAKE_City gravel and stone", "8E8272", "A89985", .039, 4.2)
+    base.data.materials[0] = textured("LAKE_City gravel and stone", "6F716A", "AAA491", .105, 4.2)
     road = shader(bpy.data.materials["MAT_GRAPHITE_GRAY"])
     road.inputs["Base Color"].default_value = color("3B4146")
     glass = shader(bpy.data.materials["MAT_HARBOR_GLASS"])
@@ -326,11 +353,51 @@ def tune_city():
     milk = shader(bpy.data.materials["MAT_OPAL_GLASS"])
     milk.inputs["Emission Color"].default_value = color("FFC78B")
     milk.inputs["Emission Strength"].default_value = 1.5
+    for name, tint in (("MAT_LEAF_SAGE","54834A"), ("MAT_LEAF_TIP","85A058"), ("MAT_TURF","4C763E")):
+        shader(bpy.data.materials[name]).inputs["Base Color"].default_value = color(tint)
+    for name, tint, rough, metal, emit in (
+        ("Basalt","343943",.66,.12,0), ("Bronze","675440",.45,.54,0),
+        ("Brass","E4AD4F",.36,.61,.10), ("Light","FFD399",.32,.12,1.7),
+        ("Smoke_Glass","344C58",.20,.40,0), ("Jet","A5DAE9",.13,.08,.14),
+        ("Amber_Glass","B48456",.25,.27,.28), ("Sky_Glass","51616B",.23,.39,.06),
+        ("Planting","566F40",.87,0,0), ("Terracotta","BC6747",.74,0,0), ("Canvas","F4DDB8",.85,0,0),
+    ):
+        material("MAT_CIVIC_"+name,tint,rough,metal,emit)
+    textured("MAT_CIVIC_Paving","A79B89","C7B69A",.93,8)
+    # Stone joints are procedural in metres and follow the existing ground modules.
+    paving=material("MAT_CIVIC_Square_Pavers","938F86",.77)
+    tree=paving.node_tree
+    brick=tree.nodes.new("ShaderNodeTexBrick")
+    tree.links.new(tree.nodes.new("ShaderNodeTexCoord").outputs["Object"],brick.inputs["Vector"])
+    for name,value in (("Color1",color("A49D92")),("Color2",color("878985")),("Mortar",color("625E58")),
+                       ("Scale",1.0),("Mortar Size",.019),("Brick Width",1.8),("Row Height",.91)):
+        brick.inputs[name].default_value=value
+    tree.links.new(brick.outputs["Color"],shader(paving).inputs["Base Color"])
+    for layer in ("ENVIRONMENT","ROADS","PLAZA"):
+        for obj in bpy.data.collections[layer].objects:
+            if obj.type=="MESH":
+                for slot in obj.material_slots:
+                    treatments = ("MAT_CONCRETE_GRAY",) if layer=="ROADS" else ("MAT_CONCRETE_GRAY","MAT_WARM_WHITE")
+                    if slot.material and slot.material.name in treatments:
+                        slot.link="OBJECT"
+                        slot.material=paving
+    fountain = material("MAT_CIVIC_Fountain","319FBA",.19,.16,.22)
+    spray = shader(bpy.data.materials["MAT_CIVIC_Jet"])
+    spray.inputs["Transmission Weight"].default_value = .52
+    spray.inputs["IOR"].default_value = 1.333
+    tree = fountain.node_tree
+    surface = shader(fountain)
+    ripples = noise(tree,tree.nodes.new("ShaderNodeTexCoord").outputs["Object"],3.6,3)
+    bump = tree.nodes.new("ShaderNodeBump")
+    bump.inputs["Strength"].default_value = .22
+    bump.inputs["Distance"].default_value = .055
+    tree.links.new(ripples.outputs["Fac"],bump.inputs["Height"])
+    tree.links.new(bump.outputs[0],surface.inputs["Normal"])
 
 
 def light(scene, group):
-    elevation = math.radians(18.5)
-    azimuth = math.radians(169)
+    elevation = math.radians(25)
+    azimuth = math.radians(211)
     sunward = Vector((math.cos(elevation) * math.cos(azimuth),
                       math.cos(elevation) * math.sin(azimuth), math.sin(elevation)))
     world = bpy.data.worlds.new("Lakeside | low sun and blue skylight")
@@ -354,7 +421,7 @@ def light(scene, group):
     tree.links.new(sky_color, tint.inputs[1])
     tree.links.new(glow_color, tint.inputs[2])
     background = next(node for node in tree.nodes if node.type == "BACKGROUND")
-    background.inputs["Strength"].default_value = .76
+    background.inputs["Strength"].default_value = .92
     tree.links.new(tint.outputs[0], background.inputs["Color"])
     horizon = ramp(tree, horizon_distance.outputs[0], (0, color("DDC6B6")), (.26, color("668BAF")))
     haze = noise(tree, direction, 7, 3.5)
@@ -425,8 +492,8 @@ def build_library(source, destination, name, *, original=None, crane=False):
     if "Tower Crane" not in name and "Planter Tree" not in name:
         tower["entrance_axis"] = "-Y"
     asset = collection(scene.collection, name)
-    for original in list(tower.users_collection):
-        original.objects.unlink(tower)
+    for previous_group in list(tower.users_collection):
+        previous_group.objects.unlink(tower)
     asset.objects.link(tower)
     asset.asset_mark()
     bpy.ops.file.pack_all()
@@ -444,15 +511,6 @@ def instance_asset(group, library, asset, name, position, height):
     obj.scale = (height,) * 3
     group.objects.link(obj)
     return obj
-
-
-def replace_infill(asset, suffix):
-    placeholders = ("CIVRUM_PH_INFILL" + suffix, "CIVRUM_Streetfront_INFILL" + suffix)
-    for name in placeholders:
-        placeholder = bpy.data.objects[name]
-        placeholder.hide_render = True
-        placeholder.hide_viewport = True
-    asset["replaces"] = ", ".join(placeholders)
 
 
 def place_tower(parent):
@@ -511,7 +569,7 @@ def main():
     parser.add_argument("--draft", action="store_true")
     parser.add_argument("--prepare-tower", action="store_true", help="Rebuild the linked library from its archived GLB")
     parser.add_argument("--hi3d-imports", type=Path, help=argparse.SUPPRESS)
-    parser.add_argument("--views", nargs="+", choices=["overview", "lake", "street", "tower", "shops", "crane"],
+    parser.add_argument("--views", nargs="+", choices=["overview", "lake", "street", "tower", "shops", "crane", "avenue"],
                         help="Render only the selected cameras")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     if args.prepare_tower:
@@ -532,10 +590,20 @@ def main():
     light(scene, collection(parent, "05 | Lighting"))
     place_tower(parent)
     place_district_assets(parent)
+    blocks = collection(parent,"11 | Avenue buildings")
+    civic = collection(parent,"12 | Fountains and forum")
+    street_walls(blocks)
+    facades(blocks)
+    public_spaces(civic)
+    public_terraces = collection(parent,"13 | Street terraces")
+    avenue_trees(public_terraces)
+    terraces(public_terraces,blocks,civic)
+    garden_paving(civic)
+    service_vehicles(collection(parent,"14 | Street vehicles"))
     cameras = collection(parent, "06 | Study cameras")
     views = {
         "overview": ("CIVRUM_Lakeside_Overview", camera(cameras, "LAKE_CAM_01 | City overview",
-                                                       (32, -390, 315), (0, -1, 0), 38)),
+                                                       (23, -389, 307), (0, -13, 3), 39)),
         "lake": ("CIVRUM_Lakeside_Walk", camera(cameras, "LAKE_CAM_02 | Waterfront walk",
                                                (-82, 163.8, 1.92), (-104, 175.0, 2.08), 29)),
         "street": ("CIVRUM_Street_Golden_Hour", camera(cameras, "LAKE_CAM_03 | Ordinary street",
@@ -546,6 +614,8 @@ def main():
                                                           (-3.2, -92, 4.3), (.5, -50.2, 6.5), 23)),
         "crane": ("CIVRUM_Construction_Crane", camera(cameras, "LAKE_CAM_06 | Construction site",
                                                     (129, -129, 3.7), (96, -103, 11.5), 28)),
+        "avenue": ("CIVRUM_West_Garden_Avenue", camera(cameras, "LAKE_CAM_07 | Fountain avenue",
+                                                     (-73.2,-58.1,5.8),(-91,-15.5,8.0),27)),
     }
     scene.camera = views["overview"][1]
     scene.render.engine = "CYCLES"
