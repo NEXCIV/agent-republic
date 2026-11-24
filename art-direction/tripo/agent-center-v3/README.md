@@ -1,5 +1,13 @@
 # CIVRUM Agent 中心 · 街道近景三视图 v3
 
+## 网页街景
+
+网页版本取自本目录的 `agent center 3d model 1.glb`。[同机位对照](web-review/Agent_Center_Blender_Web.jpg)展示 Blender 母版与实际网页的正面、门厅。网页另有独立的[招牌原稿](web-review/agent-center-sign.png)。三档资源的体积、面数和浏览器测试见[性能记录](../../../docs/PERFORMANCE.md)。
+
+重建需要 Pillow 和 gltfpack 0.25。从仓库根目录执行 `python scripts/build_agent_center_web.py <gltfpack 可执行文件或 cli.js 路径>`，然后运行 `node scripts/audit-world-assets.mjs --write-manifest` 更新 GLB 摘要。构建脚本先核对源文件 SHA-256。网页模型随仓库交付，运行网页只需已有的 GLB。
+
+## 三视图
+
 | 文件 | 视角 | 分辨率 |
 | --- | --- | --- |
 | [正面](01-front.png) | 主入口、雨棚、机器人招牌、转角窗和玻璃圆塔 | 1536 × 1024 |

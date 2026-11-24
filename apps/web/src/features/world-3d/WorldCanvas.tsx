@@ -18,6 +18,8 @@ import { pickQualityTier } from './quality';
 import type { QualityTier } from './quality';
 import { buildBuildingLinks, detectWebGl } from './webgl';
 import { WorldPreview } from './WorldPreview';
+import type { StreetView } from './AgentCenterCamera';
+import type { DetailStatus } from './WorldScene';
 
 /**
  * E6-01 — client-only WebGL gate for the district view.
@@ -80,10 +82,12 @@ export function WorldCanvas({
   forceFallback = false,
   projectStage = null,
   initialFrame = null,
+  openAgentCenter = false,
 }: {
   forceFallback?: boolean;
   projectStage?: ProjectStage | null;
   initialFrame?: WorldFrameV1 | null;
+  openAgentCenter?: boolean;
 }) {
   // Forced text-only mode must be correct in the server-rendered HTML, before
   // any JavaScript runs; otherwise it is only a post-hydration switch.
@@ -98,6 +102,8 @@ export function WorldCanvas({
   const liveFrame = useWorldFrame(initialFrame, !forceFallback);
   const { pulse, complete } = useMilestonePulse(liveFrame, !forceFallback);
   const [selection, setSelection] = useState<WorldSelection | null>(null);
+  const [streetView, setStreetView] = useState<StreetView | null>(openAgentCenter ? 'facade' : null);
+  const [detailStatus, setDetailStatus] = useState<DetailStatus>('loading');
   const buildingLinks = useMemo(() => buildBuildingLinks(), []);
   const markers = useMemo(
     () => toAgentMarkers(liveFrame?.simulation.agents ?? []),
@@ -115,13 +121,14 @@ export function WorldCanvas({
   }, [selection, buildingLinks, markers]);
 
   useEffect(() => {
-    if (selection === null) return;
+    if (!selection && !streetView) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
+        setStreetView(null);
         setSelection(null);
         return;
       }
-      if (event.key !== 'Enter' || selection.type !== 'BUILDING') return;
+      if (streetView || event.key !== 'Enter' || selection?.type !== 'BUILDING') return;
       const target = event.target as HTMLElement | null;
       if (
         target !== null &&
@@ -137,7 +144,7 @@ export function WorldCanvas({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selection, buildingLinks, router]);
+  }, [selection, streetView, buildingLinks, router]);
 
   useEffect(() => {
     if (forceFallback) {
@@ -224,10 +231,29 @@ export function WorldCanvas({
               quality={quality}
               onLowPerformance={() => setQuality('low')}
               reducedMotion={reducedMotion}
+              streetView={streetView}
+              onDetailStatus={setDetailStatus}
             />
+            <div className="world-view-controls" role="group" aria-label="World camera">
+              <button type="button" onClick={() => {
+                setSelection(null);
+                setDetailStatus('loading');
+                setStreetView(streetView ? null : 'facade');
+              }}>{streetView ? 'Back to overview' : 'Agent Center street view'}</button>
+              {streetView && <button type="button"
+                onClick={() => setStreetView(streetView === 'facade' ? 'entrance' : 'facade')}>
+                {streetView === 'facade' ? 'View entrance' : 'Whole building'}
+              </button>}
+            </div>
           </SceneErrorBoundary>
         </div>
-        {selection === null ? (
+        {streetView ? (
+          <p className="hint world-pick-hint" role="status" data-detail={detailStatus}>
+            {detailStatus === 'loading' ? 'Loading facade detail…' : detailStatus === 'fallback'
+              ? 'Showing the overview model. Reopen street view to retry.'
+              : 'Drag to orbit. Scroll or pinch to zoom.'}
+          </p>
+        ) : selection === null ? (
           <p className="hint world-pick-hint">
             Click a building or agent for details. Keyboard users can reach the same routes through the district
             directory below.

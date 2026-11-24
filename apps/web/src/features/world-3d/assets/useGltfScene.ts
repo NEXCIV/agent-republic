@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import type { Group } from 'three';
 
 const cache = new Map<string, Promise<Group>>();
@@ -10,8 +11,11 @@ let loader: GLTFLoader | null = null;
 function load(url: string): Promise<Group> {
   let pending = cache.get(url);
   if (pending === undefined) {
-    if (loader === null) loader = new GLTFLoader();
-    pending = loader.loadAsync(url).then((gltf) => gltf.scene);
+    if (loader === null) loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+    pending = loader.loadAsync(url).then((gltf) => gltf.scene).catch((error: unknown) => {
+      cache.delete(url);
+      throw error;
+    });
     cache.set(url, pending);
   }
   return pending;
@@ -22,23 +26,27 @@ function load(url: string): Promise<Group> {
  * a failure; callers keep their procedural fallback in that case, so a missing
  * asset can never blank or block the world (docs/3D_RENDERING.md §9).
  */
-export function useGltfScene(url: string | null): Group | null {
-  const [scene, setScene] = useState<Group | null>(null);
+export function useGltfAsset(url: string | null) {
+  const [result, setResult] = useState<{ url: string; scene: Group | null } | null>(null);
 
   useEffect(() => {
     if (url === null) return;
     let alive = true;
     load(url)
       .then((loaded) => {
-        if (alive) setScene(loaded.clone(true));
+        if (alive) setResult({ url, scene: loaded.clone(true) });
       })
       .catch(() => {
-        // Keep the procedural fallback; do not retry per render.
+        if (alive) setResult({ url, scene: null });
       });
     return () => {
       alive = false;
     };
   }, [url]);
 
-  return scene;
+  return result?.url === url ? result : null;
+}
+
+export function useGltfScene(url: string | null): Group | null {
+  return useGltfAsset(url)?.scene ?? null;
 }

@@ -46,13 +46,12 @@ export default async function WorldPage({
 
   return (
     <>
-      <p className="eyebrow">Plan 01 · District 01 · Fixed orthographic view</p>
+      <p className="eyebrow">Plan 01 · District 01</p>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-end', gap: 24 }}>
         <div>
           <h1>District 01</h1>
           <p className="lede">
-            An orthographic model of the capital district. The camera is fixed; buildings and the plaza are placed
-            by the published scene manifest, not by hand-written page coordinates.
+            Explore the capital district from above or step down to the Agent Center entrance.
           </p>
         </div>
         <Link className="button" href={no3d ? '/world' : '/world?no3d=1'}>
@@ -66,7 +65,8 @@ export default async function WorldPage({
         <span>District 01 / live model</span>
         <span>{stageLabel}</span>
       </div>
-      <WorldCanvas forceFallback={no3d} projectStage={stageView.stage} initialFrame={worldFrame} />
+      <WorldCanvas forceFallback={no3d} projectStage={stageView.stage} initialFrame={worldFrame}
+        openAgentCenter={params.view === 'agent-center'} />
       <div className="plate-legend" style={{ marginTop: 10 }}>
         <span>
           <i className="swatch swatch--project" /> Public works

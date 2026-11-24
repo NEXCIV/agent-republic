@@ -1,8 +1,8 @@
 {
   "schemaVersion": "1",
   "sceneVersion": "district-01@1",
-  "license": "original-work",
-  "author": "AGENT REPUBLIC team (procedural bpy scripts in tools/blender/)",
+  "license": "See /assets/LICENSES.md and per-file entries",
+  "author": "AGENT REPUBLIC team",
   "assets": [
     {
       "file": "agent-citizen.glb",
@@ -28,9 +28,40 @@
     {
       "file": "core.glb",
       "license": "original-work",
+      "usage": "legacy",
       "note": "Agent Core with smoked glazing, gold mullions and an amber crystal",
       "bytes": 307008,
       "sha256": "3e2321d11edabcf4ac02521b33e38b0ec232e94f3aefc58464a9690eed59014c"
+    },
+    {
+      "file": "agent-center-overview.glb",
+      "author": "NEXCIV",
+      "license": "project-supplied; see /assets/LICENSES.md",
+      "source": "agent-center-v3/agent center 3d model 1.glb",
+      "usage": "overview",
+      "note": "NEXCIV project asset generated with Tripo. 768px atlas and a separate enamel nameplate.",
+      "bytes": 314460,
+      "sha256": "573896d98b79d02e4a69a01b34e105bcea767e1139e815d7fe31ac4e38470dbf"
+    },
+    {
+      "file": "agent-center-mobile.glb",
+      "author": "NEXCIV",
+      "license": "project-supplied; see /assets/LICENSES.md",
+      "source": "agent-center-v3/agent center 3d model 1.glb",
+      "usage": "on-demand",
+      "note": "Agent Center street view for the low quality tier. 2048px atlas.",
+      "bytes": 1567604,
+      "sha256": "f148127099449898bb75d7c0f8fa3cdb57bf9ba8833edc809dd5cce644845581"
+    },
+    {
+      "file": "agent-center-detail.glb",
+      "author": "NEXCIV",
+      "license": "project-supplied; see /assets/LICENSES.md",
+      "source": "agent-center-v3/agent center 3d model 1.glb",
+      "usage": "on-demand",
+      "note": "Agent Center street view for the high quality tier. 4096px atlas.",
+      "bytes": 4319344,
+      "sha256": "8ea7dc1f9562e43db33cfd4be54d3d632e0c6909669305e2c24470f173f158d4"
     },
     {
       "file": "project.glb",

@@ -10,7 +10,8 @@ import type { ProjectStage } from '@agent-republic/world-engine';
 import { AgentCrowd } from './agents/AgentCrowd';
 import { DistrictEnvironment } from './assets/DistrictEnvironment';
 import { toAgentMarkers } from './agents/toAgentMarkers';
-import { useGltfScene } from './assets/useGltfScene';
+import { useGltfAsset, useGltfScene } from './assets/useGltfScene';
+import { AgentCenterCamera, type StreetView } from './AgentCenterCamera';
 import { LANDMARK_BUILDINGS } from './buildings';
 import { PALETTE } from './buildings/palette';
 import { MilestonePulse } from './effects/MilestonePulse';
@@ -21,6 +22,8 @@ import entranceView from './entrance-view.json';
 const noop = () => {};
 const { x, y, z } = entranceView.offset;
 const CAMERA_OFFSET: [number, number, number] = [x, y, z];
+const core = DISTRICT_01.landmarks.find((building) => building.id === 'CORE')!;
+export type DetailStatus = 'loading' | 'ready' | 'fallback';
 
 /**
  * E6-01/E6-02 — District 01 scene.
@@ -242,12 +245,54 @@ function ContactShadow({
   );
 }
 
+function FacadeLight({ model, highQuality }: { model: THREE.Group | null; highQuality: boolean }) {
+  const renderer = useThree((state) => state.gl);
+  const invalidate = useThree((state) => state.invalidate);
+  const target = useMemo(() => new THREE.Object3D(), []);
+  target.position.set(0, 2, 0);
+  useEffect(() => {
+    if (!model || !highQuality) return;
+    // The building and sun are static. Refresh the shadow map only on a model swap.
+    const shadows = renderer.shadowMap;
+    const { enabled, autoUpdate } = shadows;
+    shadows.enabled = true;
+    shadows.autoUpdate = false;
+    model.traverse((object) => {
+      if (object instanceof THREE.Mesh) object.castShadow = object.receiveShadow = true;
+    });
+    shadows.needsUpdate = true;
+    invalidate();
+    return () => {
+      model.traverse((object) => {
+        if (object instanceof THREE.Mesh) object.castShadow = object.receiveShadow = false;
+      });
+      shadows.enabled = enabled;
+      shadows.autoUpdate = autoUpdate;
+      invalidate();
+    };
+  }, [model, highQuality, renderer, invalidate]);
+  return (
+    <>
+      <primitive object={target} />
+      <directionalLight target={target} position={[7, 12, 5]} intensity={1.65} color="#fff2df"
+        castShadow={highQuality} shadow-mapSize-width={1024} shadow-mapSize-height={1024}
+        shadow-camera-left={-5.5} shadow-camera-right={5.5} shadow-camera-bottom={-5.5}
+        shadow-camera-top={5.5} shadow-camera-near={0.5} shadow-camera-far={28}
+        shadow-normalBias={0.012} shadow-bias={-0.0002} />
+      {highQuality && <mesh receiveShadow position={[0, 0.015, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[14, 14]} />
+        <shadowMaterial transparent opacity={0.27} depthWrite={false} />
+      </mesh>}
+    </>
+  );
+}
+
 /** The four standalone landmarks each have a GLB; the plaza lives in the island GLB. */
 const LANDMARK_MODEL_URLS: Partial<Record<LandmarkId, string>> = {
   COUNCIL: '/world/district-01/v1/council.glb',
   IDENTITY: '/world/district-01/v1/identity.glb',
   PROJECT: '/world/district-01/v1/project.glb',
-  CORE: '/world/district-01/v1/core.glb',
+  CORE: '/world/district-01/v1/agent-center-overview.glb',
 };
 
 const PROJECT_STAGE_KEYS: Record<ProjectStage, string> = {
@@ -286,16 +331,29 @@ function LandmarkModel({
   selected,
   renderedInEnvironment,
   onSelect,
+  streetQuality,
+  onDetailStatus,
 }: {
   landmark: Landmark;
   stage: ProjectStage | null;
   selected: boolean;
   renderedInEnvironment: boolean;
   onSelect?: (id: LandmarkId) => void;
+  streetQuality?: QualityTier;
+  onDetailStatus?: (status: DetailStatus) => void;
 }) {
   const Model = LANDMARK_BUILDINGS[landmark.id];
   const [x, y, z] = landmark.position;
-  const glb = useGltfScene(LANDMARK_MODEL_URLS[landmark.id] ?? null);
+  const overview = useGltfScene(LANDMARK_MODEL_URLS[landmark.id] ?? null);
+  const textureLimit = useThree((state) => state.gl.capabilities.maxTextureSize);
+  const detailUrl = streetQuality && textureLimit >= 2048
+    ? '/world/district-01/v1/agent-center-' + (streetQuality === 'high' && textureLimit >= 4096 ? 'detail' : 'mobile') + '.glb'
+    : null;
+  const detail = useGltfAsset(detailUrl);
+  const glb = detail?.scene ?? overview;
+  useEffect(() => {
+    if (streetQuality) onDetailStatus?.(!detailUrl ? 'fallback' : !detail ? 'loading' : detail.scene ? 'ready' : 'fallback');
+  }, [streetQuality, detailUrl, detail, onDetailStatus]);
 
   return (
     <group
@@ -311,6 +369,7 @@ function LandmarkModel({
         <LandmarkGlb scene={glb} landmark={landmark} stage={stage} />
       ))}
       {selected ? <SelectionOutline landmark={landmark} /> : null}
+      {streetQuality && <FacadeLight model={glb} highQuality={streetQuality === 'high'} />}
     </group>
   );
 }
@@ -337,6 +396,8 @@ function Ground({ onClear }: { onClear?: () => void }) {
 }
 
 export type WorldSceneProps = {
+  streetView?: StreetView | null;
+  onDetailStatus?: (status: DetailStatus) => void;
   /** Called when the GPU drops the WebGL context; the page falls back to HTML. */
   onContextLost?: () => void;
   /** Confirmed construction stage for project #1; null means no confirmed data. */
@@ -361,6 +422,8 @@ export type WorldSceneProps = {
 };
 
 export default function WorldScene({
+  streetView = null,
+  onDetailStatus,
   onContextLost,
   projectStage = null,
   agents = [],
@@ -401,7 +464,7 @@ export default function WorldScene({
       dpr={quality === 'low' ? 1 : [1, 2]}
       gl={{ antialias: quality === 'high', powerPreference: 'high-performance' }}
       camera={{ position: CAMERA_OFFSET, zoom: 18, near: 0.1, far: 200 }}
-      onPointerMissed={() => onClearSelection?.()}
+      onPointerMissed={streetView ? undefined : onClearSelection}
       onCreated={({ gl }) => {
         gl.domElement.addEventListener(
           'webglcontextlost',
@@ -414,18 +477,20 @@ export default function WorldScene({
       }}
     >
       <StudioEnvironment />
-      <hemisphereLight args={['#d8eeff', '#b8aa91', 1.15]} />
-      <directionalLight position={[-16, 32, 23]} intensity={2.1} color="#fff1d9" />
+      <hemisphereLight args={['#d8eeff', '#b8aa91', streetView ? 0.95 : 1.15]} />
+      {!streetView && <directionalLight position={[-16, 32, 23]} intensity={2.1} color="#fff1d9" />}
       <directionalLight position={[21, 14, -16]} intensity={0.48} color="#c7e7ff" />
-      <CameraRig focus={focus} reducedMotion={reducedMotion} />
+      {streetView
+        ? <AgentCenterCamera view={streetView} position={core.position} />
+        : <CameraRig focus={focus} reducedMotion={reducedMotion} />}
       <FrameBudget enabled={quality === 'high'} onSlow={onLowPerformance} />
-      {plaza === undefined && <Ground onClear={onClearSelection} />}
+      {plaza === undefined && <Ground onClear={streetView ? undefined : onClearSelection} />}
       {environment && (
         <DistrictEnvironment
           scene={environment}
           plaza={plaza}
-          onClear={onClearSelection}
-          onSelectPlaza={() => onSelectBuilding?.('PLAZA')}
+          onClear={streetView ? undefined : onClearSelection}
+          onSelectPlaza={() => { if (!streetView) onSelectBuilding?.('PLAZA'); }}
           reducedMotion={reducedMotion}
         />
       )}
@@ -440,15 +505,17 @@ export default function WorldScene({
           key={landmark.id}
           landmark={landmark}
           stage={projectStage}
-          selected={selectedBuildingId === landmark.id}
+          selected={!streetView && selectedBuildingId === landmark.id}
+          streetQuality={streetView && landmark.id === 'CORE' ? quality : undefined}
+          onDetailStatus={onDetailStatus}
           renderedInEnvironment={plaza !== undefined && landmark.id === 'PLAZA'}
-          onSelect={onSelectBuilding}
+          onSelect={streetView ? undefined : onSelectBuilding}
         />
       ))}
       <AgentCrowd
         markers={markers}
         selectedId={selectedAgentId}
-        onSelect={onSelectAgent}
+        onSelect={streetView ? undefined : onSelectAgent}
       />
       {milestoneLandmark !== undefined && milestoneKey !== null ? (
         <MilestonePulse

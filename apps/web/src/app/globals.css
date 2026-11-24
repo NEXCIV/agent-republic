@@ -1206,6 +1206,21 @@ label {
   display: block;
 }
 
+.world-view-controls {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  max-width: calc(100% - 24px);
+  gap: 4px;
+}
+
+.world-view-controls button {
+  min-height: 44px;
+  letter-spacing: 0.02em;
+}
+
 .world-stage--message {
   display: flex;
   align-items: center;
