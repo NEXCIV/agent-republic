@@ -8,12 +8,18 @@ import tempfile
 from pathlib import Path
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "art-direction/world-upgrade-v1"
 MASTER = PROJECT / "landmark-masters/CIVRUM_World_300m_Master.blend"
 OUTPUT = PROJECT / "lakeside-study"
+TOWER_DIR = ROOT / "art-direction/hi3d/lakeside-tower-v1"
+TOWER_SOURCE = TOWER_DIR / "Hi3D_现代豪华摩天大楼3D模型_allparts_20261125_000239.glb"
+TOWER_LIBRARY = TOWER_DIR / "CIVRUM_Lakeside_Tower.blend"
+TOWER_COLLECTION = "CIVRUM | Lakeside Tower"
+TOWER_PLACEMENT = (-83, 145.2, .185)
+TOWER_HEIGHT = 37
 
 
 def color(hex_code):
@@ -391,10 +397,75 @@ def camera(group, name, location, target, lens):
     return obj
 
 
+def build_tower_library():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    scene = bpy.context.scene
+    bpy.ops.import_scene.gltf(filepath=str(TOWER_SOURCE))
+    tower, = [obj for obj in scene.objects if obj.type == "MESH"]
+    corners = [tower.matrix_world @ Vector(corner) for corner in tower.bound_box]
+    low = Vector([min(point[axis] for point in corners) for axis in range(3)])
+    high = Vector([max(point[axis] for point in corners) for axis in range(3)])
+    foot = (low + high) / 2
+    foot.z = low.z
+    height = high.z - low.z
+    tower.data.transform(Matrix.Scale(1 / height, 4) @ Matrix.Translation(-foot) @ tower.matrix_world)
+    tower.parent = None
+    tower.matrix_world = Matrix.Identity(4)
+    tower.name = "CIVRUM_HI3D_LAKESIDE_TOWER"
+    tower["source_glb"] = TOWER_SOURCE.name
+    tower["entrance_axis"] = "-Y"
+    asset = collection(scene.collection, TOWER_COLLECTION)
+    for original in list(tower.users_collection):
+        original.objects.unlink(tower)
+    asset.objects.link(tower)
+    asset.asset_mark()
+    bpy.ops.file.pack_all()
+    bpy.context.preferences.filepaths.save_version = 0
+    bpy.ops.wm.save_as_mainfile(filepath=str(TOWER_LIBRARY), compress=True)
+
+
+def place_tower(parent):
+    group = collection(parent, "08 | Lakeside tower")
+    with bpy.data.libraries.load(str(TOWER_LIBRARY), link=True, relative=True) as (_, linked):
+        linked.collections = [TOWER_COLLECTION]
+    tower = bpy.data.objects.new("CIVRUM_LAKESIDE_TOWER", None)
+    tower.instance_type = "COLLECTION"
+    tower.instance_collection = linked.collections[0]
+    tower.location = TOWER_PLACEMENT
+    tower.scale = (TOWER_HEIGHT,) * 3
+    group.objects.link(tower)
+
+    # The old lot includes both a structural block and a separate facade.
+    placeholders = ("CIVRUM_PH_INFILL.025", "CIVRUM_Streetfront_INFILL.025")
+    for name in placeholders:
+        placeholder = bpy.data.objects[name]
+        placeholder.hide_render = True
+        placeholder.hide_viewport = True
+    tower["replaces"] = ", ".join(placeholders)
+
+    x, y, top = TOWER_PLACEMENT
+    paving = textured("LAKE_Tower foundation stone", "706C63", "9E9184", .54, 4)
+    # The existing 300 m ground ends midway under the tower's round base.
+    # A shallow foundation bridges the ground seam and aligns with the footway.
+    ring = [(11.48 * math.cos(i * math.tau / 64), 11.52 * math.sin(i * math.tau / 64))
+            for i in range(64)]
+    corners = [(px, py, z) for z in (-.12, top) for px, py in ring]
+    faces = [tuple(reversed(range(64))), tuple(range(64, 128))]
+    faces.extend((i, (i + 1) % 64, 64 + (i + 1) % 64, 64 + i) for i in range(64))
+    foundation = mesh(group, "Tower foundation", corners, faces, paving)
+    foundation.location = (x, y, 0)
+    box(group, "Tower entrance footway", x, 133.0, .04, 3.9, 1.50, .28, paving)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--draft", action="store_true")
+    parser.add_argument("--prepare-tower", action="store_true", help="Rebuild the linked library from its archived GLB")
+    parser.add_argument("--views", nargs="+", choices=["overview", "lake", "street", "tower"],
+                        help="Render only the selected cameras")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
+    if args.prepare_tower:
+        build_tower_library()
     bpy.ops.wm.open_mainfile(filepath=str(MASTER))
     scene = bpy.context.scene
     scene.name = "CIVRUM | Lakeside at golden hour"
@@ -402,16 +473,19 @@ def main():
     build_landscape(parent)
     tune_city()
     light(scene, collection(parent, "05 | Lighting"))
+    place_tower(parent)
     cameras = collection(parent, "06 | Study cameras")
     views = {
-        "CIVRUM_Lakeside_Overview": camera(cameras, "LAKE_CAM_01 | City overview",
-                                          (32, -390, 315), (0, -1, 0), 38),
-        "CIVRUM_Lakeside_Walk": camera(cameras, "LAKE_CAM_02 | Waterfront walk",
-                                      (-82, 163.8, 1.92), (-104, 175.0, 2.08), 29),
-        "CIVRUM_Street_Golden_Hour": camera(cameras, "LAKE_CAM_03 | Ordinary street",
-                                           (-61.1, -107.0, 1.90), (-66.8, -53.0, 2.85), 29),
+        "overview": ("CIVRUM_Lakeside_Overview", camera(cameras, "LAKE_CAM_01 | City overview",
+                                                       (32, -390, 315), (0, -1, 0), 38)),
+        "lake": ("CIVRUM_Lakeside_Walk", camera(cameras, "LAKE_CAM_02 | Waterfront walk",
+                                               (-82, 163.8, 1.92), (-104, 175.0, 2.08), 29)),
+        "street": ("CIVRUM_Street_Golden_Hour", camera(cameras, "LAKE_CAM_03 | Ordinary street",
+                                                      (-61.1, -107.0, 1.90), (-66.8, -53.0, 2.85), 29)),
+        "tower": ("CIVRUM_Lakeside_Tower", camera(cameras, "LAKE_CAM_04 | Lakeside tower",
+                                                 (-116, 110, 3.4), (-83, 145.2, 16.5), 26)),
     }
-    scene.camera = next(iter(views.values()))
+    scene.camera = views["overview"][1]
     scene.render.engine = "CYCLES"
     scene.cycles.samples = 10 if args.draft else 36
     scene.cycles.use_denoising = True
@@ -431,7 +505,8 @@ def main():
                 if area.type == "VIEW_3D":
                     area.spaces.active.region_3d.view_perspective = "CAMERA"
         bpy.ops.wm.save_as_mainfile(filepath=str(OUTPUT / "CIVRUM_World_300m_Lakeside.blend"), relative_remap=True)
-    for name, cam in views.items():
+    for view in args.views or views:
+        name, cam = views[view]
         scene.camera = cam
         scene.render.filepath = str(output / (name + ".png"))
         bpy.ops.render.render(write_still=True)
