@@ -53,7 +53,7 @@ def replace_infill(asset, suffix):
     asset["replaces"] = ", ".join(names)
 
 
-def make_office(floors):
+def make_office(floors, crown):
     """A glazed office with a stepped crown, a recessed lobby and lit window bays."""
     g = Geometry()
     g.box(0, 0, 0, 14.8, 18, 0.18, STONE, 0.5)
@@ -73,7 +73,7 @@ def make_office(floors):
                     axis = k * (w if is_front else d) / 5.4
                     x, y = (axis, side * d / 2) if is_front else (side * w / 2, axis)
                     g.box(x, y, z + 0.43, 0.13, 0.13, 2.57, METAL)
-                    pattern = (level * 5 + k * 3 + side + is_front) % 11
+                    pattern = (level * 5 + k * 3 + side + is_front + crown * 3) % 11
                     if pattern not in (0, 3):
                         tint = AMBER if pattern in (1, 4, 7, 8) else COOL
                         if is_front:
@@ -84,9 +84,41 @@ def make_office(floors):
             g.box(0, 0, z + 2.84, w + 0.35, d + 0.35, 0.16, GOLD, 0.5)
     roof = 4 + floors * 3
     g.box(0, 0, roof, 10.9, 13.2, 0.28, BASALT, 0.5)
-    g.box(0, 0, roof + 0.28, 8.8, 10.8, 0.16, LEAF, 0.3)
-    g.box(0, 2, roof + 0.44, 4.1, 4.3, 1.45, METAL, 0.3, GOLD)
-    return g.mesh(f"Civic office | {floors} floors", PALETTE)
+    roof += 0.28
+    for side in (-1, 1):
+        g.box(0, side * 6.33, roof, 10.68, 0.23, 0.63, BASALT, cap=GOLD)
+        g.box(side * 5.25, 0, roof, 0.24, 12.67, 0.63, BASALT, cap=GOLD)
+    g.box(0, 0, roof, 9.9, 12.1, 0.054, STONE, 0.29)
+    for x, y in ((-3.80, -3.28), (3.80, 2.9)):
+        g.box(x, y, roof + 0.055, 1.64, 4.5, 0.32, METAL, 0.17)
+        g.box(x, y, roof + 0.375, 1.27, 4.11, 0.095, LEAF, 0.13)
+    if crown == 0:
+        g.box(-0.75, 2.8, roof, 5.0, 5.4, 1.68, GLASS, 0.32)
+        g.box(-0.75, 2.8, roof + 1.68, 5.4, 5.9, 0.40, BASALT, 0.32, GOLD)
+        g.box(-1.4, 3.4, roof + 2.08, 2.7, 3.8, 0.61, METAL, 0.29, STONE)
+    elif crown == 1:
+        g.box(0, 1.1, roof, 5.92, 7.1, 1.02, METAL, 0.45)
+        g.loft(
+            rectangle(0, 1.1, 5.92, 7.1, 0.45),
+            rectangle(0, 1.1, 3.3, 4.73, 0.33),
+            roof + 1.02,
+            roof + 2.24,
+            GLASS,
+            GOLD,
+        )
+        for x in (-1.50, 0, 1.50):
+            g.box(x, 1.1, roof + 2.24, 0.08, 4.63, 0.08, BASALT)
+    else:
+        g.box(0, 1.3, roof, 8.7, 7.5, 1.2, BASALT, 0.33)
+        g.box(0, 1.3, roof + 1.2, 8.95, 7.8, 0.17, METAL, 0.33)
+        for x in (-2.6, 0, 2.6):
+            g.box(x, 1.3, roof + 1.37, 1.85, 5.8, 0.055, COOL, 0.09)
+            for y in (-0.3, 1.3, 2.9):
+                g.box(x, y, roof + 1.43, 1.76, 0.05, 0.025, METAL)
+    for y in (-3.9, -2.8):
+        g.box(1.9, y, roof + 0.06, 1.18, 0.77, 0.41, METAL, 0.10)
+        g.box(1.9, y, roof + 0.47, 0.92, 0.57, 0.03, BASALT, 0.10)
+    return g.mesh(f"Civic office | {floors} floors | crown {crown + 1}", PALETTE)
 
 
 def street_walls(group):
@@ -97,6 +129,7 @@ def street_walls(group):
     # Street-front widths follow each parcel. The height rhythm opens towards the lake and Nexus.
     round_heights = {7: 48, 20: 39, 23: 32, 34: 59, 50: 46, 53: 34}
     office_floors = {5: 9, 8: 7, 21: 11, 33: 9, 36: 14, 49: 8, 51: 11}
+    office_crowns = {5: 0, 8: 2, 21: 1, 33: 1, 36: 0, 49: 2, 51: 0}
     midrise = {2, 10, 15, 19, 24, 27, 30, 37, 43, 47, 52, 55}
     office_meshes = {}
     for slot in range(1, 56):
@@ -124,9 +157,10 @@ def street_walls(group):
             angle = 0 if y > 0 and abs(y) != 50 or y < 0 and abs(y) == 50 else 180
         if slot in office_floors:
             floors = office_floors[slot]
-            if floors not in office_meshes:
-                office_meshes[floors] = make_office(floors)
-            obj = place(group, "Civic setback office " + str(slot), office_meshes[floors], x, y, z, angle)
+            profile = (floors, office_crowns[slot])
+            if profile not in office_meshes:
+                office_meshes[profile] = make_office(*profile)
+            obj = place(group, "Civic setback office " + str(slot), office_meshes[profile], x, y, z, angle)
             obj.scale.y = 0.90
         elif slot in round_heights:
             obj = asset_instance(
