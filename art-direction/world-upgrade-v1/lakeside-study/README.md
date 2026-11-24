@@ -10,6 +10,8 @@
 
 公共建设中心的穹顶采用独立的玻璃三角面和金属杆件，屋顶平台补了铺面和成组花槽。塔吊沿施工场地转向，从全城机位看，吊臂与穹顶之间留出空隙。[建设区同机位局部对比](renders/CIVRUM_Public_Construction_Overview_Comparison.jpg) 的左右图均以 4K 渲染并裁切。
 
+入口的台阶、两侧梯梁和上下两道檐口收边使用独立网格。踏面水平，檐口沿原造型连续过渡。穹顶框条截面已收窄。[入口近景同机位对比](renders/CIVRUM_Public_Construction_Surface_Comparison.jpg)。
+
 | 固定机位 | 渲染 |
 | --- | --- |
 | 全城俯视，观察广场、北岸与街区长影 | [全城](renders/CIVRUM_Lakeside_Overview.png) |

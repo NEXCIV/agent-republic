@@ -3,7 +3,7 @@
 import math
 
 import bpy
-from build_civrum_world import Geometry, circle
+from build_civrum_world import Geometry, circle, rectangle
 from civrum_lakeside_blocks import BASALT, GOLD, LEAF, METAL, PALETTE, STONE, place
 from detail_civrum_world import rod
 from mathutils import Matrix
@@ -85,6 +85,112 @@ def finish_works_frontage(artwork):
     backing.thickness = 0.18
 
 
+def works_entrance_trim(material):
+    """Rebuild the main treads and canopy edge from their measured local profiles."""
+    body = bpy.data.objects["HERO_04_Public_Construction"]
+    group = body.users_collection[0]
+    limestone = material("MAT_Works honed limestone", "B2A08A", 0.71)
+    shadow = material("MAT_Works recessed joint", "69564A", 0.83)
+    palette = (*PALETTE, (limestone.name[4:],), (shadow.name[4:],))
+    stone, joint = len(PALETTE), len(PALETTE) + 1
+
+    stairs = Geometry()
+    # The flat treads cover the uneven import up to the existing door landing.
+    for front, top in ((8.21, 0.329), (7.68, 0.570), (7.115, 0.811), (6.535, 1.052)):
+        back = 5.38
+        stairs.box(0.02, (front + back) / 2, 0.018, 7.91, front - back, top - 0.018, stone, 0.025)
+        stairs.box(0.02, front - 0.090, top, 7.37, 0.058, 0.003, joint)
+    for x in (-4.035, 4.075):
+        footprint = rectangle(x, 7.055, 0.60, 3.32, 0.038)
+        # Close the side cheeks back into the entrance wall, following the whole pitch.
+        low = len(stairs.verts)
+        stairs.verts.extend((px, py, 0.013) for px, py in footprint)
+        stairs.verts.extend((px, py, 1.185 - (py - 5.395) * 0.233) for px, py in footprint)
+        size = len(footprint)
+        stairs.face(tuple(range(low + size - 1, low - 1, -1)), stone)
+        stairs.face(tuple(range(low + size, low + 2 * size)), stone)
+        for i in range(size):
+            a, b = low + i, low + (i + 1) % size
+            stairs.face((a, b, b + size, a + size), stone)
+    assembly = place(
+        group, "Public works | square treads and stringers", stairs.mesh("Works stair", palette), 0, 0, 0
+    )
+    assembly.parent = body
+    bevel = assembly.modifiers.new("Honed stair edges", "BEVEL")
+    bevel.width = 0.026
+    bevel.segments = 3
+    bevel.harden_normals = True
+
+    # Long continuous section with recessed bronze under the visible limestone edge.
+    sections = (
+        (-5.48, 7.31, 4.32),
+        (-4.73, 7.66, 4.30),
+        (-3.6, 7.92, 4.29),
+        (-2.3, 8.10, 4.28),
+        (-0.8, 8.29, 4.28),
+        (0.75, 8.43, 4.28),
+        (2.25, 8.52, 4.29),
+        (3.4, 8.55, 4.30),
+        (4.24, 8.41, 4.31),
+        (5.1, 8.10, 4.33),
+        (5.89, 7.69, 4.36),
+        (6.35, 7.26, 4.40),
+    )
+    profile = (
+        (-0.40, 0),
+        (-0.09, 0),
+        (0.002, 0.051),
+        (0.032, 0.100),
+        (0.033, 0.259),
+        (-0.009, 0.317),
+        (-0.40, 0.317),
+    )
+    eave = Geometry()
+    count = len(profile)
+
+    def add_coping(path, height):
+        start = len(eave.verts)
+        for x, y, z in path:
+            eave.verts.extend((x, y + dy, z + dz * height) for dy, dz in profile)
+        end = len(eave.verts)
+        for offset in range(start, end - count, count):
+            for i in range(count):
+                a, b = offset + i, offset + (i + 1) % count
+                eave.face((a, b, b + count, a + count), joint if i == 1 else stone)
+        eave.face(tuple(range(start + count - 1, start - 1, -1)), stone)
+        eave.face(tuple(range(end - count, end)), stone)
+
+    add_coping(sections, 1.0)
+    # Fit a continuous crown across the existing wave without covering the sign or emblem.
+    crest = (
+        (-5.53, 6.51, 6.535),
+        (-5.29, 6.94, 6.51),
+        (-4.76, 7.34, 6.386),
+        (-3.95, 7.64, 6.319),
+        (-3.08, 7.80, 6.298),
+        (-2.14, 7.94, 6.326),
+        (-1.37, 8.04, 6.405),
+        (-0.49, 8.13, 6.596),
+        (0.29, 8.21, 6.776),
+        (1.18, 8.29, 6.941),
+        (2.0, 8.34, 7.023),
+        (2.74, 8.38, 7.055),
+        (3.45, 8.38, 7.005),
+        (4.17, 8.30, 6.78),
+        (4.70, 8.12, 6.48),
+        (5.17, 7.79, 6.13),
+    )
+    add_coping(crest, 0.57)
+    lip = place(
+        group, "Public works | continuous entrance coping", eave.mesh("Works eave coping", palette), 0, 0, 0
+    )
+    lip.parent = body
+    for polygon in lip.data.polygons:
+        polygon.use_smooth = len(polygon.vertices) == 4
+    normals = lip.modifiers.new("Continuous stone highlights", "WEIGHTED_NORMAL")
+    normals.keep_sharp = True
+
+
 def works_roof(material):
     body = bpy.data.objects["HERO_04_Public_Construction"]
     group = body.users_collection[0]
@@ -143,7 +249,7 @@ def works_roof(material):
                 for u, v in zip(face, (*face[1:], face[0])):
                     joints.add(tuple(sorted((u, v))))
     for a, b in sorted(joints):
-        rod(frame, frame.verts[a], frame.verts[b], 0.105, METAL if a // sectors == b // sectors else GOLD)
+        rod(frame, frame.verts[a], frame.verts[b], 0.084, METAL if a // sectors == b // sectors else GOLD)
     frame.loft(circle(4.80, sectors, cx, cy), circle(4.76, sectors, cx, cy), 9.14, 9.43, BASALT)
     frame.band(circle(4.76, sectors, cx, cy), circle(4.55, sectors, cx, cy), 9.445, GOLD)
     frame.slab(circle(1.62, sectors, cx, cy), 13.14, 13.69, glass)

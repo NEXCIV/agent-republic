@@ -27,6 +27,7 @@ from civrum_lakeside_landmarks import (
     build_registry_library,
     finish_registry,
     finish_works_frontage,
+    works_entrance_trim,
     works_roof,
     worksite,
 )
@@ -914,6 +915,7 @@ def main():
     tune_city()
     finish_registry(REGISTRY_LIBRARY)
     finish_works_frontage(WORKS_SIGN)
+    works_entrance_trim(material)
     works_roof(material)
     light(scene, collection(parent, "05 | Lighting"))
     place_tower(parent)
