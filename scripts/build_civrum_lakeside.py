@@ -10,6 +10,9 @@ from pathlib import Path
 import bpy
 from mathutils import Matrix, Vector
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from prepare_civrum_hi3d import ASSETS, HI3D
+
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "art-direction/world-upgrade-v1"
 MASTER = PROJECT / "landmark-masters/CIVRUM_World_300m_Master.blend"
@@ -397,10 +400,10 @@ def camera(group, name, location, target, lens):
     return obj
 
 
-def build_tower_library():
+def build_library(source, destination, name, *, original=None, crane=False):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
-    bpy.ops.import_scene.gltf(filepath=str(TOWER_SOURCE))
+    bpy.ops.import_scene.gltf(filepath=str(source))
     tower, = [obj for obj in scene.objects if obj.type == "MESH"]
     corners = [tower.matrix_world @ Vector(corner) for corner in tower.bound_box]
     low = Vector([min(point[axis] for point in corners) for axis in range(3)])
@@ -408,40 +411,55 @@ def build_tower_library():
     foot = (low + high) / 2
     foot.z = low.z
     height = high.z - low.z
+    if crane:
+        # Measure the foundation, excluding the boom and long counterweight.
+        points = [tower.matrix_world @ v.co for v in tower.data.vertices]
+        bottom = [point for point in points if point.z <= low.z + .025 * height]
+        for axis in (0, 1):
+            foot[axis] = (min(point[axis] for point in bottom) + max(point[axis] for point in bottom)) / 2
     tower.data.transform(Matrix.Scale(1 / height, 4) @ Matrix.Translation(-foot) @ tower.matrix_world)
     tower.parent = None
     tower.matrix_world = Matrix.Identity(4)
-    tower.name = "CIVRUM_HI3D_LAKESIDE_TOWER"
-    tower["source_glb"] = TOWER_SOURCE.name
-    tower["entrance_axis"] = "-Y"
-    asset = collection(scene.collection, TOWER_COLLECTION)
+    tower.name = "HI3D | " + name.removeprefix("CIVRUM | ")
+    tower["source_glb"] = (original or source).name
+    if "Tower Crane" not in name and "Planter Tree" not in name:
+        tower["entrance_axis"] = "-Y"
+    asset = collection(scene.collection, name)
     for original in list(tower.users_collection):
         original.objects.unlink(tower)
     asset.objects.link(tower)
     asset.asset_mark()
     bpy.ops.file.pack_all()
     bpy.context.preferences.filepaths.save_version = 0
-    bpy.ops.wm.save_as_mainfile(filepath=str(TOWER_LIBRARY), compress=True)
+    bpy.ops.wm.save_as_mainfile(filepath=str(destination), compress=True)
 
 
-def place_tower(parent):
-    group = collection(parent, "08 | Lakeside tower")
-    with bpy.data.libraries.load(str(TOWER_LIBRARY), link=True, relative=True) as (_, linked):
-        linked.collections = [TOWER_COLLECTION]
-    tower = bpy.data.objects.new("CIVRUM_LAKESIDE_TOWER", None)
-    tower.instance_type = "COLLECTION"
-    tower.instance_collection = linked.collections[0]
-    tower.location = TOWER_PLACEMENT
-    tower.scale = (TOWER_HEIGHT,) * 3
-    group.objects.link(tower)
+def instance_asset(group, library, asset, name, position, height):
+    with bpy.data.libraries.load(str(library), link=True, relative=True) as (_, linked):
+        linked.collections = [asset]
+    obj = bpy.data.objects.new(name, None)
+    obj.instance_type = "COLLECTION"
+    obj.instance_collection = linked.collections[0]
+    obj.location = position
+    obj.scale = (height,) * 3
+    group.objects.link(obj)
+    return obj
 
-    # The old lot includes both a structural block and a separate facade.
-    placeholders = ("CIVRUM_PH_INFILL.025", "CIVRUM_Streetfront_INFILL.025")
+
+def replace_infill(asset, suffix):
+    placeholders = ("CIVRUM_PH_INFILL" + suffix, "CIVRUM_Streetfront_INFILL" + suffix)
     for name in placeholders:
         placeholder = bpy.data.objects[name]
         placeholder.hide_render = True
         placeholder.hide_viewport = True
-    tower["replaces"] = ", ".join(placeholders)
+    asset["replaces"] = ", ".join(placeholders)
+
+
+def place_tower(parent):
+    group = collection(parent, "08 | Lakeside tower")
+    tower = instance_asset(group, TOWER_LIBRARY, TOWER_COLLECTION, "CIVRUM_LAKESIDE_TOWER",
+                           TOWER_PLACEMENT, TOWER_HEIGHT)
+    replace_infill(tower, ".025")
 
     x, y, top = TOWER_PLACEMENT
     paving = textured("LAKE_Tower foundation stone", "706C63", "9E9184", .54, 4)
@@ -457,15 +475,54 @@ def place_tower(parent):
     box(group, "Tower entrance footway", x, 133.0, .04, 3.9, 1.50, .28, paving)
 
 
+def library_location(key):
+    _, name, _, _ = ASSETS[key]
+    return HI3D / key / ("CIVRUM_" + name.replace(" ", "_") + ".blend"), "CIVRUM | " + name
+
+
+def place_district_assets(parent):
+    shops = collection(parent, "09 | South commercial corner")
+    works = collection(parent, "10 | Construction crane")
+    paving = textured("LAKE_Commercial entrance paving", "857A6C", "ADA08A", .85, 5)
+    placements = (
+        ("garden-roof-retail-v1", shops, (-18.6, -50.55, .177), 10.3, "", -55.8),
+        ("billboard-commercial-v1", shops, (18.5, -50.87, .177), 18, ".028", -56.20),
+        ("green-planter-tree-v1", shops, (-9.55, -52.55, .176), 3.45, None, None),
+        ("autumn-planter-tree-v1", shops, (9.75, -54.10, .176), 3.65, None, None),
+        ("tower-crane-v1", works, (101.1, -105.2, .172), 22, None, None),
+    )
+    for key, group, location, height, suffix, approach_y in placements:
+        library, asset = library_location(key)
+        obj = instance_asset(group, library, asset, "CIVRUM_HI3D_" + asset.split(" | ")[1].replace(" ", "_"),
+                             location, height)
+        if suffix is not None:
+            replace_infill(obj, suffix)
+            box(shops, "Commercial storefront footing", location[0], location[1], .034,
+                15.05, 11.95 if suffix == "" else 12.9, .286, paving)
+            end_y = -57.75
+            box(shops, "Storefront walk to sidewalk", location[0], (end_y + approach_y) / 2, .092,
+                6.4, approach_y - end_y, .174, paving)
+        elif group == shops:
+            box(shops, "Planter setting stone", location[0], location[1], .041, 1.83, 1.83, .27, paving)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--draft", action="store_true")
     parser.add_argument("--prepare-tower", action="store_true", help="Rebuild the linked library from its archived GLB")
-    parser.add_argument("--views", nargs="+", choices=["overview", "lake", "street", "tower"],
+    parser.add_argument("--hi3d-imports", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--views", nargs="+", choices=["overview", "lake", "street", "tower", "shops", "crane"],
                         help="Render only the selected cameras")
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
     if args.prepare_tower:
-        build_tower_library()
+        build_library(TOWER_SOURCE, TOWER_LIBRARY, TOWER_COLLECTION)
+    if args.hi3d_imports:
+        for source in sorted(args.hi3d_imports.glob("*-v1.glb")):
+            stamp, *_ = ASSETS[source.stem]
+            original, = (HI3D / source.stem).glob(f"*_{stamp}.glb")
+            library, name = library_location(source.stem)
+            build_library(source, library, name, original=original, crane=source.stem == "tower-crane-v1")
+        return
     bpy.ops.wm.open_mainfile(filepath=str(MASTER))
     scene = bpy.context.scene
     scene.name = "CIVRUM | Lakeside at golden hour"
@@ -474,6 +531,7 @@ def main():
     tune_city()
     light(scene, collection(parent, "05 | Lighting"))
     place_tower(parent)
+    place_district_assets(parent)
     cameras = collection(parent, "06 | Study cameras")
     views = {
         "overview": ("CIVRUM_Lakeside_Overview", camera(cameras, "LAKE_CAM_01 | City overview",
@@ -484,6 +542,10 @@ def main():
                                                       (-61.1, -107.0, 1.90), (-66.8, -53.0, 2.85), 29)),
         "tower": ("CIVRUM_Lakeside_Tower", camera(cameras, "LAKE_CAM_04 | Lakeside tower",
                                                  (-116, 110, 3.4), (-83, 145.2, 16.5), 26)),
+        "shops": ("CIVRUM_South_Commercial_Corner", camera(cameras, "LAKE_CAM_05 | Commercial corner",
+                                                          (-3.2, -92, 4.3), (.5, -50.2, 6.5), 23)),
+        "crane": ("CIVRUM_Construction_Crane", camera(cameras, "LAKE_CAM_06 | Construction site",
+                                                    (129, -129, 3.7), (96, -103, 11.5), 28)),
     }
     scene.camera = views["overview"][1]
     scene.render.engine = "CYCLES"
