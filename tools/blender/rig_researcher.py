@@ -309,19 +309,19 @@ def build_surface(source):
     return rig, scale
 
 
-def foot_target(ankle, t):
+def foot_target(ankle, t, stride=STRIDE):
     if t <= .5:
-        forward = STRIDE*(.25-t)
+        forward = stride*(.25-t)
         lift = 0.
     else:
         swing = 2*t-1
         # Same backward velocity on both sides of toe-off / heel strike.
-        forward = STRIDE*(-.25 + smooth(swing) - .5*swing)
+        forward = stride*(-.25 + smooth(swing) - .5*swing)
         lift = .065*sin(pi*swing)**2
     return ankle + Vector((0,-forward,lift))
 
 
-def author_action(rig, scale, name, duration, direction=0, *, arm_lower_degrees=20):
+def author_action(rig, scale, name, duration, direction=0, *, arm_lower_degrees=20, stride=STRIDE):
     bones=rig.data.bones
     pose=rig.pose.bones
     rest={b.name:b.matrix_local.to_quaternion() for b in bones}
@@ -374,7 +374,7 @@ def author_action(rig, scale, name, duration, direction=0, *, arm_lower_degrees=
             goal=ankle.copy()
             foot_yaw=yaw
             if gait:
-                goal=foot_target(ankle,offset)
+                goal=foot_target(ankle,offset,stride)
             elif direction:
                 # Move one foot at a time. Each planted shoe stays fixed in
                 # scene space while the pelvis turns between the feet.
@@ -413,11 +413,11 @@ def main():
     save_motion_asset(rig, scale, args.output.resolve()/"CIVRUM_Researcher_03")
 
 
-def save_motion_asset(rig, scale, dest, *, arm_lower_degrees=20, viewport_color='VERTEX'):
+def save_motion_asset(rig, scale, dest, *, arm_lower_degrees=20, viewport_color='VERTEX', stride=STRIDE):
     scene=bpy.context.scene
     scene.render.fps=FPS
     actions = [
-        author_action(rig, scale, name, duration, turn, arm_lower_degrees=arm_lower_degrees)
+        author_action(rig, scale, name, duration, turn, arm_lower_degrees=arm_lower_degrees, stride=stride)
         for name, duration, turn in (
             ("Idle", 90, 0), ("Walk", CYCLE, 0), ("TurnLeft90", 30, 1), ("TurnRight90", 30, -1)
         )
@@ -426,7 +426,7 @@ def save_motion_asset(rig, scale, dest, *, arm_lower_degrees=20, viewport_color=
     scene.frame_start=0
     scene.frame_end=90
     scene.frame_set(0)
-    rig["walk_stride_m"]=scale*STRIDE
+    rig["walk_stride_m"]=scale*stride
     bpy.ops.object.select_all(action='DESELECT')
     rig.select_set(True)
     bpy.context.view_layer.objects.active=rig
