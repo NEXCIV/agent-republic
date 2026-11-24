@@ -27,6 +27,7 @@ from civrum_lakeside_landmarks import (
     build_registry_library,
     finish_registry,
     finish_works_frontage,
+    works_roof,
     worksite,
 )
 from civrum_lakeside_terrain import (
@@ -863,6 +864,17 @@ def place_district_assets(parent):
     worksite(works, crane, textured("MAT_CIVIC_Worksite", "656461", "83766A", .38, 6.4))
 
 
+def render_quality(scene, draft, overview):
+    large = overview and not draft
+    scene.render.resolution_x, scene.render.resolution_y = (
+        (960, 540) if draft else (3840, 2160) if large else (1920, 1080)
+    )
+    scene.cycles.samples = 10 if draft else 64 if large else 36
+    scene.cycles.adaptive_threshold = 0.05 if draft else 0.013 if large else 0.022
+    scene.cycles.adaptive_min_samples = 16 if large else 0
+    scene.cycles.filter_width = 1.0 if large else 1.5
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--draft", action="store_true")
@@ -902,6 +914,7 @@ def main():
     tune_city()
     finish_registry(REGISTRY_LIBRARY)
     finish_works_frontage(WORKS_SIGN)
+    works_roof(material)
     light(scene, collection(parent, "05 | Lighting"))
     place_tower(parent)
     place_district_assets(parent)
@@ -960,10 +973,8 @@ def main():
     }
     scene.camera = views["overview"][1]
     scene.render.engine = "CYCLES"
-    scene.cycles.samples = 10 if args.draft else 36
     scene.cycles.use_denoising = True
-    scene.cycles.adaptive_threshold = 0.05 if args.draft else 0.022
-    scene.render.resolution_x, scene.render.resolution_y = (960, 540) if args.draft else (1920, 1080)
+    render_quality(scene, args.draft, overview=True)
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGB"
@@ -983,6 +994,7 @@ def main():
     for view in args.views or views:
         name, cam = views[view]
         scene.camera = cam
+        render_quality(scene, args.draft, overview=view == "overview")
         scene.render.filepath = str(output / (name + ".png"))
         bpy.ops.render.render(write_still=True)
 

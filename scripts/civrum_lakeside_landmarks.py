@@ -3,8 +3,9 @@
 import math
 
 import bpy
-from build_civrum_world import Geometry
-from civrum_lakeside_blocks import BASALT, GOLD, METAL, PALETTE, STONE, place
+from build_civrum_world import Geometry, circle
+from civrum_lakeside_blocks import BASALT, GOLD, LEAF, METAL, PALETTE, STONE, place
+from detail_civrum_world import rod
 from mathutils import Matrix
 
 REGISTRY = "HERO_03_Citizen_Registration"
@@ -84,6 +85,100 @@ def finish_works_frontage(artwork):
     backing.thickness = 0.18
 
 
+def works_roof(material):
+    body = bpy.data.objects["HERO_04_Public_Construction"]
+    group = body.users_collection[0]
+    # Retain the atlas for masonry, but temper its baked highlight before fitting the roof.
+    surface = body.data.materials[0].copy()
+    surface.name = "Public Works | limestone and bronze"
+    slot = body.material_slots[0]
+    slot.link = "OBJECT"
+    slot.material = surface
+    tree = surface.node_tree
+    shader = next(n for n in tree.nodes if n.type == "BSDF_PRINCIPLED")
+    color_socket = shader.inputs["Base Color"]
+    image_color = color_socket.links[0].from_socket
+    grade = tree.nodes.new("ShaderNodeHueSaturation")
+    grade.inputs["Saturation"].default_value = 0.87
+    grade.inputs["Value"].default_value = 0.83
+    tree.links.new(image_color, grade.inputs["Color"])
+    tree.links.new(grade.outputs["Color"], color_socket)
+
+    glazing = (
+        ("Works roof | petrol glass", "286271"),
+        ("Works roof | blue glass", "347E93"),
+        ("Works roof | slate glass", "345262"),
+    )
+    names = []
+    for name, tint in glazing:
+        mat = material("MAT_" + name, tint, 0.25, 0.34)
+        names.append((mat.name.removeprefix("MAT_"),))
+    palette = (*PALETTE, *names)
+    glass = len(PALETTE)
+    cx, cy = 4.45, 1.16
+    sectors = 16
+    # Dome crown and lower curb fit the roof measured on the linked source mesh.
+    profile = (
+        (1.58, 13.16),
+        (2.43, 13.00),
+        (3.15, 12.63),
+        (3.76, 12.06),
+        (4.29, 11.19),
+        (4.59, 10.28),
+        (4.72, 9.40),
+    )
+    frame = Geometry()
+    for row, (radius, z) in enumerate(profile):
+        phase = math.pi / sectors * (row % 2)
+        frame.verts.extend((x, y, z) for x, y in circle(radius, sectors, cx, cy, phase))
+    joints = set()
+    for row in range(len(profile) - 1):
+        for i in range(sectors):
+            j = (i + 1) % sectors
+            a, b = row * sectors + i, row * sectors + j
+            c, d = (row + 1) * sectors + i, (row + 1) * sectors + j
+            triangles = ((a, c, b), (b, c, d)) if row % 2 == 0 else ((a, c, d), (a, d, b))
+            for panel, face in enumerate(triangles):
+                frame.face(face, glass + (i * 5 + row * 2 + panel) % 3)
+                for u, v in zip(face, (*face[1:], face[0])):
+                    joints.add(tuple(sorted((u, v))))
+    for a, b in sorted(joints):
+        rod(frame, frame.verts[a], frame.verts[b], 0.105, METAL if a // sectors == b // sectors else GOLD)
+    frame.loft(circle(4.80, sectors, cx, cy), circle(4.76, sectors, cx, cy), 9.14, 9.43, BASALT)
+    frame.band(circle(4.76, sectors, cx, cy), circle(4.55, sectors, cx, cy), 9.445, GOLD)
+    frame.slab(circle(1.62, sectors, cx, cy), 13.14, 13.69, glass)
+    frame.slab(circle(1.70, sectors, cx, cy), 13.69, 13.82, GOLD)
+    frame.slab(circle(1.49, sectors, cx, cy), 13.82, 13.94, BASALT)
+    for i in range(8):
+        angle = i * math.tau / 8
+        x, y = cx + 1.59 * math.cos(angle), cy + 1.59 * math.sin(angle)
+        rod(frame, (x, y, 13.17), (x, y, 13.69), 0.075, METAL)
+    dome = place(
+        group, "Public works | geometric glass dome", frame.mesh("CIVRUM Works dome", palette), 0, 0, 0
+    )
+    dome.parent = body
+
+    deck = Geometry()
+    deck.box(-7.32, -2.60, 8.46, 4.55, 3.80, 0.26, BASALT, 0.34, METAL)
+    deck.box(-7.32, -2.60, 8.71, 3.98, 3.31, 0.042, STONE, 0.28)
+    for x in (-8.63, -6.0):
+        deck.box(x, -2.60, 8.75, 1.12, 2.98, 0.20, METAL, 0.17, GOLD)
+        deck.box(x, -2.60, 8.94, 0.96, 2.84, 0.08, LEAF, 0.15)
+        for i, y in enumerate((-3.53, -2.60, -1.64)):
+            dz = 0.24 + i % 2 * 0.12
+            deck.loft(circle(0.25, 7, x, y), circle(0.39, 7, x, y, 0.31), 9.02, 9.11, LEAF)
+            deck.loft(circle(0.39, 7, x, y, 0.31), circle(0.18, 7, x + 0.035, y), 9.11, 9.11 + dz, LEAF)
+    terrace = place(
+        group,
+        "Public works | roof planters and pavers",
+        deck.mesh("CIVRUM Works roof deck", PALETTE),
+        0,
+        0,
+        0,
+    )
+    terrace.parent = body
+
+
 def worksite(group, crane, yard_material):
     """Seat the gate approach and equipment on one finished yard surface."""
     objects = bpy.data.objects
@@ -97,7 +192,7 @@ def worksite(group, crane, yard_material):
     site.box(0, 0, -0.035, 39.64, 15.68, finish + 0.035, aggregate)
     site.box(-7, 1.62, finish, 18.35, 8.32, 0.073, STONE, 0.13)
     # Offset the mast east of the delivery aisle and leave room south for storage.
-    site.box(107.4 - 95, 3.55, finish, 6.45, 6.3, 0.124, STONE, 0.18)
+    site.box(107.4 - 95, 3.55, finish, 7.0, 7.0, 0.124, STONE, 0.18)
     for side in (-1, 1):
         site.box(4.4 + side * 2.20, 0, finish + 0.001, 0.11, 14.86, 0.005, GOLD)
         site.box(4.4 + side * 2.20, -3.8, finish + 0.007, 0.20, 0.58, 0.07, BASALT)
@@ -131,7 +226,7 @@ def worksite(group, crane, yard_material):
     place(group, "Works | solid gate approach", apron.mesh("CIVRUM works ramp", PALETTE), 0, 0, 0)
 
     crane.location = (107.4, -100.05, finish + 0.124)
-    crane.rotation_euler.z = math.radians(13.5)
+    crane.rotation_euler.z = math.radians(64)
     fence_colors = {"MAT_CIVIC_TEAL": PALETTE[BASALT][0], "MAT_TECH_YELLOW": PALETTE[GOLD][0]}
     keep = bpy.data.collections["CONSTRUCTION"]
     for obj in keep.objects:
@@ -145,7 +240,7 @@ def worksite(group, crane, yard_material):
         else:
             top = 0.278 if name.startswith("CIVRUM_CONSTRUCTION_FOUNDATION") else finish
             obj.location.z += top - 0.172
-    for suffix, y in (("", -104.25), (".001", -109.50)):
+    for suffix, y in (("", -104.65), (".001", -109.50)):
         objects["CIVRUM_CONSTRUCTION_RACK_01" + suffix].location.xy = (111.0, y)
     objects["CIVRUM_CONSTRUCTION_BARRIER_01"].location.x = 93.2
     objects["CIVRUM_CONSTRUCTION_BARRIER_01.001"].location.x = 105.15
