@@ -1,10 +1,12 @@
 # CIVRUM 湖畔城市 · E6-07 氛围样板
 
-用 Blender 5.3 打开 [CIVRUM_World_300m_Lakeside.blend](CIVRUM_World_300m_Lakeside.blend)。随场景移动时，一并带上 [landmark-masters/buildings](../landmark-masters/buildings/) 和 [Hi3D](../../hi3d/) 各资产子目录中的 Blender 资产库，并保持相对位置。贴图内嵌在各自的 Blender 文件里。
+用 Blender 5.3 打开 [CIVRUM_World_300m_Lakeside.blend](CIVRUM_World_300m_Lakeside.blend)。随场景移动时，一并带上 [landmark-masters/buildings](../landmark-masters/buildings/)、[Hi3D](../../hi3d/) 各资产子目录中的 Blender 资产库和本目录的 [assets](assets/)，并保持相对位置。贴图内嵌在各自的 Blender 文件里。
 
 城市地块为 300 × 300 米，+Y 向北。湖位于北边界之外，湖面 Z = −1.34 米。滨水步道沿 Y ≈ 165 米贯通，两个栈桥和自然岸坡可独立编辑。西南侧 25° 的斜阳照亮临街立面，冷色天空为阴影补光。湖面纹理由颜色属性、噪声凹凸和反射节点生成。
 
 城区外的坡地和远岸林带随地形起伏，步道按地表贴合。树木复用六套树冠网格，松树、阔叶树和秋色树穿插成片。湖岸用碎石和深浅水色衔接，码头设有系缆桩、分段栏杆、遮阳架和四艘停靠船。南入口两块空地补成口袋花园，七栋退台办公楼使用三种屋顶造型。
+
+注册中心链接 [独立彩色资产库](assets/CIVRUM_Citizen_Registry.blend)。现有建筑网格采用重新绘制的立面贴图，招牌独立成面。东南建设区从北侧步道进入公共建设中心，南侧货运入口沿实体缓坡进入施工区。塔吊底座设在场内车道东侧，脚手架、预制件和材料架分别贴地就位。
 
 | 固定机位 | 渲染 |
 | --- | --- |
@@ -16,6 +18,8 @@
 | 东南工地，观察塔吊和围挡 | [塔吊](renders/CIVRUM_Construction_Crane.png) |
 | 西侧水景街道，观察喷泉、行道树和塔间连廊 | [水景街道](renders/CIVRUM_West_Garden_Avenue.png) |
 | 西码头抬高机位，检查停靠船、岸线和对岸林带 | [码头](renders/CIVRUM_Lakeside_Marina.png) |
+| 公民注册中心街景，检查贴图、招牌和入口 | [注册中心](renders/CIVRUM_Citizen_Registry.png) |
+| 公共建设中心北入口，检查招牌和步道衔接 | [建设中心](renders/CIVRUM_Public_Construction_Entrance.png) |
 
 [同机位前后对照](renders/CIVRUM_Lakeside_Comparison.jpg) 左侧是远景精修前，右侧是精修后。两张图使用相同的相机位置、朝向和焦距。
 

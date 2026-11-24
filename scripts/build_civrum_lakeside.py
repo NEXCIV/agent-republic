@@ -23,6 +23,12 @@ from civrum_lakeside_blocks import (
     street_walls,
     terraces,
 )
+from civrum_lakeside_landmarks import (
+    build_registry_library,
+    finish_registry,
+    finish_works_frontage,
+    worksite,
+)
 from civrum_lakeside_terrain import (
     WATER_HEIGHT,
     far_bank,
@@ -38,6 +44,8 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = ROOT / "art-direction/world-upgrade-v1"
 MASTER = PROJECT / "landmark-masters/CIVRUM_World_300m_Master.blend"
 OUTPUT = PROJECT / "lakeside-study"
+REGISTRY_LIBRARY = OUTPUT / "assets/CIVRUM_Citizen_Registry.blend"
+WORKS_SIGN = OUTPUT / "assets/works-nameplate.png"
 TOWER_DIR = ROOT / "art-direction/hi3d/lakeside-tower-v1"
 TOWER_SOURCE = TOWER_DIR / "Hi3D_现代豪华摩天大楼3D模型_allparts_20261125_000239.glb"
 TOWER_LIBRARY = TOWER_DIR / "CIVRUM_Lakeside_Tower.blend"
@@ -817,7 +825,6 @@ def place_district_assets(parent):
         ("billboard-commercial-v1", shops, (18.5, -50.87, 0.177), 18, ".028", -56.20),
         ("green-planter-tree-v1", shops, (-9.55, -52.55, 0.176), 3.45, None, None),
         ("autumn-planter-tree-v1", shops, (9.75, -54.10, 0.176), 3.65, None, None),
-        ("tower-crane-v1", works, (101.1, -105.2, 0.172), 22, None, None),
     )
     for key, group, location, height, suffix, approach_y in placements:
         library, asset = library_location(key)
@@ -851,6 +858,9 @@ def place_district_assets(parent):
             )
         elif group == shops:
             box(shops, "Planter setting stone", location[0], location[1], 0.041, 1.83, 1.83, 0.27, paving)
+    library, asset = library_location("tower-crane-v1")
+    crane = instance_asset(works, library, asset, "CIVRUM_HI3D_Tower_Crane", (0, 0, 0), 22)
+    worksite(works, crane, textured("MAT_CIVIC_Worksite", "656461", "83766A", .38, 6.4))
 
 
 def main():
@@ -859,14 +869,22 @@ def main():
     parser.add_argument(
         "--prepare-tower", action="store_true", help="Rebuild the linked library from its archived GLB"
     )
+    parser.add_argument(
+        "--prepare-registry", nargs=2, type=Path, metavar=("GLB", "SIGN"),
+        help="Pack the uncompressed registry atlas export and frontage sign",
+    )
     parser.add_argument("--hi3d-imports", type=Path, help=argparse.SUPPRESS)
     parser.add_argument(
         "--views",
         nargs="+",
-        choices=["overview", "lake", "street", "tower", "shops", "crane", "avenue", "marina"],
+        choices=["overview", "lake", "street", "tower", "shops", "crane", "avenue", "marina", "registry", "works"],
         help="Render only the selected cameras",
     )
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
+    if args.prepare_registry:
+        source, artwork = (path.resolve() for path in args.prepare_registry)
+        build_registry_library(source, artwork, REGISTRY_LIBRARY)
+        return
     if args.prepare_tower:
         build_library(TOWER_SOURCE, TOWER_LIBRARY, TOWER_COLLECTION)
     if args.hi3d_imports:
@@ -882,6 +900,8 @@ def main():
     parent = collection(bpy.data.collections["CIVRUM_WORLD"], "07 | Lakeside atmosphere")
     build_landscape(parent)
     tune_city()
+    finish_registry(REGISTRY_LIBRARY)
+    finish_works_frontage(WORKS_SIGN)
     light(scene, collection(parent, "05 | Lighting"))
     place_tower(parent)
     place_district_assets(parent)
@@ -919,7 +939,7 @@ def main():
         ),
         "crane": (
             "CIVRUM_Construction_Crane",
-            camera(cameras, "LAKE_CAM_06 | Construction site", (129, -129, 3.7), (96, -103, 11.5), 28),
+            camera(cameras, "LAKE_CAM_06 | Construction site", (124, -137, 13), (97.5, -101, 8.8), 27),
         ),
         "avenue": (
             "CIVRUM_West_Garden_Avenue",
@@ -928,6 +948,14 @@ def main():
         "marina": (
             "CIVRUM_Lakeside_Marina",
             camera(cameras, "LAKE_CAM_08 | Marina and far bank", (-66, 154, 12.4), (-96, 192, 1.4), 39),
+        ),
+        "registry": (
+            "CIVRUM_Citizen_Registry",
+            camera(cameras, "LAKE_CAM_09 | Registry frontage", (90.7, 2.8, 4.8), (80, 21, 3.7), 36),
+        ),
+        "works": (
+            "CIVRUM_Public_Construction_Entrance",
+            camera(cameras, "LAKE_CAM_10 | Public works frontage", (89.8, -53, 7), (95, -81, 6.9), 27),
         ),
     }
     scene.camera = views["overview"][1]
