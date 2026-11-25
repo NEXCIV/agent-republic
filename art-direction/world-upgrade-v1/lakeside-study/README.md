@@ -1,5 +1,23 @@
 # CIVRUM 湖畔城市 · E6-07 氛围样板
 
+## 南侧园艺商铺
+
+[打开南侧商铺样板场景](CIVRUM_World_300m_South_Shop.blend)。打开时相机朝向园艺店正门。样板位于南侧中央入口以东的第一栋低楼，沿用走查版的 40 号地基、朝向和傍晚光照。在大纲展开 `16 | South garden shop`，可分别编辑石座与柱、窗框、门廊、屋面、种植池和室内陈列。原 Hi3D 的屋顶多肉沿用原贴图，金属收边、磨砂石材与透景玻璃分别着色。
+
+| 观察位置 | 原模型 | 精修样板 |
+| --- | --- | --- |
+| 全城俯视 | [全城原图](renders/CIVRUM_South_Shop_Overview_Before.png) | [全城样板位置](renders/CIVRUM_South_Shop_Overview_After.png) |
+| 屋顶斜俯视 | [原屋顶](renders/CIVRUM_South_Shop_Roof_Before.png) | [采光天窗和种植池](renders/CIVRUM_South_Shop_Roof_After.png) |
+| 临街人眼高度 | [原橱窗](renders/CIVRUM_South_Shop_Street_Before.png) | [内凹门廊和园艺陈列](renders/CIVRUM_South_Shop_Street_After.png) |
+
+[街景与屋顶并排对比](renders/CIVRUM_South_Shop_Comparison.jpg) 中，每对图使用相同相机、画幅、曝光与第 120 帧。门平面在橱窗后方 1.10 米。穿过正面橱窗的水平抽样射线在玻璃后 4.97 米处遇到室内陈列区的背墙。天窗下方连通二层。Blender 5.3 重开验证时，整栋样板含保留植物、文字及倒角共 183,333 个三角面，原商业楼为 396,036 个。其余 28 个同源商铺仍显示原资产。这里统计的是离线 Blender 场景。
+
+在仓库根目录重建、重新打开验证并渲染三组对比。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_south_shop.py -- --save --views street roof overview
+```
+
 ## 行人走查版
 
 打开 [CIVRUM_World_300m_Walkthrough.blend](CIVRUM_World_300m_Walkthrough.blend)，按空格从第 33 帧开始跟拍。01 号从中央广场出发，经斑马线和水景步道，转入公共建设中心前庭。全程约 128.8 米，30 帧/秒，第 4950 帧停在台阶前。时间线标记对应出发、过街、转向、到达前庭、工人查看面板和到达台阶。
