@@ -139,13 +139,13 @@ function createStreetSky(horizon: THREE.Color) {
   return sky;
 }
 
-function isGardenRetail(object: THREE.Object3D): object is THREE.Mesh {
-  return object instanceof THREE.Mesh && object.name.replace(/[^a-z0-9]/gi, '').startsWith(RETAIL_PREFIX);
+function isGardenRetail(object: THREE.Object3D) {
+  return object.name.replace(/[^a-z0-9]/gi, '').startsWith(RETAIL_PREFIX);
 }
 
 function softenRetailWindows(asset: THREE.Object3D) {
   asset.traverse((object) => {
-    if (!isGardenRetail(object)) return;
+    if (!(object instanceof THREE.Mesh) || !isGardenRetail(object)) return;
     for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
       if (material instanceof THREE.MeshStandardMaterial && material.emissiveMap) {
         material.emissiveIntensity = Math.min(material.emissiveIntensity, 0.65);
@@ -328,7 +328,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const landmarkEntrances = { ...eastEntrances, center: centerEntrance, hall: new THREE.Vector3(0, 1.8, -82) };
   const retailFrustum = new THREE.Frustum();
   const viewProjection = new THREE.Matrix4();
-  const retailPlacements: { mid: THREE.Mesh; bounds: THREE.Sphere; close?: THREE.Mesh }[] = [];
+  const retailPlacements: { mid: THREE.Object3D; bounds: THREE.Sphere; close?: THREE.Object3D }[] = [];
   const tween = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pointers = new Map<number, { x: number; y: number }>();
   const aborter = new AbortController();
@@ -350,7 +350,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const details = new Map<Detail, THREE.Object3D>();
   const requestedDetails = new Set<Detail>();
   let retailSource: THREE.Object3D | undefined;
-  let retailMesh: THREE.Mesh | undefined;
+  let retailTemplate: THREE.Object3D | undefined;
   let retailRequested = false;
   const proxies = new Map<Detail, THREE.Object3D[]>();
   let actor: GLTF | undefined;
@@ -514,17 +514,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const showing = placement.close?.visible ?? false;
       const near = distance < (showing ? 86 : 76);
       if (near && !showing && retailFrustum.intersectsSphere(bounds)) {
-        if (!retailMesh) {
+        if (!retailTemplate) {
           loadRetail();
           continue;
         }
         if (!placement.close) {
-          const close = new THREE.Mesh(retailMesh.geometry, retailMesh.material);
+          const close = retailTemplate.clone();
           close.name = `${mid.name}_close`;
           close.matrix.copy(mid.matrixWorld);
           close.matrixAutoUpdate = false;
-          close.castShadow = mid.castShadow;
-          close.receiveShadow = mid.receiveShadow;
           street.add(close);
           placement.close = close;
         }
@@ -806,12 +804,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     request(RETAIL_DETAIL, 'low').then((response) => response.arrayBuffer()).then(async (bytes) => {
       if (ended || contextLost) return;
       const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
-      const mesh = asset.children.find(isGardenRetail);
-      if (ended || contextLost || !mesh) { disposeModel(asset); return; }
+      const template = asset.children.find(isGardenRetail);
+      if (ended || contextLost || !template) { disposeModel(asset); return; }
       prepareEnvironment(asset, streetAnisotropy);
       softenRetailWindows(asset);
       retailSource = asset;
-      retailMesh = mesh;
+      retailTemplate = template;
     }).catch(() => {});
   }
 
