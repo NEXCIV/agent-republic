@@ -52,6 +52,7 @@ RESEARCH_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.027"
 RESEARCH_CROSSING_Y = (82.25, 85)
 RESEARCH_CROSSING_STRIPES = WEST_CROSSING_STRIPES
 AGENT_CENTER = "HERO_02_Agent_Center"
+GOVERNANCE_HALL = "HERO_01_Governance_Hall"
 AGENT_CENTER_ANCHOR = (-95, 65, 0.172)
 RESIDENCE = "CIVRUM_PH_RESIDENTIAL_HOUSE"
 WAYPOINTS = (
@@ -190,6 +191,7 @@ CHUNKS = {
     "street": "nexus-street-detail.glb",
     "market": "corner-market-detail.glb",
     "governance": "governance-north.glb",
+    "hall": "governance-hall-detail.glb",
     "retail": "garden-roof-retail-detail.glb",
     "east": "east-civic-district.glb",
     "registry": "citizen-registry-detail.glb",
@@ -208,7 +210,7 @@ LAKE_SURFACE = "CIVRUM_Lake_Surface"
 PARKLAND = "City parkland"
 CITY_GROUND = "CIVRUM_ENV_GROUND_MAIN"
 OVERVIEW_LANDMARKS = {
-    "governance": ("HERO_01_Governance_Hall",),
+    "governance": (GOVERNANCE_HALL,),
     "research": (AGENT_CENTER,),
     "east": tuple(EAST_HEROES),
 }
@@ -275,7 +277,7 @@ def world_geometry(scene, graph, area):
         if obj.name.startswith("HERO_"):
             if citywide:
                 continue  # Reuse the city landmarks already fitted and reduced for the web.
-            heroes = {"east": EAST_HEROES, "research": (AGENT_CENTER,)}.get(area, ("HERO_01_Governance_Hall",))
+            heroes = {"east": EAST_HEROES, "research": (AGENT_CENTER,)}.get(area, (GOVERNANCE_HALL,))
             if obj.name not in heroes:
                 continue
         if area in {"shore", "citywide"} and any(group.name in SHORE_LAYER_NAMES for group in obj.users_collection):
@@ -590,7 +592,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
     transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
     texture_limit = {
-        "base": 512, "retail": 2048, "registry": 2048, "works": 2048, "center": 4096, "citywide": 768,
+        "base": 512, "retail": 2048, "registry": 2048, "works": 2048, "center": 4096, "hall": 4096, "citywide": 768,
     }.get(chunk, 1024)
     pbr = {}
     textures = {}
@@ -646,14 +648,15 @@ def stage_assets(scene, graph, chunk, library=DEST):
     }
     overview_crossings = {name: markings for (_, name), markings in crossings.items()}
     cache, parts = {}, []
-    area = {"registry": "east", "works": "east", "center": "research"}.get(chunk, chunk)
+    landmark = {"center": AGENT_CENTER, "hall": GOVERNANCE_HALL}.get(chunk)
+    area = {"registry": "east", "works": "east", "center": "research", "hall": "governance"}.get(chunk, chunk)
     for source, transform, tier in world_geometry(scene, graph, area):
         name = source.original.name
         if chunk == "retail" and not name.startswith(GARDEN_RETAIL):
             continue
         if chunk in {"registry", "works"} and EAST_HEROES.get(name) != chunk:
             continue
-        if chunk == "center" and name != AGENT_CENTER:
+        if landmark and name != landmark:
             continue
         market = name.startswith("Market | ")
         street = tier in ("detail", "buildings") or name.startswith("Courtyard | roses")
@@ -704,7 +707,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
             tier = "market_proxy"
         elif street_proxy:
             tier = "street_proxy"
-        asset["previewTier"] = "detail" if chunk in {"registry", "works", "center"} else tier
+        asset["previewTier"] = "detail" if chunk in {"registry", "works", "center", "hall"} else tier
         if chunk == "retail":
             parts.append((asset, 180000))
             break
@@ -712,6 +715,8 @@ def stage_assets(scene, graph, chunk, library=DEST):
             parts.append((asset, 230000))
         elif chunk == "center":
             parts.append((asset, 245000))
+        elif chunk == "hall":
+            parts.append((asset, 220000))
         elif chunk == "east" and len(mesh.polygons) > 10000:
             face_limit = {"registry_proxy": 18500, "works_proxy": 61000}.get(tier, 9000)
             if name.startswith(GARDEN_RETAIL):
@@ -732,7 +737,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
             limit = 68500 if name == AGENT_CENTER else 30000 if name.startswith(GARDEN_RETAIL) else 15500
             parts.append((asset, limit))
         elif chunk == "governance" and len(mesh.polygons) > 10000:
-            parts.append((asset, 52000 if name == "HERO_01_Governance_Hall" else 6500))
+            parts.append((asset, 52000 if name == GOVERNANCE_HALL else 6500))
         elif name.startswith("Courtyard | roses") and len(mesh.polygons) > 12000:
             parts.append((asset, 12000))
         elif len(mesh.polygons) > 55000:
@@ -741,7 +746,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
 
     if chunk == "retail" and len(parts) != 1:
         raise RuntimeError("Expected a single Garden Roof Retail source mesh")
-    if chunk in {"registry", "works", "center"} and len(root.objects) != 1:
+    if chunk in {"registry", "works", "center", "hall"} and len(root.objects) != 1:
         raise RuntimeError(f"Expected one landmark source mesh for {chunk}")
 
     reduced = {}
@@ -755,7 +760,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
             reduced[key].validate(clean_customdata=False)
             if (chunk in {"street", "retail", "east", "west", "shore", "research", "residential", "citywide"} and obj.name.startswith(GARDEN_RETAIL)) or (
                 chunk in {"east", "works"} and obj.name in EAST_HEROES
-            ) or obj.name == AGENT_CENTER:
+            ) or obj.name == AGENT_CENTER or chunk == "hall":
                 mesh = reduced[key]
                 mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
                 mesh.set_sharp_from_angle(angle=math.radians(35))

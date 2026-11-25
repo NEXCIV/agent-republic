@@ -75,9 +75,10 @@ const DETAIL_FILES = {
   registry: 'citizen-registry-detail.glb',
   works: 'public-construction-detail.glb',
   center: 'research-agent-center-detail.glb',
+  hall: 'governance-hall-detail.glb',
 };
 type Detail = keyof typeof DETAIL_FILES;
-const LANDMARK_DETAILS = ['registry', 'works', 'center'] as const;
+const LANDMARK_DETAILS = ['registry', 'works', 'center', 'hall'] as const;
 
 function disposeModel(asset: THREE.Object3D) {
   const materials = new Set<THREE.Material>();
@@ -99,7 +100,7 @@ function disposeModel(asset: THREE.Object3D) {
   for (const mesh of meshes) mesh.dispose();
 }
 
-function setBuildingShadows(asset: THREE.Object3D) {
+function prepareEnvironment(asset: THREE.Object3D, anisotropy = 1) {
   const pavement = new Set<THREE.Object3D>();
   asset.getObjectByName('NEXCIV_paving')?.traverse((object) => pavement.add(object));
   asset.traverse((object) => {
@@ -108,7 +109,34 @@ function setBuildingShadows(asset: THREE.Object3D) {
     const terrain = object.name === 'NEXCIV_terrain' || object.userData.previewTier === 'land';
     object.castShadow = !materials.some((material) => material.transparent) && !terrain && !pavement.has(object);
     object.receiveShadow = true;
+    for (const material of materials) {
+      if (!(material instanceof THREE.MeshStandardMaterial) || !material.map) continue;
+      material.map.anisotropy = Math.max(anisotropy, material.map.anisotropy);
+    }
   });
+}
+
+function createStreetSky(horizon: THREE.Color) {
+  const zenith = new THREE.Color('#526887');
+  const lower = new THREE.Color('#535454');
+  const sample = new THREE.Color();
+  const height = 128;
+  const pixels = new Uint8Array(4 * height * 4);
+  for (let row = 0; row < height; row++) {
+    const elevation = -Math.cos(Math.PI * (row + 0.5) / height);
+    sample.copy(horizon).lerp(elevation > 0 ? zenith : lower, THREE.MathUtils.smoothstep(Math.abs(elevation), 0, 0.68));
+    sample.getRGB(sample, THREE.SRGBColorSpace);
+    for (let column = 0; column < 4; column++) {
+      pixels.set([sample.r * 255, sample.g * 255, sample.b * 255, 255], (row * 4 + column) * 4);
+    }
+  }
+  const sky = new THREE.DataTexture(pixels, 4, height);
+  sky.mapping = THREE.EquirectangularReflectionMapping;
+  sky.colorSpace = THREE.SRGBColorSpace;
+  sky.magFilter = THREE.LinearFilter;
+  sky.minFilter = THREE.LinearFilter;
+  sky.needsUpdate = true;
+  return sky;
 }
 
 function isGardenRetail(object: THREE.Object3D): object is THREE.Mesh {
@@ -232,25 +260,26 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.shadowMap.autoUpdate = false;
+  const streetAnisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   host.append(canvas);
 
   const scene = new THREE.Scene();
   const street = new THREE.Group();
   scene.add(street);
-  const sky = new THREE.Color('#837574');
-  scene.background = sky;
-  const fog = new THREE.Fog(sky, 110, 235);
+  const citySky = new THREE.Color('#837574');
+  const horizon = new THREE.Color('#aa8e7b');
+  const streetSky = createStreetSky(horizon);
+  scene.background = streetSky;
+  const fog = new THREE.Fog(horizon, 110, 235);
   scene.fog = fog;
   const camera = new THREE.PerspectiveCamera(49, 1, 0.18, 285);
-  const ambient = new THREE.HemisphereLight('#b5ceff', '#81705a', 0.97);
-  const sun = new THREE.DirectionalLight('#ffc481', 2.14);
-  sun.position.set(-43, 33, 62);
-  sun.target.position.set(0, 0, 22);
+  const ambient = new THREE.HemisphereLight('#b5ceff', '#81705a', 0.84);
+  const sun = new THREE.DirectionalLight('#ffbb78', 2.35);
+  const sunOffset = new THREE.Vector3(-105, 73, 71);
   sun.castShadow = true;
-  Object.assign(sun.shadow.camera, { left: -46, right: 46, top: 53, bottom: -53, near: 4, far: 120 });
+  Object.assign(sun.shadow.camera, { near: 5, far: 320 });
   sun.shadow.mapSize.setScalar(host.clientWidth <= 600 ? 1024 : 2048);
-  sun.shadow.bias = -0.00035;
-  sun.shadow.normalBias = 0.033;
+  sun.shadow.bias = -0.00016;
   scene.add(ambient, sun, sun.target);
   const sunset = new THREE.DirectionalLight('#ffb56e', 2.65);
   sunset.position.set(-210, 145, 120);
@@ -296,7 +325,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     works: new THREE.Vector3(95, 1, 72),
   };
   const centerEntrance = new THREE.Vector3(-90, 1.6, -65);
-  const landmarkEntrances = { ...eastEntrances, center: centerEntrance };
+  const landmarkEntrances = { ...eastEntrances, center: centerEntrance, hall: new THREE.Vector3(0, 1.8, -82) };
   const retailFrustum = new THREE.Frustum();
   const viewProjection = new THREE.Matrix4();
   const retailPlacements: { mid: THREE.Mesh; bounds: THREE.Sphere; close?: THREE.Mesh }[] = [];
@@ -349,6 +378,24 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let lastFrame = measuredAt;
   let frameId = 0;
   let firstCityFrame = 0;
+  let shadowRadius = 0;
+
+  function updateStreetShadow(focus: THREE.Vector3, close: boolean) {
+    const radius = close ? 54 : 124;
+    const step = close ? 14 : 44;
+    const x = Math.round(focus.x / step) * step;
+    const z = Math.round(focus.z / step) * step;
+    if (radius === shadowRadius && sun.target.position.x === x && sun.target.position.z === z) return;
+    sun.target.position.set(x, 0, z);
+    sun.position.copy(sun.target.position).add(sunOffset);
+    if (radius !== shadowRadius) {
+      shadowRadius = radius;
+      Object.assign(sun.shadow.camera, { left: -radius, right: radius, top: radius, bottom: -radius });
+      sun.shadow.camera.updateProjectionMatrix();
+      sun.shadow.normalBias = close ? 0.045 : 0.08;
+    }
+    renderer.shadowMap.needsUpdate = true;
+  }
 
   function resize() {
     const width = Math.max(1, host.clientWidth);
@@ -450,7 +497,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     for (const kind of kinds) {
       const members: THREE.Object3D[] = [];
       asset.traverse((object) => {
-        if (object.userData.previewTier === `${kind}_proxy`) members.push(object);
+        if (object.userData.previewTier === `${kind}_proxy`
+          || (kind === 'hall' && object.name.startsWith('HERO_01_Governance_Hall'))) members.push(object);
       });
       proxies.set(kind, members);
     }
@@ -534,7 +582,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       street.visible = !wide;
       sunset.visible = wide;
       sun.visible = !wide;
-      ambient.intensity = wide ? 0.72 : 0.97;
+      scene.background = wide ? citySky : streetSky;
+      fog.color.copy(wide ? citySky : horizon);
+      ambient.intensity = wide ? 0.72 : 0.84;
       scene.environmentIntensity = wide ? 0.25 : 0.28;
       renderer.toneMappingExposure = wide ? 0.82 : 0.88;
       renderer.shadowMap.needsUpdate = true;
@@ -616,6 +666,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       camera.lookAt(viewFocus);
     }
     if (!document.hidden && !wide) {
+      updateStreetShadow(following ? aim : viewFocus, Boolean(following) || orbitDistance < 66);
       updateRetail();
       for (const kind of LANDMARK_DETAILS) {
         const close = details.get(kind);
@@ -735,7 +786,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (ended || contextLost) { disposeModel(asset); return; }
       citywide = asset;
       asset.visible = false;
-      setBuildingShadows(asset);
+      prepareEnvironment(asset);
       softenRetailWindows(asset);
       addLakeRipples(asset, lakeTime);
       scene.add(asset);
@@ -757,6 +808,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
       const mesh = asset.children.find(isGardenRetail);
       if (ended || contextLost || !mesh) { disposeModel(asset); return; }
+      prepareEnvironment(asset, streetAnisotropy);
       softenRetailWindows(asset);
       retailSource = asset;
       retailMesh = mesh;
@@ -771,11 +823,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (ended || contextLost) return;
       const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
       if (ended || contextLost) { disposeModel(asset); return; }
-      setBuildingShadows(asset);
+      prepareEnvironment(asset, streetAnisotropy);
       // A failed request leaves the original silhouette visible.
       details.set(kind, asset);
       street.add(asset);
-      if (kind === 'registry' || kind === 'works' || kind === 'center') {
+      if (kind !== 'street' && kind !== 'market') {
         asset.visible = false;
         return;
       }
@@ -820,7 +872,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       if (side === 'research') addCenterNameplate(asset);
       district.asset = asset;
-      setBuildingShadows(asset);
+      prepareEnvironment(asset, streetAnisotropy);
       if (side === 'shore') addLakeRipples(asset, lakeTime);
       softenRetailWindows(asset);
       street.add(asset);
@@ -842,10 +894,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         else lamp.position.y = 3.5;
         street.add(lamp);
       }
-      if (side === 'east') sun.shadow.camera.right = 124;
-      if (side === 'west' || side === 'research') sun.shadow.camera.left = -125;
-      sun.shadow.camera.far = Math.max(185, sun.shadow.camera.far);
-      sun.shadow.camera.updateProjectionMatrix();
       renderer.shadowMap.needsUpdate = true;
       district.status = 'ready';
       callbacks.district(side, district.status);
@@ -875,19 +923,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       navigation.connect('plaza', 'plazaNorth', connector);
       navigation.connect('plazaNorth', 'governance', layout);
       north = city.scene;
-      setBuildingShadows(north);
+      prepareEnvironment(north, streetAnisotropy);
       street.add(north);
       softenRetailWindows(north);
       registerRetail(north);
+      registerProxies(north, ['hall']);
       focus.set(...layout.target);
       if (mode === 'overview' && desiredDistance === START_DISTANCE && orbitPitch === START_PITCH) {
         desiredDistance = EXPANDED_DISTANCE;
         orbitPitch = EXPANDED_PITCH;
       }
-      sun.position.z -= 35;
-      sun.target.position.z -= 35;
-      Object.assign(sun.shadow.camera, { top: 92, bottom: -92, far: sideDistrictLoaded() ? 185 : 178 });
-      sun.shadow.camera.updateProjectionMatrix();
       renderer.shadowMap.needsUpdate = true;
       const entranceLight = new THREE.PointLight('#ffd08b', 64, 14, 2);
       entranceLight.position.set(0, 4, -83);
@@ -949,7 +994,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     marketEntrance.set(...(route.points.at(-1) ?? route.target));
     model = result.scene;
     registerProxies(model, ['street', 'market']);
-    setBuildingShadows(model);
+    prepareEnvironment(model, streetAnisotropy);
     softenRetailWindows(model);
     street.add(model);
     connectPrimary();
@@ -995,6 +1040,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       for (const detail of details.values()) disposeModel(detail);
       sun.shadow.dispose();
       sunset.shadow.dispose();
+      streetSky.dispose();
       environment.dispose();
       renderer.forceContextLoss();
       renderer.dispose();
