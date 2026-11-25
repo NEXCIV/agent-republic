@@ -1,5 +1,31 @@
 # CIVRUM 湖畔城市 · E6-07 氛围样板
 
+## 行人走查版
+
+打开 [CIVRUM_World_300m_Walkthrough.blend](CIVRUM_World_300m_Walkthrough.blend)，按空格从第 33 帧开始跟拍。01 号从中央广场出发，经斑马线和水景步道，转入公共建设中心前庭。全程约 128.8 米，30 帧/秒，第 4950 帧停在台阶前。时间线标记对应出发、过街、转向、到达前庭、工人查看面板和到达台阶。
+
+八名居民各自链接 [角色动作库](../../tripo/)，在湖畔场景中使用本地角色对象与 NLA 动作轨。原静态居民集合可在大纲里恢复显示。02 号建设工人先步行靠近面板，转身后低头并抬右手。沿线路缘有坡道，水景间补了连续铺面和导向牌。入口前庭增加石材铺装，玻璃后能看到有真实进深的门厅凹位、暖光与接待台。跟拍停在入口外。
+
+| 机位 | 渲染 |
+| --- | --- |
+| 同机位全城俯视 | [湖岸与街区](renders/CIVRUM_Walkthrough_Overview.png) |
+| 中央广场行人高度 | [广场出发](renders/CIVRUM_Walkthrough_Nexus_Plaza.png) |
+| 东侧水景横道 | [角色过街](renders/CIVRUM_Walkthrough_Crossing.png) |
+| 公共建设中心行人高度 | [前庭与台阶](renders/CIVRUM_Walkthrough_Public_Works.png) |
+| 面板侧前方 | [建设工人查看面板](renders/CIVRUM_Walkthrough_Work_Panel.png) |
+
+走查版与原场景同目录，依赖原有相对资产链接及八个角色目录下的 `motion/*.blend`。在仓库根目录重建和验证。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_lakeside_walk.py -- --save
+blender -b --factory-startup --disable-autoexec art-direction/world-upgrade-v1/lakeside-study/CIVRUM_World_300m_Walkthrough.blend --python-exit-code 2 -P scripts/verify_civrum_lakeside_walk.py
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_lakeside_walk.py -- --views overview plaza crossing entrance panel
+```
+
+在 Blender 5.3 重新打开走查版，八套骨架和相对资产链接均可加载。沿路线每隔五帧检查 48 厘米宽的通行范围，采样点无障碍物侵入。过街及入口抽查帧的支撑脚离地或下陷量最大约 1.1 厘米。转身由身体动画衔接到场景朝向，结束后继续向南行走。
+
+## 湖畔美术母版
+
 用 Blender 5.3 打开 [CIVRUM_World_300m_Lakeside.blend](CIVRUM_World_300m_Lakeside.blend)。随场景移动时，一并带上 [landmark-masters/buildings](../landmark-masters/buildings/)、[Hi3D](../../hi3d/) 各资产子目录中的 Blender 资产库和本目录的 [assets](assets/)，并保持相对位置。贴图内嵌在各自的 Blender 文件里。
 
 城市地块为 300 × 300 米，+Y 向北。湖位于北边界之外，湖面 Z = −1.34 米。滨水步道沿 Y ≈ 165 米贯通，两个栈桥和自然岸坡可独立编辑。西南侧 25° 的斜阳照亮临街立面，冷色天空为阴影补光。湖面纹理由颜色属性、噪声凹凸和反射节点生成。
