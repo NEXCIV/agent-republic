@@ -2,20 +2,30 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
-import { createAgentPatrol, type AgentPhase, type RoutePoint } from './agent';
+import { createAgentPatrol, type RoutePoint } from './agent';
 import { createMarketGreeting } from './marketGreeting';
+import { createNavigation, DESTINATION_FACING, placeAt, type Connection, type Junction, type Place, type ResidentId, type Visits } from './navigation';
 
 export type View = 'overview' | 'follow';
-export type AgentId = '01' | '03';
-type Activity = AgentPhase | 'greeting';
+export type AgentId = ResidentId;
+type Activity = 'outbound' | 'arrived' | 'greeting';
 export type AgentStatus = Activity | 'loading' | 'unavailable';
-type RouteData = { points: RoutePoint[]; target: RoutePoint };
+export type AgentReport = { status: AgentStatus; progress: number; from?: Place; destination?: Place };
+type RouteData = Connection & { target: RoutePoint };
 type Patrol = ReturnType<typeof createAgentPatrol>;
-type ActiveAgent = { asset: GLTF; patrol: Patrol; activity?: Activity; progress: number };
+type ActiveAgent = {
+  asset: GLTF;
+  patrol: Patrol;
+  from: Place;
+  destination: Place;
+  visits: Visits;
+  lookAt: THREE.Vector3;
+  reported?: AgentReport;
+};
 type Callbacks = {
   ready: (elapsedMs: number) => void;
   fallback: () => void;
-  agent: (id: AgentId, status: AgentStatus, percent: number) => void;
+  agent: (id: AgentId, report: AgentReport) => void;
   fps: (value: number) => void;
 };
 
@@ -161,6 +171,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let actor: GLTF | undefined;
   let actorLoading = true;
   const agents = new Map<AgentId, ActiveAgent>();
+  const navigation = createNavigation();
   const marketGreeting = createMarketGreeting();
   let marketGuest: { asset: GLTF; patrol: Patrol } | undefined;
   let marketGuestRequested = false;
@@ -174,7 +185,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let orbitPitch = START_PITCH;
   let desiredDistance = START_DISTANCE;
   let orbitDistance = START_DISTANCE;
-  let followYaw = FOLLOW_YAW;
+  let followYaw = 0;
   let followPitch = FOLLOW_PITCH;
   let followDistance = FOLLOW_DISTANCE;
   let followHeight: number | undefined;
@@ -199,7 +210,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function resetFollowCamera() {
-    followYaw = followed === '03' ? 0.52 : FOLLOW_YAW;
+    followYaw = 0;
     followPitch = followed === '03' ? 0.28 : FOLLOW_PITCH;
     followDistance = followed === '03' ? 7.4 : FOLLOW_DISTANCE;
     followHeight = undefined;
@@ -216,20 +227,39 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (next === 'follow' && id === '03') loadNorth();
   }
 
-  function attachAgent(id: AgentId, asset: GLTF, points: RoutePoint[], destination: [number, number]) {
+  function attachAgent(id: AgentId, asset: GLTF, junction: Junction) {
     try {
-      const patrol = createAgentPatrol(asset, points, destination);
+      const from = placeAt(junction);
+      const visits: Visits = { plaza: 0, market: 0, governance: 0 };
+      visits[from] = 1;
+      const choice = navigation.choose(id, junction, visits);
+      if (!choice) throw new Error('No reachable observation destination');
+      const [x, z] = DESTINATION_FACING[choice.destination];
+      const patrol = createAgentPatrol(asset, choice.path.points, [x, z]);
       scene.add(patrol.root);
-      agents.set(id, { asset, patrol, progress: -1 });
+      agents.set(id, { asset, patrol, from, destination: choice.destination, visits, lookAt: new THREE.Vector3(x, 0, z) });
     } catch {
       disposeModel(asset.scene);
-      callbacks.agent(id, 'unavailable', 0);
+      callbacks.agent(id, { status: 'unavailable', progress: 0 });
     }
+  }
+
+  function chooseNext(id: AgentId, agent: ActiveAgent) {
+    const at = agent.destination;
+    const visits = { ...agent.visits, [at]: agent.visits[at] + 1 };
+    const choice = navigation.choose(id, at, visits);
+    if (!choice) return;
+    const [x, z] = DESTINATION_FACING[choice.destination];
+    agent.patrol.plan(choice.path.points, [x, z]);
+    agent.from = at;
+    agent.destination = choice.destination;
+    agent.lookAt.set(x, 0, z);
+    agent.visits = visits;
   }
 
   function connectPrimary() {
     if (!model || !route || !actor || ended || contextLost) return;
-    attachAgent('01', actor, route.points, [13.70, 54.91]);
+    attachAgent('01', actor, 'plaza');
     actor = undefined;
   }
 
@@ -244,17 +274,23 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       measuredAt = now;
     }
 
-    const primary = agents.get('01')?.patrol;
-    const greeting = marketGreeting(playing ? dt : 0, primary, marketGuest?.patrol);
+    const primaryAgent = agents.get('01');
+    const primary = primaryAgent?.patrol;
+    const greeting = marketGreeting(playing ? dt : 0, primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
     if (playing) marketGuest?.patrol.advance(dt, greeting.visitor);
     for (const [id, agent] of agents) {
       const { patrol } = agent;
-      if (playing) patrol.advance(dt, id === '01' ? greeting.resident : undefined);
-      const activity = id === '01' && greeting.active ? 'greeting' : patrol.phase;
-      if (agent.activity !== activity || agent.progress !== patrol.progress) {
-        agent.activity = activity;
-        agent.progress = patrol.progress;
-        callbacks.agent(id, activity, agent.progress);
+      const greetingHere = id === '01' && greeting.active;
+      if (playing) {
+        const cue = greetingHere ? greeting.resident : { hold: 'end' as const, face: patrol.phase === 'arrived' ? agent.lookAt : undefined };
+        patrol.advance(dt, cue);
+        if (patrol.phase === 'arrived' && patrol.dwelledSeconds >= 4 && !greetingHere) chooseNext(id, agent);
+      }
+      const status: Activity = greetingHere ? 'greeting' : patrol.phase === 'arrived' ? 'arrived' : 'outbound';
+      const { progress } = patrol;
+      if (agent.reported?.status !== status || agent.reported.progress !== progress || agent.reported.destination !== agent.destination) {
+        agent.reported = { status, progress, from: agent.from, destination: agent.destination };
+        callbacks.agent(id, agent.reported);
       }
     }
 
@@ -275,9 +311,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
       const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming);
       // Frame the shop from the street side as the Agent passes the entrance tree.
-      const streetSide = followed === '01' ? THREE.MathUtils.smoothstep(feet.z, 47, 56) : 0;
-      const yaw = followYaw + streetSide * 1.14 + 0.32 * greetingFraming;
-      const pitch = followPitch - 0.12 * greetingFraming;
+      const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
+      const northSide = 1 - THREE.MathUtils.smoothstep(feet.z, -22, 18);
+      const yaw = followYaw + THREE.MathUtils.lerp(FOLLOW_YAW, 0.52, northSide) + streetSide * 1.14 + 0.32 * greetingFraming;
+      // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
+      const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
+        * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
+      const northCrossing = THREE.MathUtils.smoothstep(feet.z, -82, -74)
+        * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
+      const pitch = Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing) - 0.12 * greetingFraming);
       camera.position.set(
         aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
         aim.y + distance * Math.sin(pitch),
@@ -299,7 +341,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       updateDetail?.(1 - THREE.MathUtils.smoothstep(orbitDistance, 33, 71));
     }
     renderer.render(scene, camera);
-    const showStreetDetails = (mode === 'follow' && followed === '01' && patrol) || orbitDistance < 59;
+    const showStreetDetails = (mode === 'follow' && patrol && patrol.root.position.z > -44) || orbitDistance < 59;
     const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !primary || primary.progress > 0);
     if (!document.hidden && readyForDetails) {
       const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (primary && marketEntrance.distanceTo(primary.root.position) < 29);
@@ -402,12 +444,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const priority = mode === 'follow' && followed === '03' ? 'auto' : 'low';
     Promise.all([
       request('governance-route.json', priority).then((response) => response.json() as Promise<RouteData>),
+      request('nexus-connector.json', priority).then((response) => response.json() as Promise<Connection>),
       request('governance-north.glb', priority).then((response) => response.arrayBuffer()),
-      request('agent-03.glb', priority).then((response) => response.arrayBuffer()),
-    ]).then(async ([layout, cityBytes, agentBytes]) => {
+      request('agent-03.glb', priority).then((response) => response.arrayBuffer()).catch(() => undefined),
+    ]).then(async ([layout, connector, cityBytes, agentBytes]) => {
       if (ended || contextLost) return;
       const city = await loader.parseAsync(cityBytes, ASSET_PATH);
       if (ended || contextLost) { disposeModel(city.scene); return; }
+      navigation.connect('plaza', 'plazaNorth', connector);
+      navigation.connect('plazaNorth', 'governance', layout);
       north = city.scene;
       setBuildingShadows(north);
       scene.add(north);
@@ -425,11 +470,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       entranceLight.position.set(0, 4, -83);
       scene.add(entranceLight);
 
+      if (!agentBytes) throw new Error('Researcher asset unavailable');
       const agent = await loader.parseAsync(agentBytes, ASSET_PATH);
       if (ended || contextLost) { disposeModel(agent.scene); return; }
-      attachAgent('03', agent, layout.points, [0, -95]);
+      attachAgent('03', agent, 'plazaNorth');
     }).catch(() => {
-      if (!ended && !contextLost) callbacks.agent('03', 'unavailable', 0);
+      if (!ended && !contextLost) callbacks.agent('03', { status: 'unavailable', progress: 0 });
     });
   }
 
@@ -460,7 +506,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     actor = result;
     connectPrimary();
   }).catch(() => {
-    if (!ended && !contextLost) callbacks.agent('01', 'unavailable', 0);
+    if (!ended && !contextLost) callbacks.agent('01', { status: 'unavailable', progress: 0 });
   }).finally(() => { actorLoading = false; });
 
   Promise.all([
@@ -471,6 +517,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const result = await loader.parseAsync(bytes, ASSET_PATH);
     if (ended || contextLost) { disposeModel(result.scene); return; }
     route = layout;
+    navigation.connect('plaza', 'market', route);
     focus.set(...route.target);
     marketEntrance.set(...(route.points.at(-1) ?? route.target));
     model = result.scene;

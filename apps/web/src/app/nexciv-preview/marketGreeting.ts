@@ -1,20 +1,23 @@
 import type { Vector3 } from 'three';
 import type { AgentPhase, PatrolCue } from './agent';
 
-type Attendee = { phase: AgentPhase; progress: number; root: { position: Vector3 } };
+type Attendee = { phase: AgentPhase; metresRemaining: number; root: { position: Vector3 } };
 type Greeting = { active: boolean; resident?: PatrolCue; visitor?: PatrolCue };
 
 const GREETING_DURATION = 4.4;
-const VISITOR_DEPARTS_AT = 81;
+const GREETING_APPROACH_METRES = 9;
 
 export function createMarketGreeting() {
   let elapsed = 0;
 
   return (dt: number, resident?: Attendee, visitor?: Attendee): Greeting => {
-    if (!resident || !visitor) return { active: false };
+    if (!resident || !visitor) {
+      elapsed = 0;
+      return { active: false, visitor: { hold: 'start' } };
+    }
     const residentHere = resident.phase === 'arrived';
     if (!residentHere) elapsed = 0;
-    const approaching = resident.phase === 'outbound' && resident.progress >= VISITOR_DEPARTS_AT;
+    const approaching = resident.phase === 'outbound' && resident.metresRemaining <= GREETING_APPROACH_METRES;
     const meeting = residentHere && visitor.phase === 'arrived';
 
     if (meeting && elapsed < GREETING_DURATION) {

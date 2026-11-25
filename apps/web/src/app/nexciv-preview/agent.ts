@@ -27,7 +27,7 @@ function createNod(asset: GLTF, mixer: THREE.AnimationMixer) {
   return mixer.clipAction(clip).setLoop(THREE.LoopOnce, 1);
 }
 
-export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination: [number, number]) {
+function measuredRoute(points: RoutePoint[]) {
   let length = 0;
   let previous: THREE.Vector3 | undefined;
   const route = points.map((point) => {
@@ -36,11 +36,18 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination
     previous = position;
     return { position, distance: length };
   });
+  if (!Number.isFinite(length) || length <= 0) throw new Error('Invalid Agent route');
+  return { route, length };
+}
+
+export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDestination: [number, number]) {
+  let { route, length } = measuredRoute(points);
+  let destination = initialDestination;
   const idleClip = THREE.AnimationClip.findByName(asset.animations, 'Idle');
   const walkClip = THREE.AnimationClip.findByName(asset.animations, 'Walk');
   const stride = Number(asset.scene.children.find((object) => object.userData.walk_stride_m)?.userData.walk_stride_m);
-  if (!idleClip || !walkClip || !Number.isFinite(length) || length <= 0 || !Number.isFinite(stride) || stride <= 0) {
-    throw new Error('Invalid Agent route or motion clips');
+  if (!idleClip || !walkClip || !Number.isFinite(stride) || stride <= 0) {
+    throw new Error('Invalid Agent motion clips or stride');
   }
 
   const root = new THREE.Group();
@@ -115,6 +122,15 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination
     root,
     get phase() { return phase; },
     get progress() { return Math.round(100 * distance / length); },
+    get metresRemaining() { return length - distance; },
+    get dwelledSeconds() { return dwell; },
+    plan(nextPoints: RoutePoint[], nextDestination: [number, number]) {
+      ({ route, length } = measuredRoute(nextPoints));
+      destination = nextDestination;
+      distance = dwell = 0;
+      direction = 1;
+      phase = 'outbound';
+    },
     advance(dt: number, cue?: PatrolCue) {
       if (dt <= 0) return;
       const heldAtStart = cue?.hold === 'start' && distance === 0;

@@ -1,23 +1,22 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createWalk, type AgentId, type AgentStatus, type View, type WalkController } from './walk';
+import { createWalk, type AgentId, type AgentReport, type View, type WalkController } from './walk';
+import type { Place } from './navigation';
 import styles from './preview.module.css';
 
-const DESTINATIONS: Record<AgentId, string> = { '01': 'Corner Market', '03': '议会大厅' };
-type AgentReport = { status: AgentStatus; progress: number };
+const PLACES: Record<Place, string> = { plaza: '中央广场', market: 'Corner Market', governance: '议会大厅' };
 const STARTING: AgentReport = { status: 'loading', progress: 0 };
 
-function activity(id: AgentId, status: AgentStatus) {
+function activity(id: AgentId, report: AgentReport) {
+  const place = PLACES[report.destination ?? 'plaza'];
   return {
     loading: id === '03' ? '正在载入议会大厅街区' : '中央广场',
-    outbound: `前往 ${DESTINATIONS[id]}`,
-    arrived: `已到达 ${DESTINATIONS[id]}`,
+    outbound: `前往 ${place}`,
+    arrived: `已到达 ${place}`,
     greeting: '和 02 号打招呼',
-    inbound: '返回中央广场',
-    atNexus: '已返回中央广场',
     unavailable: 'Agent 暂未载入',
-  }[status];
+  }[report.status];
 }
 
 export function WalkPreview() {
@@ -42,7 +41,7 @@ export function WalkPreview() {
       const controller = createWalk(host, initialView, !reduceMotion, {
         ready: (elapsed) => { setReadyTime(elapsed); setState('ready'); },
         fallback: () => setState('fallback'),
-        agent: (id, status, progress) => setReports((previous) => ({ ...previous, [id]: { status, progress } })),
+        agent: (id, report) => setReports((previous) => ({ ...previous, [id]: report })),
         fps: setFps,
       });
       world.current = controller;
@@ -60,6 +59,8 @@ export function WalkPreview() {
 
   const sceneReady = state === 'ready';
   const agent = reports[selected];
+  const origin = PLACES[agent.from ?? 'plaza'];
+  const destination = agent.destination ? PLACES[agent.destination] : '';
   const agentReady = sceneReady && agent.status !== 'loading' && agent.status !== 'unavailable';
   const playbackReady = sceneReady && Object.values(reports).some(({ status }) => status !== 'loading' && status !== 'unavailable');
 
@@ -79,7 +80,7 @@ export function WalkPreview() {
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
           <small>{agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区'}</small>
-          <strong role="status">{sceneReady ? activity(selected, agent.status) : '中央广场'}</strong>
+          <strong role="status">{sceneReady ? activity(selected, agent) : '中央广场'}</strong>
         </div>
         {state === 'fallback' && <p className={styles.fallback}>3D 场景暂时无法加载。下方可查看路线的两处实景。</p>}
       </section>
@@ -105,9 +106,9 @@ export function WalkPreview() {
           </span>
         </div>
         <div className={styles.route}>
-          <span>中央广场</span>
-          <progress aria-label={`Agent ${selected} 在中央广场与${DESTINATIONS[selected]}之间的位置`} max={100} value={agent.progress} />
-          <span>{DESTINATIONS[selected]}</span>
+          <span>{origin}</span>
+          <progress aria-label={destination ? `Agent ${selected} 从 ${origin} 前往 ${destination} 的行程` : `Agent ${selected} 的行程`} max={100} value={agent.progress} />
+          <span>{destination}</span>
           <span className={styles.performance} aria-label="本机实时渲染指标">{fps > 0 ? `${fps} FPS · ${(readyTime / 1000).toFixed(1)} s` : ''}</span>
         </div>
         {state === 'fallback' && (

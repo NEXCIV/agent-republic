@@ -47,6 +47,18 @@ GOVERNANCE_WAYPOINTS = (
     (0.0, 73.6),
     (0.0, 81.10),
 )
+PLAZA_CONNECTOR = (
+    WAYPOINTS[0],
+    (2, -22.4),
+    (16.7, -22.4),
+    (19.8, -17.0),
+    (21.9, -12.0),
+    (22.5, -6.0),
+    (22.6, 7.0),
+    (21.0, 14.7),
+    (17.4, 18.0),
+    GOVERNANCE_WAYPOINTS[0],
+)
 MARKET_GREETING_WAYPOINTS = ((7.2, -59.65), (11.45, -59.65))
 LAYERS = {
     "ROADS",
@@ -183,6 +195,29 @@ def sidewalk_route(scene, graph, waypoints, clearance=0.0):
                     raise RuntimeError(f"Insufficient clearance at {(x, y)} next to {obstacle}")
         result.append([round(x, 3), round(point.z, 3), round(-y, 3)])
     return result
+
+
+def alternate_lanes(scene, graph):
+    """Offset the continuous spine before splitting it, so all shared nodes still line up."""
+    spine = [
+        Vector(point) for point in (*reversed(WAYPOINTS), *PLAZA_CONNECTOR[1:], *GOVERNANCE_WAYPOINTS[1:])
+    ]
+    tangents = [(end - start).normalized() for start, end in pairwise(spine)]
+    normals = [Vector((-direction.y, direction.x)) for direction in tangents]
+    alternate = []
+    for i, point in enumerate(spine):
+        before = normals[max(0, i - 1)]
+        after = normals[min(i, len(normals) - 1)]
+        bisector = (before + after).normalized()
+        alternate.append(point - bisector * (0.84 / max(0.5, bisector.dot(after))))
+    south = len(WAYPOINTS) - 1
+    north = south + len(PLAZA_CONNECTOR) - 1
+    # Follow the outer part of the slope where the curb turns into the north crossing.
+    alternate[north + 1].x += 0.32
+    alternate[north + 2].x += 0.32
+    # The second Agent stops at the Market's sidewalk corner, clear of the greeting spot.
+    spans = (list(reversed(alternate[1 : south + 1])), alternate[south : north + 1], alternate[north:])
+    return [sidewalk_route(scene, graph, span, clearance=0.22) for span in spans]
 
 
 def paint_governance_crossing(mesh, transform, white, asphalt):
@@ -379,6 +414,8 @@ def main():
     graph = bpy.context.evaluated_depsgraph_get()
     route = sidewalk_route(scene, graph, WAYPOINTS)
     north_route = sidewalk_route(scene, graph, GOVERNANCE_WAYPOINTS, clearance=0.23)
+    connector = sidewalk_route(scene, graph, PLAZA_CONNECTOR, clearance=0.28)
+    market_lane, plaza_lane, north_lane = alternate_lanes(scene, graph)
     market_guest = sidewalk_route(scene, graph, MARKET_GREETING_WAYPOINTS, clearance=0.32)
     if any(point[1] < 0.15 for point in market_guest):
         raise RuntimeError("The Market greeting approach must stay on the sidewalk")
@@ -393,12 +430,19 @@ def main():
         for obj in list(root.objects):
             bpy.data.objects.remove(obj, do_unlink=True)
         bpy.data.collections.remove(root)
-    manifest = {"points": route, "target": [1, 0, 24]}
+    manifest = {"points": route, "alternate": market_lane, "target": [1, 0, 24]}
     (args.output / "route.json").write_text(
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8"
     )
     (args.output / "governance-route.json").write_text(
-        json.dumps({"points": north_route, "target": [0, 0, -15]}, separators=(",", ":")) + "\n",
+        json.dumps(
+            {"points": north_route, "alternate": north_lane, "target": [0, 0, -15]}, separators=(",", ":")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (args.output / "nexus-connector.json").write_text(
+        json.dumps({"points": connector, "alternate": plaza_lane}, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
     (args.output / "market-greeting.json").write_text(
