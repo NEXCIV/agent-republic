@@ -31,6 +31,9 @@ EAST_CROSSING_STRIPES = tuple((-4.59 + i * 0.61, -4.24 + i * 0.61) for i in rang
 WEST_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.018"
 WEST_CROSSING_Y = (-38.5, -36.0)
 WEST_CROSSING_STRIPES = tuple((-67.35 + i * 0.60, -67.01 + i * 0.60) for i in range(12))
+SHORE_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.071"
+SHORE_CROSSING_X = (16.4, 19.7)
+SHORE_CROSSING_STRIPES = tuple((122.63 + i * 0.59, 122.97 + i * 0.59) for i in range(12))
 WAYPOINTS = (
     (0, -21.4),
     (2.3, -29.4),
@@ -97,6 +100,17 @@ FORUM_ALTERNATE = (
     (-53.55, -31.05), (-58, -36.8), (-73.6, -36.8), (-73.75, -51), (-73.75, -54.8),
     (-90.95, -55.3), (-92.7, -58.5), (-91.46, -64), (-91.46, -68.4), (-93.21, -75.1),
 )
+SHORE_HALL_SIDE = ((8, 77), (10, 77), (13, 82.5), (16, 84.5), (17, 85.5), (17, 108))
+SHORE_WAYPOINTS = (
+    GOVERNANCE_WAYPOINTS[-1], *SHORE_HALL_SIDE, (16.5, 117), (17.5, 119.5),
+    (17.5, 132.5), (8.5, 134), (7.5, 136), (6.5, 146.8), (4, 151.6),
+    (4, 165.3), (71, 165.3), (71, 174), (71, 190),
+)
+SHORE_ALTERNATE = (
+    *SHORE_HALL_SIDE, (16.5, 115.5), (17, 117.5), (18.5, 119.5), (18.5, 132.5),
+    (8.5, 134), (7.5, 136), (7.25, 146.8), (3.15, 151.6),
+    (3.15, 166.15), (71.85, 166.15), (71.85, 174), (71.85, 190),
+)
 EAST_HEROES = {
     "HERO_03_Citizen_Registration": "registry",
     "HERO_04_Public_Construction": "works",
@@ -144,7 +158,13 @@ CHUNKS = {
     "registry": "citizen-registry-detail.glb",
     "works": "public-construction-detail.glb",
     "west": "west-community-district.glb",
+    "shore": "north-lakeshore.glb",
 }
+SHORE_LAYER_NAMES = {
+    "01 | Terrain and shore", "02 | Lake", "03 | Promenade and piers", "04 | Shore trees", "Marina boats",
+}
+LAKE_SURFACE = "CIVRUM_Lake_Surface"
+PARKLAND = "City parkland"
 
 
 def in_slice(obj, matrix, area):
@@ -160,6 +180,8 @@ def in_slice(obj, matrix, area):
         return not (base or governance) and top_x > EAST and low_x < 143 and top_y > -125 and low_y < 44
     if area == "west":
         return not (base or governance) and low_x < WEST and top_x > -151 and top_y > -130 and low_y < 15
+    if area == "shore":
+        return not (base or governance) and top_y > 116 and low_y < 164 and top_x > -153 and low_x < 153
     return governance if area == "governance" else base
 
 
@@ -172,6 +194,9 @@ def world_geometry(scene, graph, area):
         named_layers.add("03_Hero_Landmarks")
     if area == "east":
         named_layers.update(("CONSTRUCTION", "10 | Construction crane", "02 | Public Works at eye level"))
+    if area == "shore":
+        named_layers.update(SHORE_LAYER_NAMES)
+        named_layers.update(("05_Street_Assets", "08 | Lakeside tower", "20 | NEXCIV Waterfront Tower"))
     candidates = {ob for name in named_layers for ob in layers[name].objects if ob.name in scene.objects}
     lot_types = {"governance": "GOVERNANCE", "east": "CONSTRUCTION", "west": "COMMUNITY"}
     lot = lot_types.get(area)
@@ -186,6 +211,23 @@ def world_geometry(scene, graph, area):
             heroes = EAST_HEROES if area == "east" else ("HERO_01_Governance_Hall",)
             if obj.name not in heroes:
                 continue
+        if area == "shore" and any(group.name in SHORE_LAYER_NAMES for group in obj.users_collection):
+            # The lake and shaped banks extend past the regular street chunks.
+            name = obj.name
+            if obj.type == "MESH" and not name.startswith(("South ", "Pocket garden", "Belt road", "Southern ")):
+                bounds = [obj.matrix_world @ Vector(co) for co in obj.bound_box]
+                if max(point.y for point in bounds) > 111:
+                    if name.startswith(("Park woodland", "Far bank woodland")):
+                        x, y, _ = obj.matrix_world.translation
+                        if abs(x) > 285 or y > 410:
+                            continue
+                        # Thin the distant crowns without changing the authored quayside planting.
+                        index = name.rpartition(".")[2]
+                        if (y > 230 or abs(x) > 154) and index.isdigit() and int(index) % 3:
+                            continue
+                    tier = "water" if name == LAKE_SURFACE else "land" if name in (PARKLAND, "Far shore parkland") else "shore"
+                    yield obj.evaluated_get(graph), obj.matrix_world, tier
+            continue
         if obj.instance_collection:
             for part in obj.instance_collection.all_objects:
                 matrix = (
@@ -314,6 +356,23 @@ def paint_crossing(mesh, transform, white, asphalt, across, bands, cross_axis=0)
     mesh.update()
 
 
+def trim_parkland(mesh, transform):
+    """Match the north edge of the starter terrain at 111 m."""
+    bm = bmesh.new()
+    bm.from_mesh(mesh)
+    bmesh.ops.bisect_plane(
+        bm,
+        geom=[*bm.verts, *bm.edges, *bm.faces],
+        dist=0.00001,
+        plane_co=transform.inverted() @ Vector((0, 111, 0)),
+        plane_no=transform.to_3x3().transposed() @ Vector((0, 1, 0)),
+        clear_inner=True,
+    )
+    bm.to_mesh(mesh)
+    bm.free()
+    mesh.update()
+
+
 def stage_assets(scene, graph, chunk):
     root = bpy.data.collections.new("NEXCIV web export")
     scene.collection.children.link(root)
@@ -343,7 +402,7 @@ def stage_assets(scene, graph, chunk):
             finish.surface_render_method = "BLENDED"
             transparent.add(finish)
         base = surface.inputs["Base Color"]
-        if base.is_linked and base.links[0].from_node.type != "TEX_IMAGE":
+        if base.is_linked and base.links[0].from_node.type not in {"TEX_IMAGE", "VERTEX_COLOR"}:
             links = finish.node_tree.links
             upstream = base.links[0].from_node
             atlas = upstream.inputs["Color"].links if upstream.type == "HUE_SAT" else ()
@@ -371,6 +430,7 @@ def stage_assets(scene, graph, chunk):
         ("governance", GOVERNANCE_CROSSING_ROAD): (GOVERNANCE_CROSSING_X, GOVERNANCE_CROSSING_STRIPES, 0),
         ("east", EAST_CROSSING_ROAD): (EAST_CROSSING_X, EAST_CROSSING_STRIPES, 0),
         ("west", WEST_CROSSING_ROAD): (WEST_CROSSING_Y, WEST_CROSSING_STRIPES, 1),
+        ("shore", SHORE_CROSSING_ROAD): (SHORE_CROSSING_X, SHORE_CROSSING_STRIPES, 0),
     }
     cache, parts = {}, []
     area = "east" if chunk in {"east", "registry", "works"} else chunk
@@ -404,6 +464,8 @@ def stage_assets(scene, graph, chunk):
         asset = bpy.data.objects.new(source.name, mesh)
         root.objects.link(asset)
         asset.matrix_world = Matrix.Identity(4) if chunk == "retail" else transform
+        if chunk == "shore" and name == PARKLAND:
+            trim_parkland(mesh, transform)
         if name.startswith("CIVRUM_LOT_PAINT_"):
             # The lettering and the top of the stone are both at 0.182 m in the source scene.
             asset.location.z += 0.004
@@ -436,6 +498,8 @@ def stage_assets(scene, graph, chunk):
                 parts.append((asset, face_limit))
         elif chunk == "west" and len(mesh.polygons) > 55000:
             parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 14000))
+        elif chunk == "shore" and len(mesh.polygons) > 20000:
+            parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 12000))
         elif chunk == "governance" and len(mesh.polygons) > 10000:
             parts.append((asset, 52000 if name == "HERO_01_Governance_Hall" else 6500))
         elif name.startswith("Courtyard | roses") and len(mesh.polygons) > 12000:
@@ -458,7 +522,7 @@ def stage_assets(scene, graph, chunk):
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
             reduced[key].validate(clean_customdata=False)
-            if (chunk in {"street", "retail", "east", "west"} and obj.name.startswith(GARDEN_RETAIL)) or (
+            if (chunk in {"street", "retail", "east", "west", "shore"} and obj.name.startswith(GARDEN_RETAIL)) or (
                 chunk in {"east", "works"} and obj.name in EAST_HEROES
             ):
                 mesh = reduced[key]
@@ -470,7 +534,7 @@ def stage_assets(scene, graph, chunk):
     # Batch stable surfaces while keeping repeated meshes shared and both replacements independent.
     bpy.ops.object.select_all(action="DESELECT")
     shared = set(reduced.values())
-    for tier in ("city", "paving", "detail", "market_proxy"):
+    for tier in ("city", "paving", "detail", "market_proxy", "land", "shore", "water"):
         keep = [
             o
             for o in root.objects
@@ -578,6 +642,13 @@ def main():
         "points": sidewalk_route(scene, graph, FORUM_WAYPOINTS, clearance=0.22),
         "alternate": sidewalk_route(scene, graph, (east_prefix[0], *FORUM_ALTERNATE), clearance=0.22),
     }
+    shore_route = None
+    if args.chunk in {None, "shore"}:
+        end_x, _, end_z = north_lane[-1]
+        shore_route = {
+            "points": sidewalk_route(scene, graph, SHORE_WAYPOINTS, clearance=0.22),
+            "alternate": sidewalk_route(scene, graph, ((end_x, -end_z), *SHORE_ALTERNATE), clearance=0.22),
+        }
     args.output.mkdir(parents=True, exist_ok=True)
     for chunk, filename in CHUNKS.items():
         if args.chunk and chunk != args.chunk:
@@ -614,6 +685,10 @@ def main():
     (args.output / "west-route.json").write_text(
         json.dumps(forum_route, separators=(",", ":")) + "\n", encoding="utf-8"
     )
+    if shore_route:
+        (args.output / "lakeshore-route.json").write_text(
+            json.dumps(shore_route, separators=(",", ":")) + "\n", encoding="utf-8"
+        )
     print(f"PREVIEW PASS {len(route)} market and {len(north_route)} governance route samples", flush=True)
 
 

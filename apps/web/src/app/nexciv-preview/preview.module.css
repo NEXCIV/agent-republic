@@ -95,6 +95,7 @@
   .viewer {min-height: max(375px, calc(100svh - 207px));}
   .destination {top: 16px; padding: 9px 12px 11px;}
   .footer {gap: 5px;}
+  .switcher[aria-label="视角"] { flex-wrap: wrap; }
   .hint {width: 100%; margin: 2px 0 0;}
   .route {gap: 6px; flex-wrap: wrap;}
   .route progress {flex: 1; min-width: 64px;}
