@@ -1,5 +1,17 @@
 # CIVRUM 湖畔城市 · E6-07 氛围样板
 
+## 湖畔商街黄昏版
+
+[打开黄昏场景](CIVRUM_World_300m_Dusk.blend) 后，相机位于南侧园艺商铺前。场景沿用上一版的模型和镜位，把太阳高度从 25° 调到 10°。入口雨棚的两盏向下照明覆盖门前铺地，招牌、前排货架和二楼分别控制亮度；屋顶天窗仍能看见二层。可在 `18 | Dusk practical lighting` 集合调整新增灯具。
+
+28 栋同源沿街商铺复用原网格和贴图，按窗带高度、窗面颜色和位置控制暖光。99 盏路灯的光源跟随灯头，按三种灯型共享灯具数据。中央广场与议会入口有局部投光，蓝色水景保留在广场水池一带。
+
+[街景与俯视原光照对比](renders/CIVRUM_Dusk_Comparison.jpg) · [1920 × 1080 街景](renders/CIVRUM_Dusk_Street.png) · [2560 × 1440 俯视](renders/CIVRUM_Dusk_Overview.png)。两组镜位均使用第 120 帧。此版本供 Blender 美术评审。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_shop_dusk.py -- --save --views street overview
+```
+
 ## 南侧园艺商铺
 
 [打开南侧商铺样板场景](CIVRUM_World_300m_South_Shop.blend)。打开时相机朝向园艺店正门。样板位于南侧中央入口以东的第一栋低楼，沿用走查版的 40 号地基、朝向和傍晚光照。在大纲展开 `16 | South garden shop`，可分别编辑石座与柱、窗框、门廊、屋面、种植池和室内陈列。原 Hi3D 的屋顶多肉沿用原贴图，金属收边、磨砂石材与透景玻璃分别着色。
