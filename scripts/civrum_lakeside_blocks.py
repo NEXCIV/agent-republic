@@ -4,6 +4,7 @@ import math
 
 import bpy
 from build_civrum_world import Geometry, circle, rectangle
+from civrum_nexus_plaza import rebuild_medallion
 from mathutils import Vector
 
 STONE, BASALT, METAL, GOLD, LIGHT, GLASS, WATER, FOAM, LEAF, BRICK, CANVAS, WOOD, AMBER, COOL = range(14)
@@ -268,30 +269,7 @@ def public_spaces(group):
         group, "Forum | outdoor auditorium", forum.mesh("Forum seating and stage", PALETTE), -95, -88.5, 0.172
     )
 
-    compass = Geometry()
-    for i in range(16):
-        a, b = i * 22.5, (i + 1) * 22.5
-        compass.surface(sector(3.15, 9.45, a + 0.4, b - 0.4, 3), 0, BASALT if i % 2 else METAL)
-        ar, br = math.radians(a), math.radians(b)
-        mid = (ar + br) / 2
-        compass.surface(
-            [
-                (3.4 * math.cos(mid), 3.4 * math.sin(mid)),
-                (8.9 * math.cos(ar + 0.02), 8.9 * math.sin(ar + 0.02)),
-                (8.9 * math.cos(br - 0.02), 8.9 * math.sin(br - 0.02)),
-            ],
-            0.003,
-            GOLD if i % 2 else STONE,
-        )
-    compass.band(circle(9.66, 96), circle(9.51, 96), 0.001, GOLD)
-    place(
-        group,
-        "Nexus | stone and brass compass",
-        compass.mesh("Nexus radial paving", PALETTE),
-        0,
-        -11.6,
-        0.222,
-    )
+    rebuild_medallion(group, PALETTE, STONE, BASALT, METAL, GOLD)
     strips = Geometry()
     for sign in (-1, 1):
         strips.box(0, sign * 5.03, 0, 32, 0.76, 0.012, GOLD)

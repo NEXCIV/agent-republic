@@ -1,5 +1,15 @@
 # NEXCIV 湖畔城市 · E6-07 美术样板
 
+## Nexus 中央广场
+
+[打开中央广场修正版](NEXCIV_World_300m_Plaza.blend) · [同机位前后对比](renders/NEXCIV_Plaza_Comparison.jpg)。中央雕塑和直径 16.5 米的石材镶嵌共用圆心 `(0, -12.15)`。十六组放射纹和两道金色环线拼在同一个铺装面上。外圈距台阶最近处 0.70 米，南侧引导线分列入口字标两侧。
+
+场景基于北岸圆塔版。Blender 5.3 重开文件后，沿圆环和放射纹采样的 1,152 个点均命中同一铺装高度。后续重建湖畔场景也会使用这套铺装。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_nexciv_plaza_patch.py -- --save --render
+```
+
 ## 北岸圆塔
 
 [打开 NEXCIV 湖畔场景](NEXCIV_World_300m_Waterfront.blend)。北岸原圆塔地块位于 `(-83, 145.2)`，新版约 36.7 米高。弧形塔冠朝向湖岸，屋面设独立种植池与座椅。楼层压边、深色立柱上的细金线、内退玻璃和琥珀色窗灯可分别调整。首层雨棚有 NEXCIV 字样，透过门厅玻璃可见接待台和吊灯。

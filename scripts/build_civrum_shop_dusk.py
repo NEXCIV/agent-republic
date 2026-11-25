@@ -310,7 +310,12 @@ def gold_accents(scene):
     gold_finish(nexus.name, "F0B90B", "FFD277", 0.34)
     for obj in scene.objects:
         if obj.name.startswith(
-            ("Nexus | boulevard guides", "Nexus | stone and brass compass", "Civic setback office ")
+            (
+                "Nexus | boulevard guides",
+                "Nexus | stone and brass compass",
+                "Nexus | south entry markers",
+                "Civic setback office ",
+            )
         ):
             for slot in obj.material_slots:
                 if slot.material.name in {"MAT_CIVIC_Brass", "MAT_CIVIC_Light"}:
