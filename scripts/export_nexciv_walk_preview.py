@@ -32,6 +32,7 @@ from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
 from civrum_lakeside_blocks import PALETTE, STONE
 from refine_nexciv_public_works import ROOF_DETAILS, WORKS, refine_public_works
+from refine_nexciv_works_railing import RAILING
 
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "apps/web/public/nexciv-walk"
@@ -586,7 +587,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
             continue
         if chunk == "registry" and EAST_HEROES.get(name) != chunk:
             continue
-        if chunk == "works" and name not in (WORKS, ROOF_DETAILS):
+        if chunk == "works" and name not in (WORKS, ROOF_DETAILS, RAILING):
             continue
         if name == ROOF_DETAILS and chunk != "works":
             continue
@@ -664,9 +665,12 @@ def stage_assets(scene, graph, chunk, library=DEST):
             tier = "market_proxy"
         elif street_proxy:
             tier = "street_proxy"
-        asset["previewTier"] = (
-            "works_roof" if name == ROOF_DETAILS else "detail" if chunk in {"registry", "works", "center", "hall"} else tier
-        )
+        if name == RAILING:
+            asset["previewTier"] = "works_proxy" if chunk == "east" else "works_railing"
+        elif name == ROOF_DETAILS:
+            asset["previewTier"] = "works_roof"
+        else:
+            asset["previewTier"] = "detail" if chunk in {"registry", "works", "center", "hall"} else tier
         if chunk == "works" and name == WORKS:
             parts.append((asset, 480000))
         elif chunk == "center":
@@ -698,8 +702,8 @@ def stage_assets(scene, graph, chunk, library=DEST):
 
     if chunk in {"registry", "center", "hall", "retail"} and len(root.objects) != 1:
         raise RuntimeError(f"Expected one landmark source mesh for {chunk}")
-    if chunk == "works" and len(root.objects) != 2:
-        raise RuntimeError("Expected the original construction centre and its fitted roof details")
+    if chunk == "works" and len(root.objects) != 3:
+        raise RuntimeError("Expected the construction centre, its fitted roof details and its terrace railing")
 
     reduced = {}
     for obj, face_limit in parts:

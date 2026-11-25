@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_civrum_lakeside import material
 from build_civrum_world import Geometry, circle
 from detail_civrum_world import rod
+from refine_nexciv_works_railing import fit_curved_railing
 
 STUDY = Path(__file__).resolve().parents[1] / "art-direction/world-upgrade-v1/lakeside-study"
 WORLD = STUDY / "NEXCIV_World_300m_Facades.blend"
@@ -147,6 +148,7 @@ def refine_public_works(scene, *, roof_details=False):
         bpy.data.collections["02 | Public Works at eye level"].objects.link(obj)
     if roof_details:
         fit_roof_details(scene, body)
+    fit_curved_railing(scene, body)
 
 
 def main():
