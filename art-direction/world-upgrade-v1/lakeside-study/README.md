@@ -1,5 +1,15 @@
 # CIVRUM 湖畔城市 · E6-07 氛围样板
 
+## 黑金暖黄昏
+
+[打开黑金暖黄昏场景](CIVRUM_World_300m_Gold_Dusk.blend)。夕阳照亮建筑朝光面，深蓝湖面和石墨灰街道衬托暖色橱窗。中央 Nexus 顶部、广场指路线与退台办公楼的局部收边使用技术黄 `#F0B90B`。园艺商铺用较柔和的金属色，入口雨棚的暖光延伸到人行道。
+
+[前后对比](renders/CIVRUM_Gold_Dusk_Comparison.jpg) · [全城俯视](renders/CIVRUM_Gold_Dusk_Overview.png) · [商铺街景](renders/CIVRUM_Gold_Dusk_Street.png)。对比沿用上一版黄昏的镜位、曝光和第 120 帧。可在仓库根目录重建此 Blender 版本。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_shop_dusk.py -- --gold --save --views overview street
+```
+
 ## 湖畔商街黄昏版
 
 [打开黄昏场景](CIVRUM_World_300m_Dusk.blend) 后，相机位于南侧园艺商铺前。场景沿用上一版的模型和镜位，把太阳高度从 25° 调到 10°。入口雨棚的两盏向下照明覆盖门前铺地，招牌、前排货架和二楼分别控制亮度；屋顶天窗仍能看见二层。可在 `18 | Dusk practical lighting` 集合调整新增灯具。

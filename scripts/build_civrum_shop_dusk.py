@@ -27,7 +27,7 @@ def stops(node, entries):
         ramp.elements.new(pos).color = tint
 
 
-def evening_sky(scene):
+def evening_sky(scene, gold):
     # The original sky has separate backgrounds for visible sky and diffuse illumination.
     tree = scene.world.node_tree
     nodes = tree.nodes
@@ -38,14 +38,18 @@ def evening_sky(scene):
     sun = bpy.data.objects["Lakeside warm sun"]
     sun.location = direction * 150
     sun.rotation_euler = (-direction).to_track_quat("-Z", "Y").to_euler()
-    sun.data.energy, sun.data.angle, sun.data.color = 1.27, math.radians(1.9), (1, 0.57, 0.32)
+    sun.data.energy = 2.02 if gold else 1.27
+    sun.data.angle = math.radians(1.9)
+    sun.data.color = (1, 0.58, 0.22) if gold else (1, 0.57, 0.32)
     nodes["Vector Math"].inputs[1].default_value = direction
-    stops(nodes["Color Ramp"], [(0, color("BFADB7")), (0.28, color("8999B0")), (0.78, color("526C9B"))])
+    fill = ("C4B0B0", "8DA1BA", "4F73A4") if gold else ("BFADB7", "8999B0", "526C9B")
+    sky = ("FFD08C", "F8BB86", "B1A6B5", "617EA9") if gold else ("F8C090", "E9B5A4", "AAA2BF", "627DA6")
+    stops(nodes["Color Ramp"], [(p, color(tint)) for p, tint in zip((0, 0.28, 0.78), fill, strict=True)])
     stops(
         nodes["Color Ramp.002"],
-        [(0, color("F8C090")), (0.08, color("E9B5A4")), (0.26, color("AAA2BF")), (0.68, color("627DA6"))],
+        [(p, color(tint)) for p, tint in zip((0, 0.08, 0.26, 0.68), sky, strict=True)],
     )
-    nodes["Background"].inputs["Strength"].default_value = 0.62
+    nodes["Background"].inputs["Strength"].default_value = 0.68 if gold else 0.62
     nodes["Background.001"].inputs["Strength"].default_value = 0.82
     nodes["Mix (Legacy).001"].inputs[0].default_value = 0.38
     # Reflected sky follows the visible sky, including across the lake and in the clear shop glazing.
@@ -259,17 +263,78 @@ def plaza_lighting(group):
             )
 
 
+def gold_accents(scene):
+    # Retain the blue upper sky, lake material and cool water lights. Change the practicals by use.
+    lights = {
+        "Dusk | canopy downlight": ((1, 0.65, 0.27), 1.18),
+        "Dusk | fascia wash": ((1, 0.77, 0.42), 1.13),
+        "Dusk | rear display": ((1, 0.66, 0.32), 1.10),
+        "Dusk | rooflight well": ((1, 0.68, 0.29), 1.12),
+        "Dusk | council portico uplight": ((1, 0.70, 0.32), 1.32),
+        "Dusk | Nexus plinth uplight": ((1, 0.71, 0.25), 1.40),
+    }
+    # One shared light data-block per street fixture style, updated once per style.
+    for data in bpy.data.lights:
+        if data.library:
+            continue
+        key = data.name.partition(".")[0]
+        if key in lights:
+            data.color, gain = lights[key]
+            data.energy *= gain
+        elif key.startswith("Dusk | CIVRUM_Street_PROP_STREETLIGHT_"):
+            data.color = (1, 0.70, 0.34)
+    for obj in bpy.data.objects["Shop 40 | Ground centre"].children:
+        if obj.type == "LIGHT" and obj.name.startswith("Shop 40 |"):
+            r, g, b = obj.data.color
+            obj.data.color = (r, g * 0.97, b * 0.80)
+
+    def gold_finish(name, base, light, strength):
+        surface = shader(bpy.data.materials[name])
+        if base:
+            surface.inputs["Base Color"].default_value = color(base)
+        surface.inputs["Emission Color"].default_value = color(light)
+        surface.inputs["Emission Strength"].default_value = strength
+
+    gold_finish("MAT_SHOP_Brass", "DCB761", "FFD179", 0.16)
+    gold_finish("MAT_SHOP_Opal", None, "FFD29A", 4.8)
+    gold_finish("Dusk | warm street lantern glass", None, "FFD594", 6.2)
+    # Use a separate finish for the city accents rather than changing every object using brass.
+    trim = bpy.data.materials["MAT_CIVIC_Brass"].copy()
+    trim.name = "Civic | architectural gold trim"
+    gold_finish(trim.name, "F0B90B", "FFD06E", 0.29)
+    ribbon = bpy.data.materials["MAT_CIVIC_Light"].copy()
+    ribbon.name = "Civic | amber guide lens"
+    gold_finish(ribbon.name, "F0B90B", "FFD06A", 3.1)
+    nexus = bpy.data.materials["MAT_TECH_YELLOW"].copy()
+    nexus.name = "Nexus | saffron crown"
+    gold_finish(nexus.name, "F0B90B", "FFD277", 0.34)
+    for obj in scene.objects:
+        if obj.name.startswith(
+            ("Nexus | boulevard guides", "Nexus | stone and brass compass", "Civic setback office ")
+        ):
+            for slot in obj.material_slots:
+                if slot.material.name in {"MAT_CIVIC_Brass", "MAT_CIVIC_Light"}:
+                    finish = trim if slot.material.name == "MAT_CIVIC_Brass" else ribbon
+                    slot.link, slot.material = "OBJECT", finish
+    for slot in scene.objects["CIVRUM_PH_CENTRAL_NEXUS"].material_slots:
+        if slot.material.name == "MAT_TECH_YELLOW":
+            slot.link, slot.material = "OBJECT", nexus
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--save", action="store_true")
     parser.add_argument("--views", nargs="+", choices=CAMERAS, default=[])
     parser.add_argument("--draft", type=Path)
     parser.add_argument("--device", choices=("CPU", "CUDA"), default="CPU")
+    parser.add_argument(
+        "--gold", action="store_true", help="Render the warmer graphite and gold dusk variant"
+    )
     args = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
     bpy.ops.wm.open_mainfile(filepath=str(SHOP_WORLD))
     scene = bpy.context.scene
     group = collection(bpy.data.collections["CIVRUM_WORLD"], "18 | Dusk practical lighting")
-    evening_sky(scene)
+    evening_sky(scene, args.gold)
     shop_lights(group)
     street_lights(scene, group)
     plaza_lighting(group)
@@ -280,13 +345,17 @@ def main():
         ("LAKE_Lantern lens", 4.5),
     ):
         shader(bpy.data.materials[name]).inputs["Emission Strength"].default_value = strength
+    if args.gold:
+        gold_accents(scene)
+    version = "Gold_Dusk" if args.gold else "Dusk"
+    destination = OUTPUT / "CIVRUM_World_300m_Gold_Dusk.blend" if args.gold else DEST
     scene.frame_set(120)
     scene.camera = bpy.data.objects[CAMERAS["street"]]
-    scene.render.filepath = "//renders/CIVRUM_Dusk_Street.png"
+    scene.render.filepath = f"//renders/CIVRUM_{version}_Street.png"
     if args.save:
         bpy.context.preferences.filepaths.save_version = 0
-        bpy.ops.wm.save_as_mainfile(filepath=str(DEST), compress=True)
-        bpy.ops.wm.open_mainfile(filepath=str(DEST))
+        bpy.ops.wm.save_as_mainfile(filepath=str(destination), compress=True)
+        bpy.ops.wm.open_mainfile(filepath=str(destination))
         scene = bpy.context.scene
     lamps = [o for o in scene.objects if o.name.startswith("Dusk pool |")]
     assert len(lamps) == 99 and all(o.parent and o.type == "LIGHT" for o in lamps)
@@ -294,6 +363,13 @@ def main():
     retail = bpy.data.collections["Dusk | occupied garden retail"]
     assert shops == 28 == sum(o.instance_collection == retail for o in scene.objects)
     assert all(not lib.is_missing and lib.filepath.startswith("//") for lib in bpy.data.libraries)
+    if args.gold:
+        path_light = bpy.data.materials["Civic | amber guide lens"]
+        guides = [o for o in scene.objects if o.name.startswith("Nexus | boulevard guides")]
+        assert guides and all(any(slot.material == path_light for slot in o.material_slots) for o in guides)
+        target_gold = color("F0B90B")
+        metal = shader(bpy.data.materials["Nexus | saffron crown"]).inputs["Base Color"].default_value
+        assert max(abs(a - b) for a, b in zip(metal, target_gold, strict=True)) < 1e-5
     print(
         f"DUSK OK: {shops} retail instances, {len(lamps)} street lanterns, six existing shop lights.",
         flush=True,
@@ -313,7 +389,7 @@ def main():
         render(
             scene,
             bpy.data.objects[CAMERAS[key]],
-            output / f"CIVRUM_Dusk_{key.title()}.png",
+            output / f"CIVRUM_{version}_{key.title()}.png",
             width,
             bool(args.draft),
         )
