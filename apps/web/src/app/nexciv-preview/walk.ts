@@ -4,9 +4,10 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
 import { createMarketGreeting } from './marketGreeting';
-import { createNavigation, DESTINATION_FACING, placeAt, type Connection, type Junction, type Place, type ResidentId, type Visits } from './navigation';
+import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
-export type View = 'overview' | 'follow';
+export type View = 'overview' | 'follow' | 'east';
+export type EastStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 export type AgentId = ResidentId;
 type Activity = 'outbound' | 'arrived' | 'greeting';
 export type AgentStatus = Activity | 'loading' | 'unavailable';
@@ -26,6 +27,7 @@ type Callbacks = {
   ready: (elapsedMs: number) => void;
   fallback: () => void;
   agent: (id: AgentId, report: AgentReport) => void;
+  east: (status: EastStatus) => void;
   fps: (value: number) => void;
 };
 
@@ -42,6 +44,8 @@ const START_PITCH = 0.88;
 const START_DISTANCE = 115;
 const EXPANDED_PITCH = 1.08;
 const EXPANDED_DISTANCE = 166;
+const EAST_PITCH = 1.02;
+const EAST_DISTANCE = 143;
 const FOLLOW_YAW = -2.54;
 const FOLLOW_PITCH = 0.39;
 const FOLLOW_DISTANCE = 5.6;
@@ -51,6 +55,8 @@ const RETAIL_DETAIL = 'garden-roof-retail-detail.glb';
 const DETAIL_FILES = {
   street: 'nexus-street-detail.glb',
   market: 'corner-market-detail.glb',
+  registry: 'citizen-registry-detail.glb',
+  works: 'public-construction-detail.glb',
 };
 type Detail = keyof typeof DETAIL_FILES;
 
@@ -143,8 +149,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   generator.dispose();
 
   const focus = new THREE.Vector3(0, 0, 24);
+  const eastFocus = new THREE.Vector3(83, 0, 44);
+  const viewFocus = focus.clone();
   const aim = new THREE.Vector3();
   const marketEntrance = new THREE.Vector3();
+  const eastEntrances = {
+    registry: new THREE.Vector3(80, 1, -14),
+    works: new THREE.Vector3(95, 1, 72),
+  };
   const retailFrustum = new THREE.Frustum();
   const viewProjection = new THREE.Matrix4();
   const retailPlacements: { mid: THREE.Mesh; bounds: THREE.Sphere; close?: THREE.Mesh }[] = [];
@@ -156,6 +168,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let model: THREE.Object3D | undefined;
   let north: THREE.Object3D | undefined;
   let northRequested = false;
+  let east: THREE.Object3D | undefined;
+  let eastState: EastStatus = 'idle';
   const details = new Map<Detail, THREE.Object3D>();
   const requestedDetails = new Set<Detail>();
   let retailSource: THREE.Object3D | undefined;
@@ -199,7 +213,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function zoom(factor: number) {
     if (mode === 'follow' && agents.has(followed)) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
-    else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north ? 176 : 139);
+    else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north || east ? 176 : 139);
   }
 
   function resetFollowCamera() {
@@ -211,6 +225,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function setView(next: View, id = followed) {
+    if (mode !== next && next !== 'follow') {
+      orbitYaw = START_YAW;
+      orbitPitch = next === 'east' ? EAST_PITCH : north ? EXPANDED_PITCH : START_PITCH;
+      desiredDistance = next === 'east' ? EAST_DISTANCE : north ? EXPANDED_DISTANCE : START_DISTANCE;
+    }
     if (id !== followed) {
       followed = id;
       resetFollowCamera();
@@ -218,12 +237,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     mode = next;
     followHeight = undefined;
     if (next === 'follow' && id === '03') loadNorth();
+    if (next === 'east') loadEast(true);
   }
 
-  function attachAgent(id: AgentId, asset: GLTF, junction: Junction) {
+  function attachAgent(id: AgentId, asset: GLTF, junction: AgentStart) {
     try {
       const from = placeAt(junction);
-      const visits: Visits = { plaza: 0, market: 0, governance: 0 };
+      const visits: Visits = { plaza: 0, market: 0, governance: 0, registry: 0, works: 0 };
       visits[from] = 1;
       const choice = navigation.choose(id, junction, visits);
       if (!choice) throw new Error('No reachable observation destination');
@@ -263,6 +283,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const bounds = new THREE.Box3().setFromObject(object).getBoundingSphere(new THREE.Sphere());
       retailPlacements.push({ mid: object, bounds });
     });
+  }
+
+  function registerProxies(asset: THREE.Object3D, kinds: Detail[]) {
+    for (const kind of kinds) {
+      const members: THREE.Object3D[] = [];
+      asset.traverse((object) => {
+        if (object.userData.previewTier === `${kind}_proxy`) members.push(object);
+      });
+      proxies.set(kind, members);
+    }
   }
 
   function updateRetail() {
@@ -345,6 +375,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const feet = patrol.root.position;
       followHeight = followHeight === undefined || !tween ? feet.y : THREE.MathUtils.damp(followHeight, feet.y, 12, dt);
       aim.set(feet.x, followHeight + 0.94, feet.z);
+      // Keep the Agent and front doors in view without looking through the sidewalk signs.
+      const registryFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.registry), 3, 17);
+      const worksFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.works), 3, 17);
+      const entranceFrame = Math.max(registryFrame, worksFrame);
+      aim.y += 0.58 * entranceFrame;
+      aim.z += 1.15 * worksFrame - 0.65 * registryFrame;
       const frameGuest = followed === '01' && greeting.active ? 1 : 0;
       greetingFraming = tween ? THREE.MathUtils.damp(greetingFraming, frameGuest, 7, dt) : frameGuest;
       if (followed === '01' && marketGuest) {
@@ -353,11 +389,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         aim.z = THREE.MathUtils.lerp(aim.z, guest.z, greetingFraming * 0.5);
       }
       const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
-      const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming);
+      const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming) + 2.2 * entranceFrame;
       // Frame the shop from the street side as the Agent passes the entrance tree.
       const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
       const northSide = 1 - THREE.MathUtils.smoothstep(feet.z, -22, 18);
-      const yaw = followYaw + THREE.MathUtils.lerp(FOLLOW_YAW, 0.52, northSide) + streetSide * 1.14 + 0.32 * greetingFraming;
+      const centralYaw = THREE.MathUtils.lerp(FOLLOW_YAW, 0.52, northSide) + streetSide * 1.14 + 0.32 * greetingFraming;
+      const registryYaw = THREE.MathUtils.lerp(centralYaw, -0.54, registryFrame);
+      const yaw = followYaw + THREE.MathUtils.lerp(registryYaw, -2.76, worksFrame);
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
@@ -371,20 +409,34 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       );
       camera.lookAt(aim);
     } else {
-      fog.near = north ? 165 : 110;
-      fog.far = north ? 275 : 235;
+      fog.near = north || east ? 165 : 110;
+      fog.far = north || east ? 275 : 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
+      const target = mode === 'east' && east ? eastFocus : focus;
+      if (tween) viewFocus.lerp(target, 1 - Math.exp(-8 * dt));
+      else viewFocus.copy(target);
       const distance = orbitDistance * (camera.aspect < 0.8 ? 1.09 : 1);
       camera.position.set(
-        focus.x + distance * Math.sin(orbitYaw) * Math.cos(orbitPitch),
-        focus.y + distance * Math.sin(orbitPitch),
-        focus.z + distance * Math.cos(orbitYaw) * Math.cos(orbitPitch),
+        viewFocus.x + distance * Math.sin(orbitYaw) * Math.cos(orbitPitch),
+        viewFocus.y + distance * Math.sin(orbitPitch),
+        viewFocus.z + distance * Math.cos(orbitYaw) * Math.cos(orbitPitch),
       );
-      camera.lookAt(focus);
+      camera.lookAt(viewFocus);
     }
-    if (!document.hidden) updateRetail();
+    if (!document.hidden) {
+      updateRetail();
+      for (const kind of ['registry', 'works'] as const) {
+        const close = details.get(kind);
+        if (!close) continue;
+        const show = eastEntrances[kind].distanceTo(camera.position) < (close.visible ? 40 : 33);
+        if (show === close.visible) continue;
+        close.visible = show;
+        for (const proxy of proxies.get(kind) ?? []) proxy.visible = !show;
+        renderer.shadowMap.needsUpdate = true;
+      }
+    }
     renderer.render(scene, camera);
-    const showStreetDetails = (mode === 'follow' && patrol && patrol.root.position.z > -44) || orbitDistance < 59;
+    const showStreetDetails = mode === 'east' || (mode === 'follow' && patrol && patrol.root.position.z > -44) || orbitDistance < 59;
     const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !primary || primary.progress > 0);
     if (!document.hidden && readyForDetails) {
       const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (primary && marketEntrance.distanceTo(primary.root.position) < 29);
@@ -394,6 +446,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       if (showStreetDetails) loadDetail('street');
       if (playing && (!primary || primary.progress >= 10)) loadNorth();
+      if (playing && eastState === 'idle' && (!primary || primary.progress >= 30)) loadEast(false);
+      if (east) {
+        for (const kind of ['registry', 'works'] as const) {
+          const entrance = eastEntrances[kind];
+          if (entrance.distanceTo(camera.position) < 38) {
+            loadDetail(kind);
+          }
+        }
+      }
     }
     frameId = requestAnimationFrame(animate);
   }
@@ -489,6 +550,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       // A failed request leaves the original silhouette visible.
       details.set(kind, asset);
       scene.add(asset);
+      if (kind === 'registry' || kind === 'works') {
+        asset.visible = false;
+        return;
+      }
       if (kind === 'street') {
         softenRetailWindows(asset);
         registerRetail(asset);
@@ -496,6 +561,50 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       for (const proxy of placeholders) proxy.visible = false;
       renderer.shadowMap.needsUpdate = true;
     }).catch(() => {});
+  }
+
+  function loadEast(interactive: boolean) {
+    if (!model || ended || contextLost || eastState === 'ready' || eastState === 'loading') return;
+    eastState = 'loading';
+    callbacks.east(eastState);
+    const priority = interactive ? 'auto' : 'low';
+    Promise.all([
+      request('east-routes.json', priority).then((response) => response.json() as Promise<EastRoutes>),
+      request('east-civic-district.glb', priority).then((response) => response.arrayBuffer()),
+    ]).then(async ([layout, bytes]) => {
+      if (ended || contextLost) return;
+      const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
+      if (ended || contextLost) { disposeModel(asset); return; }
+      try {
+        navigation.connectEast(layout);
+      } catch (error) {
+        disposeModel(asset);
+        throw error;
+      }
+      east = asset;
+      setBuildingShadows(east);
+      softenRetailWindows(east);
+      scene.add(east);
+      registerProxies(east, ['registry', 'works']);
+      registerRetail(east);
+      for (const entrance of Object.values(eastEntrances)) {
+        const lamp = new THREE.PointLight('#ffd08b', 65, 14, 2);
+        lamp.position.copy(entrance);
+        lamp.position.y = 3.5;
+        scene.add(lamp);
+      }
+      // Widen the same sun's shadow projection as the eastern avenue becomes visible.
+      sun.shadow.camera.right = 124;
+      sun.shadow.camera.far = Math.max(185, sun.shadow.camera.far);
+      sun.shadow.camera.updateProjectionMatrix();
+      renderer.shadowMap.needsUpdate = true;
+      eastState = 'ready';
+      callbacks.east(eastState);
+    }).catch(() => {
+      if (ended || contextLost) return;
+      eastState = 'unavailable';
+      callbacks.east(eastState);
+    });
   }
 
   function loadNorth() {
@@ -519,13 +628,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       softenRetailWindows(north);
       registerRetail(north);
       focus.set(...layout.target);
-      if (desiredDistance === START_DISTANCE && orbitPitch === START_PITCH) {
+      if (mode !== 'east' && desiredDistance === START_DISTANCE && orbitPitch === START_PITCH) {
         desiredDistance = EXPANDED_DISTANCE;
         orbitPitch = EXPANDED_PITCH;
       }
       sun.position.z -= 35;
       sun.target.position.z -= 35;
-      Object.assign(sun.shadow.camera, { top: 92, bottom: -92, far: 178 });
+      Object.assign(sun.shadow.camera, { top: 92, bottom: -92, far: east ? 185 : 178 });
       sun.shadow.camera.updateProjectionMatrix();
       renderer.shadowMap.needsUpdate = true;
       const entranceLight = new THREE.PointLight('#ffd08b', 64, 14, 2);
@@ -583,13 +692,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     focus.set(...route.target);
     marketEntrance.set(...(route.points.at(-1) ?? route.target));
     model = result.scene;
-    for (const kind of ['street', 'market'] as const) {
-      const members: THREE.Object3D[] = [];
-      model.traverse((object) => {
-        if (object.userData.previewTier === `${kind}_proxy`) members.push(object);
-      });
-      proxies.set(kind, members);
-    }
+    registerProxies(model, ['street', 'market']);
     setBuildingShadows(model);
     softenRetailWindows(model);
     scene.add(model);
@@ -608,8 +711,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     play(enabled) { playing = enabled; },
     reset() {
       orbitYaw = START_YAW;
-      orbitPitch = north ? EXPANDED_PITCH : START_PITCH;
-      orbitDistance = desiredDistance = north ? EXPANDED_DISTANCE : START_DISTANCE;
+      orbitPitch = mode === 'east' ? EAST_PITCH : north ? EXPANDED_PITCH : START_PITCH;
+      orbitDistance = desiredDistance = mode === 'east' ? EAST_DISTANCE : north ? EXPANDED_DISTANCE : START_DISTANCE;
       resetFollowCamera();
     },
     dispose() {
@@ -628,6 +731,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);
       if (north) disposeModel(north);
+      if (east) disposeModel(east);
       if (retailSource) disposeModel(retailSource);
       for (const detail of details.values()) disposeModel(detail);
       sun.shadow.dispose();

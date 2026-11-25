@@ -1,4 +1,4 @@
-"""Export the Nexus observation scene and its optional street and market detail."""
+"""Export the NEXCIV observation scene, district chunks and pedestrian routes."""
 
 import argparse
 import json
@@ -25,6 +25,9 @@ GOVERNANCE_NORTH = 116
 GOVERNANCE_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.002"
 GOVERNANCE_CROSSING_X = (10.7, 13.1)
 GOVERNANCE_CROSSING_STRIPES = tuple((61.06 + i * 0.52, 61.37 + i * 0.52) for i in range(12))
+EAST_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_MAIN.018"
+EAST_CROSSING_X = (93.8, 96.55)
+EAST_CROSSING_STRIPES = tuple((-4.59 + i * 0.61, -4.24 + i * 0.61) for i in range(16))
 WAYPOINTS = (
     (0, -21.4),
     (2.3, -29.4),
@@ -62,6 +65,27 @@ PLAZA_CONNECTOR = (
     GOVERNANCE_WAYPOINTS[0],
 )
 MARKET_GREETING_WAYPOINTS = ((7.2, -59.65), (11.45, -59.65))
+EAST_JUNCTION = (95, -31.8)
+EAST_JUNCTION_ALT = (96, -31.05)
+EAST_AVENUE = (
+    (24.59, -16.6), (25.83, -17.17), (32.4, -20.1), (33.7, -20.7),
+    (35.98, -22.3), (37.65, -23.6), (47, -30), (53.55, -31.8), EAST_JUNCTION,
+)
+EAST_AVENUE_ALT = (
+    (24.55, -15.8), (25.83, -16.36), (32.4, -19.29), (33.7, -19.89),
+    (35.98, -21.49), (37.65, -22.79), (47, -29.19), (53.55, -31.05),
+    (70, -31.05), (76, -32.62), (91, -32.62), EAST_JUNCTION_ALT,
+)
+REGISTRY_WAYPOINTS = (
+    EAST_JUNCTION, (95, -12), (94.3, -8), (94.3, 8.4), (92.6, 11.2), (80, 13.9),
+)
+REGISTRY_ALTERNATE = (EAST_JUNCTION_ALT, (96, 9), (93.6, 12.1), (80.8, 14.5))
+WORKS_WAYPOINTS = (EAST_JUNCTION, (95, -60.55), (95, -72.2))
+WORKS_ALTERNATE = (EAST_JUNCTION_ALT, (96, -61.2), (96.65, -66.4), (96.65, -72.2))
+EAST_HEROES = {
+    "HERO_03_Citizen_Registration": "registry",
+    "HERO_04_Public_Construction": "works",
+}
 LAYERS = {
     "ROADS",
     "PLAZA",
@@ -101,36 +125,46 @@ CHUNKS = {
     "market": "corner-market-detail.glb",
     "governance": "governance-north.glb",
     "retail": "garden-roof-retail-detail.glb",
+    "east": "east-civic-district.glb",
+    "registry": "citizen-registry-detail.glb",
+    "works": "public-construction-detail.glb",
 }
 
 
-def in_slice(obj, matrix, governance):
+def in_slice(obj, matrix, area):
     points = [matrix @ Vector(co) for co in obj.bound_box]
     low_y = min(p.y for p in points)
     top_y = max(p.y for p in points)
-    return (
-        max(p.x for p in points) > WEST
-        and min(p.x for p in points) < EAST
-        and (
-            top_y > NORTH and NORTH <= low_y < GOVERNANCE_NORTH
-            if governance
-            else top_y > SOUTH and low_y < NORTH
-        )
-    )
+    low_x = min(p.x for p in points)
+    top_x = max(p.x for p in points)
+    central_x = top_x > WEST and low_x < EAST
+    base = central_x and top_y > SOUTH and low_y < NORTH
+    governance = central_x and top_y > NORTH and NORTH <= low_y < GOVERNANCE_NORTH
+    if area == "east":
+        return not (base or governance) and top_x > EAST and low_x < 143 and top_y > -125 and low_y < 44
+    return governance if area == "governance" else base
 
 
-def world_geometry(scene, graph, governance=False):
+def world_geometry(scene, graph, area):
     layers = bpy.data.collections
-    named_layers = LAYERS | {"03_Hero_Landmarks", "05_Street_Assets"} if governance else LAYERS
+    named_layers = LAYERS.copy()
+    if area in {"governance", "east"}:
+        named_layers.update(("03_Hero_Landmarks", "05_Street_Assets"))
+    if area == "east":
+        named_layers.update(("CONSTRUCTION", "10 | Construction crane", "02 | Public Works at eye level"))
     candidates = {ob for name in named_layers for ob in layers[name].objects if ob.name in scene.objects}
     for obj in sorted(candidates, key=lambda item: item.name):
-        civic_paving = governance and obj.name.startswith(
-            ("CIVRUM_LOT_GOVERNANCE", "CIVRUM_LOT_PAINT_GOVERNANCE")
+        civic_paving = obj.name.startswith(
+            ("CIVRUM_LOT_GOVERNANCE", "CIVRUM_LOT_PAINT_GOVERNANCE") if area == "governance"
+            else ("CIVRUM_LOT_CONSTRUCTION", "CIVRUM_LOT_PAINT_CONSTRUCTION", "Civic reflecting pool") if area == "east"
+            else ()
         )
         if obj.hide_render or obj.hide_viewport or (obj.name.startswith(SKIP) and not civic_paving):
             continue
-        if governance and obj.name.startswith("HERO_") and obj.name != "HERO_01_Governance_Hall":
-            continue
+        if obj.name.startswith("HERO_"):
+            heroes = EAST_HEROES if area == "east" else ("HERO_01_Governance_Hall",)
+            if obj.name not in heroes:
+                continue
         if obj.instance_collection:
             for part in obj.instance_collection.all_objects:
                 matrix = (
@@ -138,9 +172,9 @@ def world_geometry(scene, graph, governance=False):
                     @ Matrix.Translation(-obj.instance_collection.instance_offset)
                     @ part.matrix_world
                 )
-                if part.type == "MESH" and in_slice(part, matrix, governance):
+                if part.type == "MESH" and in_slice(part, matrix, area):
                     yield part, matrix, "buildings" if "retail" in part.name.lower() else "detail"
-        elif obj.type in {"MESH", "FONT"} and in_slice(obj, obj.matrix_world, governance):
+        elif obj.type in {"MESH", "FONT"} and in_slice(obj, obj.matrix_world, area):
             name = obj.name
             if name.startswith("CIVRUM_BANNER_DISTRICT_CODE"):
                 continue
@@ -169,7 +203,12 @@ def world_geometry(scene, graph, governance=False):
             )
             if name.startswith(("CIVRUM_ROAD_", "CIVRUM_PLAZA_TILE", "CIVRUM_PLAZA_SEATING_APRON")):
                 subgroup = "paving"
-            if governance and (civic_paving or name.startswith(("WALK_Paving_", "CIVRUM_WALK_"))):
+            if name in EAST_HEROES:
+                subgroup = f"{EAST_HEROES[name]}_proxy"
+            if area in {"governance", "east"} and (
+                (civic_paving and not name.startswith("Civic reflecting pool"))
+                or name.startswith(("WALK_Paving_", "CIVRUM_WALK_", "Forecourt | limestone paver"))
+            ):
                 subgroup = "paving"
             yield obj.evaluated_get(graph), obj.matrix_world, subgroup
 
@@ -221,33 +260,34 @@ def alternate_lanes(scene, graph):
     alternate[north + 2].x += 0.32
     # The second Agent stops at the Market's sidewalk corner, clear of the greeting spot.
     spans = (list(reversed(alternate[1 : south + 1])), alternate[south : north + 1], alternate[north:])
-    return [sidewalk_route(scene, graph, span, clearance=0.22) for span in spans]
+    return [sidewalk_route(scene, graph, span, clearance=0.22) for span in spans], alternate[south : south + 4]
 
 
-def paint_governance_crossing(mesh, transform, white, asphalt):
+def paint_crossing(mesh, transform, white, asphalt, across, bands):
     """Cut the existing roadway into paint regions at the pedestrian approach."""
-    left, right = GOVERNANCE_CROSSING_X
-    bands = GOVERNANCE_CROSSING_STRIPES
     inverse = transform.inverted()
     axes = transform.to_3x3().transposed()
     bm = bmesh.new()
     bm.from_mesh(mesh)
-    x_planes = [((x, 0, 0), (1, 0, 0)) for x in (left, right)]
-    y_planes = [((0, y, 0), (0, 1, 0)) for band in bands for y in band]
-    for point, normal in (*x_planes, *y_planes):
+    planes = [(0, value) for value in across]
+    planes.extend((1, value) for band in bands for value in band)
+    for coordinate, value in planes:
+        point, normal = Vector((0, 0, 0)), Vector((0, 0, 0))
+        point[coordinate], normal[coordinate] = value, 1
         bmesh.ops.bisect_plane(
             bm,
             geom=[*bm.verts, *bm.edges, *bm.faces],
             dist=0.00001,
-            plane_co=inverse @ Vector(point),
-            plane_no=axes @ Vector(normal),
+            plane_co=inverse @ point,
+            plane_no=axes @ normal,
         )
     for face in bm.faces:
         pos = transform @ face.calc_center_median()
-        if not (left < pos.x < right and bands[0][0] <= pos.y <= bands[-1][1]):
+        band_pos = pos.y
+        if not (across[0] < pos.x < across[1] and bands[0][0] <= band_pos <= bands[-1][1]):
             continue
         if all(abs((transform @ vertex.co).z - ROAD_Z) < 0.0001 for vertex in face.verts):
-            face.material_index = white if any(start < pos.y < end for start, end in bands) else asphalt
+            face.material_index = white if any(start < band_pos < end for start, end in bands) else asphalt
     bm.normal_update()
     bm.to_mesh(mesh)
     bm.free()
@@ -259,8 +299,9 @@ def stage_assets(scene, graph, chunk):
     scene.collection.children.link(root)
     glass = material("NEXCIV browser glazing", "B0B9BF", 0.20, 0.25)
     shader(glass).inputs["Alpha"].default_value = 0.26
+    transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
-    texture_limit = {"base": 512, "retail": 2048}.get(chunk, 1024)
+    texture_limit = {"base": 512, "retail": 2048, "registry": 2048, "works": 2048}.get(chunk, 1024)
     pbr = {}
     textures = {}
 
@@ -274,10 +315,24 @@ def stage_assets(scene, graph, chunk):
         surface = next((node for node in finish.node_tree.nodes if node.type == "BSDF_PRINCIPLED"), None)
         if surface is None:
             return finish
+        if source.name == "Walkthrough | entry clear glass":
+            # Translate Blender's Transparent BSDF mix into glTF alpha blending.
+            output = next(node for node in finish.node_tree.nodes if node.type == "OUTPUT_MATERIAL")
+            finish.node_tree.links.new(surface.outputs[0], output.inputs["Surface"])
+            surface.inputs["Alpha"].default_value = 0.08
+            finish.surface_render_method = "BLENDED"
+            transparent.add(finish)
         base = surface.inputs["Base Color"]
         if base.is_linked and base.links[0].from_node.type != "TEX_IMAGE":
-            finish.node_tree.links.remove(base.links[0])
-            base.default_value = source.diffuse_color
+            links = finish.node_tree.links
+            upstream = base.links[0].from_node
+            atlas = upstream.inputs["Color"].links if upstream.type == "HUE_SAT" else ()
+            if atlas and atlas[0].from_node.type == "TEX_IMAGE":
+                # glTF can't export Blender's Hue/Saturation node. Keep the atlas and its UVs.
+                links.new(atlas[0].from_socket, base)
+            else:
+                links.remove(base.links[0])
+                base.default_value = source.diffuse_color
         for node in finish.node_tree.nodes:
             if node.type != "TEX_IMAGE" or node.image is None:
                 continue
@@ -293,9 +348,12 @@ def stage_assets(scene, graph, chunk):
         return finish
 
     cache, parts = {}, []
-    for source, transform, tier in world_geometry(scene, graph, governance=chunk == "governance"):
+    area = "east" if chunk in {"east", "registry", "works"} else chunk
+    for source, transform, tier in world_geometry(scene, graph, area):
         name = source.original.name
         if chunk == "retail" and not name.startswith(GARDEN_RETAIL):
+            continue
+        if chunk in {"registry", "works"} and EAST_HEROES.get(name) != chunk:
             continue
         market = name.startswith("Market | ")
         street = tier in ("detail", "buildings") or name.startswith("Courtyard | roses")
@@ -321,13 +379,17 @@ def stage_assets(scene, graph, chunk):
         asset = bpy.data.objects.new(source.name, mesh)
         root.objects.link(asset)
         asset.matrix_world = Matrix.Identity(4) if chunk == "retail" else transform
-        if chunk == "governance" and name == "CIVRUM_LOT_PAINT_GOVERNANCE":
+        if chunk in {"governance", "east"} and name in {"CIVRUM_LOT_PAINT_GOVERNANCE", "CIVRUM_LOT_PAINT_CONSTRUCTION"}:
             # The lettering and the top of the stone are both at 0.182 m in the source scene.
             asset.location.z += 0.004
-        if chunk == "governance" and name == GOVERNANCE_CROSSING_ROAD:
+        if (chunk, name) in {("governance", GOVERNANCE_CROSSING_ROAD), ("east", EAST_CROSSING_ROAD)}:
             mesh = asset.data = mesh.copy()
             slots = {slot.material.name: i for i, slot in enumerate(source.material_slots) if slot.material}
-            paint_governance_crossing(mesh, transform, slots[WHITE], slots[ASPHALT])
+            crossing = (
+                (GOVERNANCE_CROSSING_X, GOVERNANCE_CROSSING_STRIPES)
+                if chunk == "governance" else (EAST_CROSSING_X, EAST_CROSSING_STRIPES)
+            )
+            paint_crossing(mesh, transform, slots[WHITE], slots[ASPHALT], *crossing)
         for index, original in enumerate(source.material_slots):
             if not original.material:
                 continue
@@ -339,11 +401,19 @@ def stage_assets(scene, graph, chunk):
             tier = "market_proxy"
         elif street_proxy:
             tier = "street_proxy"
-        asset["previewTier"] = tier
+        asset["previewTier"] = "detail" if chunk in {"registry", "works"} else tier
         if chunk == "retail":
             parts.append((asset, 180000))
             break
-        if chunk == "governance" and len(mesh.polygons) > 10000:
+        if chunk == "works":
+            parts.append((asset, 230000))
+        elif chunk == "east" and len(mesh.polygons) > 10000:
+            face_limit = {"registry_proxy": 18500, "works_proxy": 61000}.get(tier, 9000)
+            if name.startswith(GARDEN_RETAIL):
+                face_limit = 30000
+            if len(mesh.polygons) > face_limit:
+                parts.append((asset, face_limit))
+        elif chunk == "governance" and len(mesh.polygons) > 10000:
             parts.append((asset, 52000 if name == "HERO_01_Governance_Hall" else 6500))
         elif name.startswith("Courtyard | roses") and len(mesh.polygons) > 12000:
             parts.append((asset, 12000))
@@ -353,6 +423,8 @@ def stage_assets(scene, graph, chunk):
 
     if chunk == "retail" and len(parts) != 1:
         raise RuntimeError("Expected a single Garden Roof Retail source mesh")
+    if chunk in {"registry", "works"} and len(root.objects) != 1:
+        raise RuntimeError(f"Expected one landmark source mesh for {chunk}")
 
     reduced = {}
     for obj, face_limit in parts:
@@ -363,7 +435,9 @@ def stage_assets(scene, graph, chunk):
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
             reduced[key].validate(clean_customdata=False)
-            if chunk in {"street", "retail"} and obj.name.startswith(GARDEN_RETAIL):
+            if (chunk in {"street", "retail", "east"} and obj.name.startswith(GARDEN_RETAIL)) or (
+                chunk in {"east", "works"} and obj.name in EAST_HEROES
+            ):
                 mesh = reduced[key]
                 mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
                 mesh.set_sharp_from_angle(angle=math.radians(35))
@@ -379,7 +453,7 @@ def stage_assets(scene, graph, chunk):
             for o in root.objects
             if o["previewTier"] == tier
             and o.data not in shared
-            and not any(slot.material == glass for slot in o.material_slots)
+            and not any(slot.material in transparent for slot in o.material_slots)
         ]
         if len(keep) == 1:
             keep[0].name = "NEXCIV " + tier
@@ -392,11 +466,14 @@ def stage_assets(scene, graph, chunk):
         bpy.ops.object.join()
         head.name = "NEXCIV " + tier
         head.select_set(False)
-    if chunk == "base":
-        bpy.ops.mesh.primitive_plane_add(size=1, location=(4, -19, -0.006))
+    if chunk in {"base", "east"}:
+        location, scale = ((4, -19, -0.006), (260, 260, 1)) if chunk == "base" else (
+            (173, -40, -0.006), (78, 220, 1)
+        )
+        bpy.ops.mesh.primitive_plane_add(size=1, location=location)
         ground = bpy.context.object
         ground.name = "NEXCIV terrain"
-        ground.scale = (260, 260, 1)
+        ground.scale = scale
         ground.data.materials.append(material("NEXCIV ground", "55564F", 0.89))
         root.objects.link(ground)
     bpy.ops.object.select_all(action="DESELECT")
@@ -456,10 +533,21 @@ def main():
     route = sidewalk_route(scene, graph, WAYPOINTS)
     north_route = sidewalk_route(scene, graph, GOVERNANCE_WAYPOINTS, clearance=0.23)
     connector = sidewalk_route(scene, graph, PLAZA_CONNECTOR, clearance=0.28)
-    market_lane, plaza_lane, north_lane = alternate_lanes(scene, graph)
+    (market_lane, plaza_lane, north_lane), east_prefix = alternate_lanes(scene, graph)
     market_guest = sidewalk_route(scene, graph, MARKET_GREETING_WAYPOINTS, clearance=0.32)
     if any(point[1] < 0.15 for point in market_guest):
         raise RuntimeError("The Market greeting approach must stay on the sidewalk")
+    east_routes = {
+        name: {
+            "points": sidewalk_route(scene, graph, waypoints, clearance=0.22),
+            "alternate": sidewalk_route(scene, graph, alternate, clearance=0.22),
+        }
+        for name, waypoints, alternate in (
+            ("avenue", (*PLAZA_CONNECTOR[:4], *EAST_AVENUE), (*east_prefix, *EAST_AVENUE_ALT)),
+            ("registry", REGISTRY_WAYPOINTS, REGISTRY_ALTERNATE),
+            ("works", WORKS_WAYPOINTS, WORKS_ALTERNATE),
+        )
+    }
     args.output.mkdir(parents=True, exist_ok=True)
     for chunk, filename in CHUNKS.items():
         if args.chunk and chunk != args.chunk:
@@ -489,6 +577,9 @@ def main():
     )
     (args.output / "market-greeting.json").write_text(
         json.dumps({"points": market_guest}, separators=(",", ":")) + "\n", encoding="utf-8"
+    )
+    (args.output / "east-routes.json").write_text(
+        json.dumps(east_routes, separators=(",", ":")) + "\n", encoding="utf-8"
     )
     print(f"PREVIEW PASS {len(route)} market and {len(north_route)} governance route samples", flush=True)
 
