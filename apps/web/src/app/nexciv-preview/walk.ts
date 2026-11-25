@@ -29,6 +29,7 @@ type Callbacks = {
   fallback: () => void;
   agent: (id: AgentId, report: AgentReport) => void;
   district: (side: District, status: DistrictStatus) => void;
+  overview: (status: DistrictStatus) => void;
   fps: (value: number) => void;
 };
 
@@ -45,6 +46,9 @@ const START_PITCH = 0.88;
 const START_DISTANCE = 115;
 const EXPANDED_PITCH = 1.08;
 const EXPANDED_DISTANCE = 166;
+const CITYWIDE_FILE = 'nexciv-city-overview.glb';
+const CITYWIDE_DISTANCE = 382;
+const CITYWIDE_PITCH = 0.99;
 const DISTRICT_ORBIT: Record<District, [yaw: number, pitch: number, distance: number]> = {
   east: [START_YAW, 1.02, 143],
   west: [-0.18, 1.02, 130],
@@ -231,6 +235,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   host.append(canvas);
 
   const scene = new THREE.Scene();
+  const street = new THREE.Group();
+  scene.add(street);
   const sky = new THREE.Color('#837574');
   scene.background = sky;
   const fog = new THREE.Fog(sky, 110, 235);
@@ -246,9 +252,20 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   sun.shadow.bias = -0.00035;
   sun.shadow.normalBias = 0.033;
   scene.add(ambient, sun, sun.target);
+  const sunset = new THREE.DirectionalLight('#ffb56e', 2.65);
+  sunset.position.set(-210, 145, 120);
+  sunset.target.position.set(0, 0, -22);
+  sunset.castShadow = true;
+  sunset.visible = false;
+  Object.assign(sunset.shadow.camera, { left: -248, right: 248, top: 236, bottom: -230, near: 4, far: 645 });
+  sunset.shadow.camera.updateProjectionMatrix();
+  sunset.shadow.mapSize.setScalar(2048);
+  sunset.shadow.bias = -0.00038;
+  sunset.shadow.normalBias = 0.10;
+  scene.add(sunset, sunset.target);
   const marketLamp = new THREE.PointLight('#ffc478', 180, 15, 2);
   marketLamp.position.set(13.6, 3.2, 54.1);
-  scene.add(marketLamp);
+  street.add(marketLamp);
 
   const generator = new THREE.PMREMGenerator(renderer);
   const room = new RoomEnvironment();
@@ -259,6 +276,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   generator.dispose();
 
   const focus = new THREE.Vector3(0, 0, 24);
+  const citywideFocus = new THREE.Vector3(0, 0, 9);
   const districtFocus: Record<District, THREE.Vector3> = {
     east: new THREE.Vector3(83, 0, 44),
     west: new THREE.Vector3(-83, 0, 61),
@@ -288,6 +306,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let ended = false;
   let contextLost = false;
   let model: THREE.Object3D | undefined;
+  let citywide: THREE.Object3D | undefined;
+  let overviewStatus: DistrictStatus = 'idle';
   let north: THREE.Object3D | undefined;
   let northLoading: Promise<void> | undefined;
   let northFailed = false;
@@ -341,6 +361,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function zoom(factor: number) {
     if (mode === 'follow' && agents.has(followed)) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
+    else if (mode === 'overview' && citywide) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 155, 465);
     else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north || sideDistrictLoaded() ? 176 : 139);
   }
 
@@ -359,9 +380,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       [orbitYaw, orbitPitch, desiredDistance] = DISTRICT_ORBIT[mode];
       return;
     }
-    orbitYaw = START_YAW;
-    orbitPitch = north ? EXPANDED_PITCH : START_PITCH;
-    desiredDistance = north ? EXPANDED_DISTANCE : START_DISTANCE;
+    orbitYaw = citywide && mode === 'overview' ? 0.11 : START_YAW;
+    orbitPitch = citywide && mode === 'overview' ? CITYWIDE_PITCH : north ? EXPANDED_PITCH : START_PITCH;
+    desiredDistance = citywide && mode === 'overview' ? CITYWIDE_DISTANCE : north ? EXPANDED_DISTANCE : START_DISTANCE;
   }
 
   function setView(next: View, id = followed) {
@@ -374,6 +395,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (viewChanged && next !== 'follow') resetOrbit();
     followHeight = undefined;
     if (next === 'follow' && id === '03') loadNorth(true);
+    if (next === 'overview') loadCitywide();
     if (next !== 'overview' && next !== 'follow') loadDistrict(next, true);
   }
 
@@ -388,7 +410,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (!choice) throw new Error('No reachable observation destination');
       const [x, z] = DESTINATION_FACING[choice.destination];
       const patrol = createAgentPatrol(asset, choice.path.points, [x, z]);
-      scene.add(patrol.root);
+      street.add(patrol.root);
       agents.set(id, { asset, patrol, from, destination: choice.destination, visits, lookAt: new THREE.Vector3(x, 0, z) });
     } catch {
       disposeModel(asset.scene);
@@ -455,7 +477,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           close.matrixAutoUpdate = false;
           close.castShadow = mid.castShadow;
           close.receiveShadow = mid.receiveShadow;
-          scene.add(close);
+          street.add(close);
           placement.close = close;
         }
         mid.visible = false;
@@ -472,7 +494,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function animate(now: number) {
     if (ended || contextLost || !model) return;
     const dt = document.hidden ? 0 : Math.min((now - lastFrame) / 1000, 0.075);
-    if (playing && tween && districts.shore.asset) lakeTime.value += dt;
+    if (playing && tween && (districts.shore.asset || citywide)) lakeTime.value += dt;
     lastFrame = now;
     measurements++;
     if (now - measuredAt >= 1200) {
@@ -503,10 +525,24 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
     const patrol = agents.get(followed)?.patrol;
     const following = mode === 'follow' && patrol;
+    const district = mode !== 'overview' && mode !== 'follow' ? districts[mode] : undefined;
+    const wide = Boolean(citywide && (mode === 'overview'
+      || (citywide.visible && (mode === 'follow' && !patrol
+        || district && (district.status === 'loading' || orbitDistance > 192)))));
+    if (citywide && citywide.visible !== wide) {
+      citywide.visible = wide;
+      street.visible = !wide;
+      sunset.visible = wide;
+      sun.visible = !wide;
+      ambient.intensity = wide ? 0.72 : 0.97;
+      scene.environmentIntensity = wide ? 0.25 : 0.28;
+      renderer.toneMappingExposure = wide ? 0.82 : 0.88;
+      renderer.shadowMap.needsUpdate = true;
+    }
     const seeingLake = Boolean(districts.shore.asset && (mode === 'shore' || (following && patrol.root.position.z < -132)));
     // Use more of the depth buffer for the surfaces visible from the high camera.
     const near = following ? 0.18 : Math.max(1, orbitDistance * 0.055);
-    const far = seeingLake ? 520 : 285;
+    const far = wide ? 920 : seeingLake ? 520 : 285;
     if (camera.near !== near || camera.far !== far) {
       camera.near = near;
       camera.far = far;
@@ -564,10 +600,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       );
       camera.lookAt(aim);
     } else {
-      fog.near = seeingLake ? 177 : north || sideDistrictLoaded() ? 165 : 110;
-      fog.far = seeingLake ? 510 : north || sideDistrictLoaded() ? 275 : 235;
+      fog.near = wide ? 395 : seeingLake ? 177 : north || sideDistrictLoaded() ? 165 : 110;
+      fog.far = wide ? 770 : seeingLake ? 510 : north || sideDistrictLoaded() ? 275 : 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
-      const target = mode !== 'overview' && mode !== 'follow' && districts[mode].asset ? districtFocus[mode] : focus;
+      const target = wide && !district ? citywideFocus
+        : mode !== 'overview' && mode !== 'follow' && (districts[mode].asset || wide) ? districtFocus[mode] : focus;
       if (tween) viewFocus.lerp(target, 1 - Math.exp(-8 * dt));
       else viewFocus.copy(target);
       const distance = orbitDistance * (camera.aspect < 0.8 ? 1.09 : 1);
@@ -578,7 +615,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       );
       camera.lookAt(viewFocus);
     }
-    if (!document.hidden) {
+    if (!document.hidden && !wide) {
       updateRetail();
       for (const kind of LANDMARK_DETAILS) {
         const close = details.get(kind);
@@ -600,7 +637,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         loadDetail('market');
         loadMarketGuest();
       }
-      if (showStreetDetails) loadDetail('street');
+      if (!wide && showStreetDetails) loadDetail('street');
       if (playing && (!primary || primary.progress >= 10)) loadNorth();
       if (playing && (!primary || primary.progress >= 30) && districts.east.status === 'idle') loadDistrict('east', false);
       if (playing && (!primary || primary.progress >= 55) && districts.east.status !== 'loading' && districts.west.status === 'idle') loadDistrict('west', false);
@@ -688,6 +725,30 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     return response;
   }
 
+  function loadCitywide() {
+    if (citywide || overviewStatus === 'loading' || ended || contextLost) return;
+    overviewStatus = 'loading';
+    callbacks.overview(overviewStatus);
+    request(CITYWIDE_FILE).then((response) => response.arrayBuffer()).then(async (bytes) => {
+      if (ended || contextLost) return;
+      const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
+      if (ended || contextLost) { disposeModel(asset); return; }
+      citywide = asset;
+      asset.visible = false;
+      setBuildingShadows(asset);
+      softenRetailWindows(asset);
+      addLakeRipples(asset, lakeTime);
+      scene.add(asset);
+      if (mode === 'overview') resetOrbit();
+      overviewStatus = 'ready';
+      callbacks.overview(overviewStatus);
+    }).catch(() => {
+      if (ended || contextLost) return;
+      overviewStatus = 'unavailable';
+      callbacks.overview(overviewStatus);
+    });
+  }
+
   function loadRetail() {
     if (retailRequested) return;
     retailRequested = true;
@@ -713,7 +774,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       setBuildingShadows(asset);
       // A failed request leaves the original silhouette visible.
       details.set(kind, asset);
-      scene.add(asset);
+      street.add(asset);
       if (kind === 'registry' || kind === 'works' || kind === 'center') {
         asset.visible = false;
         return;
@@ -762,7 +823,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       setBuildingShadows(asset);
       if (side === 'shore') addLakeRipples(asset, lakeTime);
       softenRetailWindows(asset);
-      scene.add(asset);
+      street.add(asset);
       if (side === 'research' || side === 'west') {
         districts.research.asset?.traverse((object) => {
           if (object.userData.previewTier === 'west_skybridge') object.visible = Boolean(districts.west.asset);
@@ -779,7 +840,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (side === 'research') lamp.position.set(-88.9, 1.9, -64.4);
         else if (side === 'residential') lamp.position.set(95.3, 2.65, -56.4);
         else lamp.position.y = 3.5;
-        scene.add(lamp);
+        street.add(lamp);
       }
       if (side === 'east') sun.shadow.camera.right = 124;
       if (side === 'west' || side === 'research') sun.shadow.camera.left = -125;
@@ -815,7 +876,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       navigation.connect('plazaNorth', 'governance', layout);
       north = city.scene;
       setBuildingShadows(north);
-      scene.add(north);
+      street.add(north);
       softenRetailWindows(north);
       registerRetail(north);
       focus.set(...layout.target);
@@ -830,7 +891,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       renderer.shadowMap.needsUpdate = true;
       const entranceLight = new THREE.PointLight('#ffd08b', 64, 14, 2);
       entranceLight.position.set(0, 4, -83);
-      scene.add(entranceLight);
+      street.add(entranceLight);
 
       if (!agentBytes) throw new Error('Researcher asset unavailable');
       const agent = await loader.parseAsync(agentBytes, ASSET_PATH);
@@ -858,7 +919,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       try {
         const patrol = createAgentPatrol(asset, layout.points, [marketEntrance.x, marketEntrance.z]);
         marketGuest = { asset, patrol };
-        scene.add(patrol.root);
+        street.add(patrol.root);
       } catch {
         disposeModel(asset.scene);
       }
@@ -890,12 +951,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     registerProxies(model, ['street', 'market']);
     setBuildingShadows(model);
     softenRetailWindows(model);
-    scene.add(model);
+    street.add(model);
     connectPrimary();
     renderer.shadowMap.needsUpdate = true;
     firstCityFrame = lastFrame = measuredAt = performance.now();
     animate(lastFrame);
     callbacks.ready(performance.now() - started);
+    if (mode === 'overview') loadCitywide();
   }).catch(() => {
     if (!ended && !contextLost) callbacks.fallback();
   });
@@ -925,12 +987,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);
       if (north) disposeModel(north);
+      if (citywide) disposeModel(citywide);
       for (const { asset } of Object.values(districts)) {
         if (asset) disposeModel(asset);
       }
       if (retailSource) disposeModel(retailSource);
       for (const detail of details.values()) disposeModel(detail);
       sun.shadow.dispose();
+      sunset.shadow.dispose();
       environment.dispose();
       renderer.forceContextLoss();
       renderer.dispose();

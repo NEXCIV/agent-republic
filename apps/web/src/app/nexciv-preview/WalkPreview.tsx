@@ -41,6 +41,7 @@ export function WalkPreview() {
   const world = useRef<WalkController | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');
+  const [overview, setOverview] = useState<DistrictStatus>('idle');
   const [districts, setDistricts] = useState<Record<District, DistrictStatus>>({
     east: 'idle', west: 'idle', shore: 'idle', research: 'idle', residential: 'idle',
   });
@@ -63,6 +64,7 @@ export function WalkPreview() {
         fallback: () => setState('fallback'),
         agent: (id, report) => setReports((previous) => ({ ...previous, [id]: report })),
         district: (side, status) => setDistricts((previous) => ({ ...previous, [side]: status })),
+        overview: setOverview,
         fps: setFps,
       });
       world.current = controller;
@@ -91,6 +93,12 @@ export function WalkPreview() {
     ready: district.places,
     unavailable: `${district.button}载入失败，点击${district.button}重试`,
   }[district.status];
+  const overviewMessage = view === 'overview' && state !== 'fallback' ? {
+    idle: '正在载入全城',
+    loading: '正在载入全城',
+    ready: '300 米城区与北岸湖畔',
+    unavailable: '全城载入失败，点击全城重试',
+  }[overview] : undefined;
 
   return (
     <div className={styles.page} lang="zh-CN" data-preview="nexciv-walk">
@@ -107,15 +115,15 @@ export function WalkPreview() {
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
-          <strong role="status">{districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
+          <small>{view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
+          <strong role="status">{overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
         </div>
         {state === 'fallback' && <p className={styles.fallback}>3D 场景暂时无法加载。下方可查看路线的两处实景。</p>}
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         <div className={styles.controls}>
           <div className={styles.switcher} role="group" aria-label="视角">
-            <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>俯视</button>
+            <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>全城</button>
             {(Object.keys(DISTRICTS) as District[]).map((side) => (
               <button key={side} disabled={!sceneReady} aria-pressed={view === side} onClick={() => select(side)}>
                 {DISTRICTS[side].button}

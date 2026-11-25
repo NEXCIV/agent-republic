@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import sys
+from collections import defaultdict
 from contextlib import contextmanager
 from itertools import pairwise
 from pathlib import Path
@@ -198,12 +199,19 @@ CHUNKS = {
     "research": "northwest-research-district.glb",
     "center": "research-agent-center-detail.glb",
     "residential": "northeast-garden-residences.glb",
+    "citywide": "nexciv-city-overview.glb",
 }
 SHORE_LAYER_NAMES = {
     "01 | Terrain and shore", "02 | Lake", "03 | Promenade and piers", "04 | Shore trees", "Marina boats",
 }
 LAKE_SURFACE = "CIVRUM_Lake_Surface"
 PARKLAND = "City parkland"
+CITY_GROUND = "CIVRUM_ENV_GROUND_MAIN"
+OVERVIEW_LANDMARKS = {
+    "governance": ("HERO_01_Governance_Hall",),
+    "research": (AGENT_CENTER,),
+    "east": tuple(EAST_HEROES),
+}
 
 
 def in_slice(obj, matrix, area):
@@ -227,51 +235,68 @@ def in_slice(obj, matrix, area):
         if obj.name.startswith(("CIVRUM_LOT_RESIDENTIAL", "CIVRUM_LOT_PAINT_RESIDENTIAL")):
             return True
         return not (base or governance) and top_x > EAST and low_x < 153 and low_y >= 44 and top_y <= 116
+    if area == "citywide":
+        return top_x > -188 and low_x < 188 and top_y > -180 and low_y < 175
     return governance if area == "governance" else base
 
 
 def world_geometry(scene, graph, area):
     layers = bpy.data.collections
     named_layers = LAYERS.copy()
-    if area in {"governance", "east", "west", "research", "residential"}:
+    if area in {"governance", "east", "west", "research", "residential", "citywide"}:
         named_layers.add("05_Street_Assets")
-    if area in {"governance", "east", "research"}:
+    if area in {"governance", "east", "research", "citywide"}:
         named_layers.add("03_Hero_Landmarks")
-    if area == "east":
+    if area in {"east", "citywide"}:
         named_layers.update(("CONSTRUCTION", "10 | Construction crane", "02 | Public Works at eye level"))
-    if area == "shore":
+    if area in {"shore", "citywide"}:
         named_layers.update(SHORE_LAYER_NAMES)
         named_layers.update(("05_Street_Assets", "08 | Lakeside tower", "20 | NEXCIV Waterfront Tower"))
+    if area == "citywide":
+        named_layers.add("16 | South garden shop")
     candidates = {ob for name in named_layers for ob in layers[name].objects if ob.name in scene.objects}
     lot_types = {
         "governance": "GOVERNANCE", "east": "CONSTRUCTION", "west": "COMMUNITY",
         "research": "RESEARCH", "residential": "RESIDENTIAL",
     }
     lot = lot_types.get(area)
+    citywide = area == "citywide"
     for obj in sorted(candidates, key=lambda item: item.name):
         civic_paving = lot and obj.name.startswith((f"CIVRUM_LOT_{lot}", f"CIVRUM_LOT_PAINT_{lot}"))
+        if citywide:
+            civic_paving = obj.name == CITY_GROUND or obj.name.startswith("CIVRUM_LOT_")
         scenery = (
             area in {"east", "west"} and obj.name.startswith("Civic reflecting pool")
         ) or (area == "west" and obj.name.startswith("Forum |"))
+        if citywide and obj.name.startswith(SKIP[2:]):
+            scenery = True
         if obj.hide_render or obj.hide_viewport or (obj.name.startswith(SKIP) and not (civic_paving or scenery)):
             continue
         if obj.name.startswith("HERO_"):
+            if citywide:
+                continue  # Reuse the city landmarks already fitted and reduced for the web.
             heroes = {"east": EAST_HEROES, "research": (AGENT_CENTER,)}.get(area, ("HERO_01_Governance_Hall",))
             if obj.name not in heroes:
                 continue
-        if area == "shore" and any(group.name in SHORE_LAYER_NAMES for group in obj.users_collection):
+        if area in {"shore", "citywide"} and any(group.name in SHORE_LAYER_NAMES for group in obj.users_collection):
             # The lake and shaped banks extend past the regular street chunks.
             name = obj.name
-            if obj.type == "MESH" and not name.startswith(("South ", "Pocket garden", "Belt road", "Southern ")):
+            if obj.type == "MESH" and (
+                citywide or not name.startswith(("South ", "Pocket garden", "Belt road", "Southern "))
+            ):
                 bounds = [obj.matrix_world @ Vector(co) for co in obj.bound_box]
-                if max(point.y for point in bounds) > 111:
+                if citywide or max(point.y for point in bounds) > 111:
                     if name.startswith(("Park woodland", "Far bank woodland")):
                         x, y, _ = obj.matrix_world.translation
-                        if abs(x) > 285 or y > 410:
+                        outside = (
+                            abs(x) > 310 or not -265 < y < 410
+                            if citywide else abs(x) > 285 or y > 410
+                        )
+                        if outside:
                             continue
                         # Thin the distant crowns without changing the authored quayside planting.
                         index = name.rpartition(".")[2]
-                        if (y > 230 or abs(x) > 154) and index.isdigit() and int(index) % 3:
+                        if (citywide or y > 230 or abs(x) > 154) and index.isdigit() and int(index) % 3:
                             continue
                     tier = "water" if name == LAKE_SURFACE else "land" if name in (PARKLAND, "Far shore parkland") else "shore"
                     yield obj.evaluated_get(graph), obj.matrix_world, tier
@@ -289,10 +314,10 @@ def world_geometry(scene, graph, area):
             name = obj.name
             if name.startswith("CIVRUM_BANNER_DISTRICT_CODE"):
                 continue
-            keep_placeholder = area == "residential" and name == RESIDENCE
+            keep_placeholder = area in {"residential", "citywide"} and name == RESIDENCE
             if name.startswith(("CIVRUM_PH_", "CIVRUM_Streetfront_")) and "NEXUS" not in name and not keep_placeholder:
                 continue
-            if min(obj.dimensions.x, obj.dimensions.y) > 95:
+            if min(obj.dimensions.x, obj.dimensions.y) > 95 and not (citywide and name == CITY_GROUND):
                 continue
             # Preserve road markings, beacon, shelter and wayfinding across camera ranges.
             subgroup = (
@@ -325,6 +350,8 @@ def world_geometry(scene, graph, area):
                 civic_paving or name.startswith(("WALK_Paving_", "CIVRUM_WALK_", "Forecourt | limestone paver"))
             ):
                 subgroup = "paving"
+            if citywide and (civic_paving or name.startswith("CIVRUM_WALK_")):
+                subgroup = "land" if name == CITY_GROUND else "paving"
             yield obj.evaluated_get(graph), obj.matrix_world, subgroup
 
 
@@ -513,14 +540,58 @@ def stage_residence(root, graph):
     bpy.data.curves.remove(lettering)
 
 
-def stage_assets(scene, graph, chunk):
+def import_overview_landmarks(root, library):
+    for chunk, names in OVERVIEW_LANDMARKS.items():
+        filename = CHUNKS[chunk]
+        path = library / filename
+        before = set(bpy.data.objects)
+        bpy.ops.import_scene.gltf(filepath=str(path if path.exists() else DEST / filename))
+        added = set(bpy.data.objects) - before
+        bpy.context.view_layer.update()
+        landmarks = [
+            obj for obj in added if obj.type == "MESH" and obj.name.startswith(names)
+        ]
+        if len(landmarks) != len(names):
+            raise RuntimeError(f"Expected {names} in {filename}, loaded {[obj.name for obj in landmarks]}")
+        for obj in landmarks:
+            transform = obj.matrix_world.copy()
+            obj.parent = None
+            obj.matrix_world = transform
+            obj["previewTier"] = "landmark"
+            for collection in list(obj.users_collection):
+                collection.objects.unlink(obj)
+            root.objects.link(obj)
+        for obj in added - set(landmarks):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def group_overview_instances(root):
+    groups = defaultdict(list)
+    for obj in root.objects:
+        slots = tuple(slot.material for slot in obj.material_slots)
+        if obj.data.users > 1:
+            groups[obj.data, slots].append(obj)
+    for members in groups.values():
+        if len(members) < 3:
+            continue
+        first = members[0]
+        holder = bpy.data.objects.new(f"NEXCIV instances | {first.name}", None)
+        root.objects.link(holder)
+        holder["previewTier"] = first["previewTier"]
+        for obj in members:
+            obj.parent = holder
+
+
+def stage_assets(scene, graph, chunk, library=DEST):
     root = bpy.data.collections.new("NEXCIV web export")
     scene.collection.children.link(root)
     glass = material("NEXCIV browser glazing", "B0B9BF", 0.20, 0.25)
     shader(glass).inputs["Alpha"].default_value = 0.26
     transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
-    texture_limit = {"base": 512, "retail": 2048, "registry": 2048, "works": 2048, "center": 4096}.get(chunk, 1024)
+    texture_limit = {
+        "base": 512, "retail": 2048, "registry": 2048, "works": 2048, "center": 4096, "citywide": 768,
+    }.get(chunk, 1024)
     pbr = {}
     textures = {}
 
@@ -573,6 +644,7 @@ def stage_assets(scene, graph, chunk):
         ("shore", SHORE_CROSSING_ROAD): (SHORE_CROSSING_X, SHORE_CROSSING_STRIPES, 0),
         ("research", RESEARCH_CROSSING_ROAD): (RESEARCH_CROSSING_Y, RESEARCH_CROSSING_STRIPES, 1),
     }
+    overview_crossings = {name: markings for (_, name), markings in crossings.items()}
     cache, parts = {}, []
     area = {"registry": "east", "works": "east", "center": "research"}.get(chunk, chunk)
     for source, transform, tier in world_geometry(scene, graph, area):
@@ -616,7 +688,8 @@ def stage_assets(scene, graph, chunk):
         if name.startswith("CIVRUM_LOT_PAINT_"):
             # The lettering and the top of the stone are both at 0.182 m in the source scene.
             asset.location.z += 0.004
-        if crossing := crossings.get((chunk, name)):
+        crossing = overview_crossings.get(name) if chunk == "citywide" else crossings.get((chunk, name))
+        if crossing:
             mesh = asset.data = mesh.copy()
             slots = {slot.material.name: i for i, slot in enumerate(source.material_slots) if slot.material}
             paint_crossing(mesh, transform, slots[WHITE], slots[ASPHALT], *crossing)
@@ -649,6 +722,12 @@ def stage_assets(scene, graph, chunk):
             parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 14000))
         elif chunk == "shore" and len(mesh.polygons) > 20000:
             parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 12000))
+        elif chunk == "citywide":
+            face_limit = 30000 if name.startswith(GARDEN_RETAIL) else 12000
+            if name.startswith(("Park woodland", "Far bank woodland")):
+                face_limit = 380
+            if len(mesh.polygons) > face_limit:
+                parts.append((asset, face_limit))
         elif chunk in {"research", "residential"} and len(mesh.polygons) > 55000:
             limit = 68500 if name == AGENT_CENTER else 30000 if name.startswith(GARDEN_RETAIL) else 15500
             parts.append((asset, limit))
@@ -674,7 +753,7 @@ def stage_assets(scene, graph, chunk):
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
             reduced[key].validate(clean_customdata=False)
-            if (chunk in {"street", "retail", "east", "west", "shore", "research", "residential"} and obj.name.startswith(GARDEN_RETAIL)) or (
+            if (chunk in {"street", "retail", "east", "west", "shore", "research", "residential", "citywide"} and obj.name.startswith(GARDEN_RETAIL)) or (
                 chunk in {"east", "works"} and obj.name in EAST_HEROES
             ) or obj.name == AGENT_CENTER:
                 mesh = reduced[key]
@@ -683,8 +762,10 @@ def stage_assets(scene, graph, chunk):
             obj.modifiers.remove(modifier)
         obj.data = reduced[key]
 
-    if chunk == "residential":
+    if chunk in {"residential", "citywide"}:
         stage_residence(root, graph)
+    if chunk == "citywide":
+        import_overview_landmarks(root, library)
 
     # Batch stable surfaces while keeping repeated meshes shared and both replacements independent.
     bpy.ops.object.select_all(action="DESELECT")
@@ -704,6 +785,9 @@ def stage_assets(scene, graph, chunk):
         for obj in keep:
             obj.select_set(True)
         head = keep[0]
+        # Joining must not change a linked mesh used by objects in a different batch.
+        if head.data.users > 1:
+            head.data = head.data.copy()
         bpy.context.view_layer.objects.active = head
         bpy.ops.object.join()
         head.name = "NEXCIV " + tier
@@ -723,6 +807,8 @@ def stage_assets(scene, graph, chunk):
         ground.scale = scale
         ground.data.materials.append(material("NEXCIV ground", "55564F", 0.89))
         root.objects.link(ground)
+    if chunk == "citywide":
+        group_overview_instances(root)
     bpy.ops.object.select_all(action="DESELECT")
     for obj in root.objects:
         if obj.name in scene.objects:
@@ -752,7 +838,7 @@ def precise_meshopt_positions():
         meshopt.MeshoptEncoder.encode_attribute = staticmethod(encode)
 
 
-def export_chunk(path):
+def export_chunk(path, gpu_instances=False):
     bpy.ops.export_scene.gltf(
         filepath=str(path),
         export_format="GLB",
@@ -761,6 +847,7 @@ def export_chunk(path):
         export_extras=True,
         export_cameras=False,
         export_lights=False,
+        export_gpu_instances=gpu_instances,
         export_image_format="JPEG",
         export_jpeg_quality=83,
         export_meshopt_compression_enable=True,
@@ -823,10 +910,10 @@ def main():
     for chunk, filename in CHUNKS.items():
         if args.chunk and chunk != args.chunk:
             continue
-        root = stage_assets(scene, graph, chunk)
+        root = stage_assets(scene, graph, chunk, args.output)
         path = args.output / filename
         with precise_meshopt_positions():
-            export_chunk(path)
+            export_chunk(path, gpu_instances=chunk == "citywide")
         print(f"PREVIEW {chunk}: {len(root.objects)} nodes, {path.stat().st_size:,} bytes", flush=True)
         for obj in list(root.objects):
             bpy.data.objects.remove(obj, do_unlink=True)

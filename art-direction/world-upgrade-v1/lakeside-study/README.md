@@ -2,7 +2,11 @@
 
 ## 网页街区观察
 
-启动 Web 应用后打开 [街区观察](http://127.0.0.1:3137/nexciv-preview)。01 号 Agent 从 Nexus 广场南侧出发，03 号研究员从广场北侧出发。可以在「俯视」「东区」「西区」「湖畔」「研究区」「住宅区」「跟随 01」与「跟随 03」之间切换，拖动并缩放镜头。按「暂停动画」可观察定格姿势。系统减少动态效果时默认从静止俯视开始，可以主动播放。
+启动 Web 应用后打开 [街区观察](http://127.0.0.1:3137/nexciv-preview)。01 号 Agent 从 Nexus 广场南侧出发，03 号研究员从广场北侧出发。可以在「全城」「东区」「西区」「湖畔」「研究区」「住宅区」「跟随 01」与「跟随 03」之间切换，拖动并缩放镜头。按「暂停动画」可观察定格姿势。系统减少动态效果时默认从静止的全城视角开始，可以主动播放。
+
+「全城」按需加载独立的城区与湖岸 GLB。模型涵盖 300 × 300 米城区、外围绿地、连续道路、四座主要地标和北岸湖泊。全城模式使用单独的黄昏太阳光，重复栽植与商铺共用网格。切换街区时，镜头先移向目的地，等街区资源就绪后切换到精细景观。行走状态在镜头切换期间继续推进。
+
+全城 GLB 为 32.1 MB。Blender 回导检查了东西及南北干道上的 1,002 个采样点，均通过。桌面 Edge 在 GTX 1070 Ti、1440 × 900 下，两轮首次从中心城区切到全城分别耗时 5.4 和 5.8 秒，镜头稳定后短测为 116 和 124 FPS。默认镜头完整容纳城区四角。已验证五个街区切换、跟随 01 和 03、镜头复位以及加载失败后重试。[全城网页实拍](renders/NEXCIV_Web_Full_City.jpg)
 
 九个可到访地点是 Nexus 中央广场、Corner Market、议会大厅、公民注册中心、公共建设中心、社区剧场、湖畔码头、Agent 中心和花园住宅。01、03 到达后各自从已加载且可达的地点重新选择，按角色偏好、访问次数和路程评分。路径由双向路段拼接，两名 Agent 使用各自的轨迹，在议会大厅周边共用部分通道。分区资源加载失败时，已连通的路线仍可通行。
 
@@ -65,7 +69,7 @@ Corner Market 门前保留约 4.4 秒的问候。01 号接近时，02 号工人�
 blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/export_nexciv_walk_preview.py
 ```
 
-可在命令末尾加 `-- --chunk governance` 仅导出议会大厅街区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。西区使用 `-- --chunk west`，北岸湖畔使用 `-- --chunk shore`，研究区底包和近景使用 `-- --chunk research` 和 `-- --chunk center`，住宅区使用 `-- --chunk residential`。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
+可在命令末尾加 `-- --chunk governance` 仅导出议会大厅街区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。西区使用 `-- --chunk west`，北岸湖畔使用 `-- --chunk shore`，研究区底包和近景使用 `-- --chunk research` 和 `-- --chunk center`，住宅区使用 `-- --chunk residential`。全城使用 `-- --chunk citywide`，复用已生成的 `governance`、`research` 和 `east` 分块里的四座主地标。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
 
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 
