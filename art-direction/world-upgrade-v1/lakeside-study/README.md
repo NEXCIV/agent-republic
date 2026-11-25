@@ -1,5 +1,15 @@
 # NEXCIV 湖畔城市 · E6-07 美术样板
 
+## 城区道路标线
+
+[打开道路修正版](NEXCIV_World_300m_Roads.blend) · [标线前后对比](renders/NEXCIV_Roads_Comparison.jpg) · [行人视角](renders/NEXCIV_Roads_Near.png)。117 段直路的车道线和斑马线直接使用路面网格中的材质分区。四条会被斜向坡道切到的白线已按坡道范围让位。水景步道口在两侧坡道之间均布七条白线。
+
+从保存的场景重开后，1,365 个白线采样点都命中正确的路面材质。两段道路导出为 GLB 后重新导入，沥青和白线仍处于同一标高。角色走查也已复验。浏览器端整城缩放与移动端显示是后续游戏集成的验收项。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_nexciv_road_markings.py -- --save --render
+```
+
 ## Nexus 中央广场
 
 [打开中央广场修正版](NEXCIV_World_300m_Plaza.blend) · [同机位前后对比](renders/NEXCIV_Plaza_Comparison.jpg)。中央雕塑和直径 16.5 米的石材镶嵌共用圆心 `(0, -12.15)`。十六组放射纹和两道金色环线拼在同一个铺装面上。外圈距台阶最近处 0.70 米，南侧引导线分列入口字标两侧。
