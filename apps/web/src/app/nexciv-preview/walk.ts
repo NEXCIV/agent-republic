@@ -5,17 +5,19 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type AgentPhase, type RoutePoint } from './agent';
 
 export type View = 'overview' | 'follow';
+export type AgentId = '01' | '03';
 export type AgentStatus = AgentPhase | 'loading' | 'unavailable';
 type RouteData = { points: RoutePoint[]; target: RoutePoint };
+type ActiveAgent = { asset: GLTF; patrol: ReturnType<typeof createAgentPatrol>; phase?: AgentPhase; progress: number };
 type Callbacks = {
   ready: (elapsedMs: number) => void;
   fallback: () => void;
-  agent: (status: AgentStatus, percent: number) => void;
+  agent: (id: AgentId, status: AgentStatus, percent: number) => void;
   fps: (value: number) => void;
 };
 
 export type WalkController = {
-  view: (mode: View) => void;
+  view: (mode: View, id?: AgentId) => void;
   zoom: (factor: number) => void;
   play: (enabled: boolean) => void;
   reset: () => void;
@@ -25,6 +27,8 @@ export type WalkController = {
 const START_YAW = 0.23;
 const START_PITCH = 0.88;
 const START_DISTANCE = 115;
+const EXPANDED_PITCH = 1.08;
+const EXPANDED_DISTANCE = 166;
 const FOLLOW_YAW = -2.54;
 const FOLLOW_PITCH = 0.39;
 const FOLLOW_DISTANCE = 5.6;
@@ -114,7 +118,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   scene.background = sky;
   const fog = new THREE.Fog(sky, 110, 235);
   scene.fog = fog;
-  const camera = new THREE.PerspectiveCamera(49, 1, 0.18, 235);
+  const camera = new THREE.PerspectiveCamera(49, 1, 0.18, 285);
   const ambient = new THREE.HemisphereLight('#b5ceff', '#81705a', 0.97);
   const sun = new THREE.DirectionalLight('#ffc481', 2.14);
   sun.position.set(-43, 33, 62);
@@ -146,12 +150,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let ended = false;
   let contextLost = false;
   let model: THREE.Object3D | undefined;
+  let north: THREE.Object3D | undefined;
+  let northRequested = false;
   const details = new Map<Detail, THREE.Object3D>();
   const requestedDetails = new Set<Detail>();
   const proxies = new Map<Detail, THREE.Object3D[]>();
   let actor: GLTF | undefined;
   let actorLoading = true;
-  let patrol: ReturnType<typeof createAgentPatrol> | undefined;
+  const agents = new Map<AgentId, ActiveAgent>();
+  let followed: AgentId = '01';
   let route: RouteData | undefined;
   let updateDetail: ((level: number) => void) | undefined;
   let mode: View = initialView;
@@ -164,8 +171,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let followPitch = FOLLOW_PITCH;
   let followDistance = FOLLOW_DISTANCE;
   let followHeight: number | undefined;
-  let shownPhase: AgentPhase | undefined;
-  let shownProgress = -1;
   let measurements = 0;
   let measuredAt = performance.now();
   let lastFrame = measuredAt;
@@ -182,25 +187,42 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function zoom(factor: number) {
-    if (mode === 'follow' && patrol) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 9.5);
-    else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, 139);
+    if (mode === 'follow' && agents.has(followed)) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
+    else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north ? 176 : 139);
   }
 
-  function setView(next: View) {
-    mode = next;
+  function resetFollowCamera() {
+    followYaw = followed === '03' ? 0.52 : FOLLOW_YAW;
+    followPitch = followed === '03' ? 0.28 : FOLLOW_PITCH;
+    followDistance = followed === '03' ? 7.4 : FOLLOW_DISTANCE;
     followHeight = undefined;
   }
 
-  function connectAgent() {
-    if (!model || !route || !actor || patrol || ended || contextLost) return;
-    try {
-      patrol = createAgentPatrol(actor, route.points);
-      scene.add(patrol.root);
-    } catch {
-      disposeModel(actor.scene);
-      actor = undefined;
-      callbacks.agent('unavailable', 0);
+  function setView(next: View, id = followed) {
+    if (id !== followed) {
+      followed = id;
+      resetFollowCamera();
     }
+    mode = next;
+    followHeight = undefined;
+    if (next === 'follow' && id === '03') loadNorth();
+  }
+
+  function attachAgent(id: AgentId, asset: GLTF, points: RoutePoint[], destination: [number, number]) {
+    try {
+      const patrol = createAgentPatrol(asset, points, destination);
+      scene.add(patrol.root);
+      agents.set(id, { asset, patrol, progress: -1 });
+    } catch {
+      disposeModel(asset.scene);
+      callbacks.agent(id, 'unavailable', 0);
+    }
+  }
+
+  function connectPrimary() {
+    if (!model || !route || !actor || ended || contextLost) return;
+    attachAgent('01', actor, route.points, [13.70, 54.91]);
+    actor = undefined;
   }
 
   function animate(now: number) {
@@ -214,15 +236,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       measuredAt = now;
     }
 
-    if (patrol) {
+    for (const [id, agent] of agents) {
+      const { patrol } = agent;
       if (playing) patrol.advance(dt);
-      if (shownPhase !== patrol.phase || shownProgress !== patrol.progress) {
-        shownPhase = patrol.phase;
-        shownProgress = patrol.progress;
-        callbacks.agent(shownPhase, shownProgress);
+      if (agent.phase !== patrol.phase || agent.progress !== patrol.progress) {
+        agent.phase = patrol.phase;
+        agent.progress = patrol.progress;
+        callbacks.agent(id, agent.phase, agent.progress);
       }
     }
 
+    const patrol = agents.get(followed)?.patrol;
     if (mode === 'follow' && patrol) {
       fog.near = 48;
       fog.far = 139;
@@ -230,7 +254,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       followHeight = followHeight === undefined || !tween ? feet.y : THREE.MathUtils.damp(followHeight, feet.y, 12, dt);
       aim.set(feet.x, followHeight + 0.94, feet.z);
       // Frame the shop from the street side as the Agent passes the entrance tree.
-      const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
+      const streetSide = followed === '01' ? THREE.MathUtils.smoothstep(feet.z, 47, 56) : 0;
       const yaw = followYaw + streetSide * 1.14;
       camera.position.set(
         aim.x + followDistance * Math.sin(yaw) * Math.cos(followPitch),
@@ -240,8 +264,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       camera.lookAt(aim);
       updateDetail?.(1);
     } else {
-      fog.near = 110;
-      fog.far = 235;
+      fog.near = north ? 165 : 110;
+      fog.far = north ? 275 : 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
       const distance = orbitDistance * (camera.aspect < 0.8 ? 1.09 : 1);
       camera.position.set(
@@ -253,14 +277,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       updateDetail?.(1 - THREE.MathUtils.smoothstep(orbitDistance, 33, 71));
     }
     renderer.render(scene, camera);
-    const showStreetDetails = (mode === 'follow' && patrol) || orbitDistance < 59;
-    const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !patrol || patrol.progress > 0);
+    const primary = agents.get('01')?.patrol;
+    const showStreetDetails = (mode === 'follow' && followed === '01' && patrol) || orbitDistance < 59;
+    const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !primary || primary.progress > 0);
     if (!document.hidden && readyForDetails) {
-      const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (patrol && marketEntrance.distanceTo(patrol.root.position) < 29);
+      const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (primary && marketEntrance.distanceTo(primary.root.position) < 29);
       if (nearMarket) {
         loadDetail('market');
       }
       if (showStreetDetails) loadDetail('street');
+      if (playing && (!primary || primary.progress >= 10)) loadNorth();
     }
     frameId = requestAnimationFrame(animate);
   }
@@ -287,7 +313,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
     const dx = next.x - previous.x;
     const dy = next.y - previous.y;
-    if (mode === 'follow' && patrol) {
+    if (mode === 'follow' && agents.has(followed)) {
       followYaw -= dx * 0.006;
       followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.006, 0.16, 1.18);
     } else {
@@ -348,14 +374,51 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }).catch(() => {});
   }
 
+  function loadNorth() {
+    if (!model || northRequested || ended || contextLost) return;
+    northRequested = true;
+    const priority = mode === 'follow' && followed === '03' ? 'auto' : 'low';
+    Promise.all([
+      request('governance-route.json', priority).then((response) => response.json() as Promise<RouteData>),
+      request('governance-north.glb', priority).then((response) => response.arrayBuffer()),
+      request('agent-03.glb', priority).then((response) => response.arrayBuffer()),
+    ]).then(async ([layout, cityBytes, agentBytes]) => {
+      if (ended || contextLost) return;
+      const city = await loader.parseAsync(cityBytes, ASSET_PATH);
+      if (ended || contextLost) { disposeModel(city.scene); return; }
+      north = city.scene;
+      setBuildingShadows(north);
+      scene.add(north);
+      focus.set(...layout.target);
+      if (desiredDistance === START_DISTANCE && orbitPitch === START_PITCH) {
+        desiredDistance = EXPANDED_DISTANCE;
+        orbitPitch = EXPANDED_PITCH;
+      }
+      sun.position.z -= 35;
+      sun.target.position.z -= 35;
+      Object.assign(sun.shadow.camera, { top: 92, bottom: -92, far: 178 });
+      sun.shadow.camera.updateProjectionMatrix();
+      renderer.shadowMap.needsUpdate = true;
+      const entranceLight = new THREE.PointLight('#ffd08b', 64, 14, 2);
+      entranceLight.position.set(0, 4, -83);
+      scene.add(entranceLight);
+
+      const agent = await loader.parseAsync(agentBytes, ASSET_PATH);
+      if (ended || contextLost) { disposeModel(agent.scene); return; }
+      attachAgent('03', agent, layout.points, [0, -95]);
+    }).catch(() => {
+      if (!ended && !contextLost) callbacks.agent('03', 'unavailable', 0);
+    });
+  }
+
   request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
     if (ended || contextLost) return;
     const result = await loader.parseAsync(bytes, ASSET_PATH);
     if (ended || contextLost) { disposeModel(result.scene); return; }
     actor = result;
-    connectAgent();
+    connectPrimary();
   }).catch(() => {
-    if (!ended && !contextLost) callbacks.agent('unavailable', 0);
+    if (!ended && !contextLost) callbacks.agent('01', 'unavailable', 0);
   }).finally(() => { actorLoading = false; });
 
   Promise.all([
@@ -378,7 +441,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
     setBuildingShadows(model);
     scene.add(model);
-    connectAgent();
+    connectPrimary();
     renderer.shadowMap.needsUpdate = true;
     firstCityFrame = lastFrame = measuredAt = performance.now();
     animate(lastFrame);
@@ -393,20 +456,22 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     play(enabled) { playing = enabled; },
     reset() {
       orbitYaw = START_YAW;
-      orbitPitch = START_PITCH;
-      orbitDistance = desiredDistance = START_DISTANCE;
-      followYaw = FOLLOW_YAW;
-      followPitch = FOLLOW_PITCH;
-      followDistance = FOLLOW_DISTANCE;
+      orbitPitch = north ? EXPANDED_PITCH : START_PITCH;
+      orbitDistance = desiredDistance = north ? EXPANDED_DISTANCE : START_DISTANCE;
+      resetFollowCamera();
     },
     dispose() {
       ended = true;
       aborter.abort();
       cancelAnimationFrame(frameId);
       sizeObserver.disconnect();
-      patrol?.dispose();
+      for (const agent of agents.values()) {
+        agent.patrol.dispose();
+        disposeModel(agent.asset.scene);
+      }
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);
+      if (north) disposeModel(north);
       for (const detail of details.values()) disposeModel(detail);
       sun.shadow.dispose();
       environment.dispose();

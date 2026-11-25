@@ -1,25 +1,32 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createWalk, type AgentStatus, type View, type WalkController } from './walk';
+import { createWalk, type AgentId, type AgentStatus, type View, type WalkController } from './walk';
 import styles from './preview.module.css';
 
-const agentActivity: Record<AgentStatus, string> = {
-  loading: '中央广场',
-  outbound: '前往 Corner Market',
-  atMarket: '已到达 Corner Market',
-  inbound: '返回中央广场',
-  atNexus: '已返回中央广场',
-  unavailable: 'Agent 暂未载入',
-};
+const DESTINATIONS: Record<AgentId, string> = { '01': 'Corner Market', '03': '议会大厅' };
+type AgentReport = { status: AgentStatus; progress: number };
+const STARTING: AgentReport = { status: 'loading', progress: 0 };
+
+function activity(id: AgentId, status: AgentStatus) {
+  return {
+    loading: id === '03' ? '正在载入议会大厅街区' : '中央广场',
+    outbound: `前往 ${DESTINATIONS[id]}`,
+    arrived: `已到达 ${DESTINATIONS[id]}`,
+    inbound: '返回中央广场',
+    atNexus: '已返回中央广场',
+    unavailable: 'Agent 暂未载入',
+  }[status];
+}
 
 export function WalkPreview() {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');
+  const [selected, setSelected] = useState<AgentId>('01');
   const [playing, setPlaying] = useState(true);
-  const [agent, setAgent] = useState<{ status: AgentStatus; progress: number }>({ status: 'loading', progress: 0 });
+  const [reports, setReports] = useState<Record<AgentId, AgentReport>>({ '01': STARTING, '03': STARTING });
   const [fps, setFps] = useState(0);
   const [readyTime, setReadyTime] = useState(0);
 
@@ -34,10 +41,7 @@ export function WalkPreview() {
       const controller = createWalk(host, initialView, !reduceMotion, {
         ready: (elapsed) => { setReadyTime(elapsed); setState('ready'); },
         fallback: () => setState('fallback'),
-        agent: (status, progress) => {
-          setAgent({ status, progress });
-          if (status === 'unavailable') setView('overview');
-        },
+        agent: (id, status, progress) => setReports((previous) => ({ ...previous, [id]: { status, progress } })),
         fps: setFps,
       });
       world.current = controller;
@@ -47,13 +51,16 @@ export function WalkPreview() {
     }
   }, []);
 
-  function select(next: View) {
-    world.current?.view(next);
+  function select(next: View, id = selected) {
+    world.current?.view(next, id);
     setView(next);
+    setSelected(id);
   }
 
   const sceneReady = state === 'ready';
+  const agent = reports[selected];
   const agentReady = sceneReady && agent.status !== 'loading' && agent.status !== 'unavailable';
+  const playbackReady = sceneReady && Object.values(reports).some(({ status }) => status !== 'loading' && status !== 'unavailable');
 
   return (
     <div className={styles.page} lang="zh-CN" data-preview="nexciv-walk">
@@ -67,12 +74,11 @@ export function WalkPreview() {
         </span>
       </header>
       <section className={styles.viewer} aria-label="NEXCIV 实时街区">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{agentReady ? 'AGENT 01 · 模拟行为' : 'NEXUS 东南街区'}</small>
-          <strong role="status">{sceneReady ? agentActivity[agent.status] : '中央广场'}</strong>
+          <small>{agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区'}</small>
+          <strong role="status">{sceneReady ? activity(selected, agent.status) : '中央广场'}</strong>
         </div>
         {state === 'fallback' && <p className={styles.fallback}>3D 场景暂时无法加载。下方可查看路线的两处实景。</p>}
       </section>
@@ -80,14 +86,15 @@ export function WalkPreview() {
         <div className={styles.controls}>
           <div className={styles.switcher} aria-label="视角">
             <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>俯视</button>
-            <button disabled={!agentReady} aria-pressed={view === 'follow'} onClick={() => select('follow')}>跟随 Agent</button>
+            <button disabled={!sceneReady || reports['01'].status === 'unavailable'} aria-label="跟随 Agent 01" aria-pressed={view === 'follow' && selected === '01'} onClick={() => select('follow', '01')}>跟随 01</button>
+            <button disabled={!sceneReady || reports['03'].status === 'unavailable'} aria-label="跟随 Agent 03" aria-pressed={view === 'follow' && selected === '03'} onClick={() => select('follow', '03')}>跟随 03</button>
           </div>
           <div className={styles.switcher} aria-label="缩放">
             <button disabled={!sceneReady} onClick={() => world.current?.zoom(1.25)} aria-label="缩小">−</button>
             <button disabled={!sceneReady} onClick={() => world.current?.zoom(0.8)} aria-label="放大">+</button>
           </div>
           <button disabled={!sceneReady} onClick={() => world.current?.reset()}>重置镜头</button>
-          <button disabled={!agentReady} onClick={() => {
+          <button disabled={!playbackReady} onClick={() => {
             world.current?.play(!playing);
             setPlaying(!playing);
           }}>{playing ? '暂停动画' : '播放动画'}</button>
@@ -98,8 +105,8 @@ export function WalkPreview() {
         </div>
         <div className={styles.route}>
           <span>中央广场</span>
-          <progress aria-label="Agent 在中央广场与 Corner Market 之间的位置" max={100} value={agent.progress} />
-          <span>Corner Market</span>
+          <progress aria-label={`Agent ${selected} 在中央广场与${DESTINATIONS[selected]}之间的位置`} max={100} value={agent.progress} />
+          <span>{DESTINATIONS[selected]}</span>
           <span className={styles.performance} aria-label="本机实时渲染指标">{fps > 0 ? `${fps} FPS · ${(readyTime / 1000).toFixed(1)} s` : ''}</span>
         </div>
         {state === 'fallback' && (

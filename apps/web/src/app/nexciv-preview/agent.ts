@@ -2,13 +2,13 @@ import * as THREE from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 
 export type RoutePoint = [number, number, number];
-export type AgentPhase = 'outbound' | 'atMarket' | 'inbound' | 'atNexus';
+export type AgentPhase = 'outbound' | 'arrived' | 'inbound' | 'atNexus';
 
 const SPEED = 1.25;
 const STOP_SECONDS = 4;
 const UP = new THREE.Vector3(0, 1, 0);
 
-export function createAgentPatrol(asset: GLTF, points: RoutePoint[]) {
+export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination: [number, number]) {
   let length = 0;
   let previous: THREE.Vector3 | undefined;
   const route = points.map((point) => {
@@ -19,7 +19,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[]) {
   });
   const idleClip = THREE.AnimationClip.findByName(asset.animations, 'Idle');
   const walkClip = THREE.AnimationClip.findByName(asset.animations, 'Walk');
-  const stride = Number(asset.scene.getObjectByName('Citizen01')?.userData.walk_stride_m);
+  const stride = Number(asset.scene.children.find((object) => object.userData.walk_stride_m)?.userData.walk_stride_m);
   if (!idleClip || !walkClip || !Number.isFinite(length) || length <= 0 || !Number.isFinite(stride) || stride <= 0) {
     throw new Error('Invalid Agent route or motion clips');
   }
@@ -63,7 +63,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[]) {
     const tangent = positionAt(distance + 0.45, ahead).sub(positionAt(distance - 0.45, behind));
     const alongRoute = Math.atan2(tangent.x * direction, tangent.z * direction);
     let yaw = alongRoute;
-    if (phase === 'atMarket') yaw = Math.atan2(13.70 - root.position.x, 54.91 - root.position.z);
+    if (phase === 'arrived') yaw = Math.atan2(destination[0] - root.position.x, destination[1] - root.position.z);
     if (dwell > STOP_SECONDS - 1.1) yaw = alongRoute + Math.PI;
     heading.setFromAxisAngle(UP, yaw);
     if (dt > 0) root.quaternion.rotateTowards(heading, dt * 3.2);
@@ -86,7 +86,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[]) {
     get progress() { return Math.round(100 * distance / length); },
     advance(dt: number) {
       if (dt <= 0) return;
-      if (phase === 'atMarket' || phase === 'atNexus') {
+      if (phase === 'arrived' || phase === 'atNexus') {
         dwell += dt;
         if (dwell >= STOP_SECONDS) {
           dwell = 0;
@@ -95,7 +95,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[]) {
         }
       } else {
         distance = THREE.MathUtils.clamp(distance + direction * SPEED * dt, 0, length);
-        if (distance === length) phase = 'atMarket';
+        if (distance === length) phase = 'arrived';
         if (distance === 0) phase = 'atNexus';
       }
       updatePose(dt);
