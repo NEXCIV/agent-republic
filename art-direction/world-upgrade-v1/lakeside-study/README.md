@@ -1,5 +1,23 @@
 # NEXCIV 湖畔城市 · E6-07 美术样板
 
+## 网页步行样板
+
+启动 Web 应用后打开 [街区试玩](http://127.0.0.1:3137/nexciv-preview)。可以拖动俯视镜头，使用滚轮、双指或按钮缩放。切到「步行」后，使用 W / S、方向键或屏幕按钮，从 Nexus 中央广场经过斑马线和路缘坡道走到 Corner Market。进度条可以跳到沿途位置，拖动视野可以低头检查标线和铺装。
+
+```powershell
+pnpm --filter @agent-republic/web dev --port 3137
+```
+
+样板从下方的道路修正版导出，复用实际广场铺装、道路和商铺。GLB 大小约 13.4 MB，使用 Meshopt 压缩。斑马线和沥青共用路面网格，缩放时始终可见。小型装饰随距离淡出。页面在三维模型加载失败时提供静态预览。[浏览器俯视、过街及到店截图](renders/NEXCIV_Web_Walk_Preview.jpg)。
+
+已在 Edge 桌面窗口和同一台电脑的 390 × 844 触屏模拟窗口验证镜头操作与到店，并通过拦截模型请求验证静态预览。手机真机性能仍需实测。
+
+在仓库根目录用 Blender 5.3 重新导出网页模型与路线。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/export_nexciv_walk_preview.py
+```
+
 ## 城区道路标线
 
 [打开道路修正版](NEXCIV_World_300m_Roads.blend) · [标线前后对比](renders/NEXCIV_Roads_Comparison.jpg) · [行人视角](renders/NEXCIV_Roads_Near.png)。117 段直路的车道线和斑马线直接使用路面网格中的材质分区。四条会被斜向坡道切到的白线已按坡道范围让位。水景步道口在两侧坡道之间均布七条白线。
