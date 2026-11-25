@@ -4,11 +4,13 @@ import argparse
 import json
 import math
 import sys
+from contextlib import contextmanager
 from itertools import pairwise
 from pathlib import Path
 
 import bmesh
 import bpy
+from io_scene_gltf2.io.exp import meshopt
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -315,6 +317,9 @@ def stage_assets(scene, graph, chunk):
         asset = bpy.data.objects.new(source.name, mesh)
         root.objects.link(asset)
         asset.matrix_world = transform
+        if chunk == "governance" and name == "CIVRUM_LOT_PAINT_GOVERNANCE":
+            # The lettering and the top of the stone are both at 0.182 m in the source scene.
+            asset.location.z += 0.004
         if chunk == "governance" and name == GOVERNANCE_CROSSING_ROAD:
             mesh = asset.data = mesh.copy()
             slots = {slot.material.name: i for i, slot in enumerate(source.material_slots) if slot.material}
@@ -387,6 +392,28 @@ def stage_assets(scene, graph, chunk):
     return root
 
 
+@contextmanager
+def precise_meshopt_positions():
+    """Blender 5.3 uses 12-bit shared precision, collapsing adjacent paving layers."""
+    encode = meshopt.MeshoptEncoder.encode_attribute
+
+    def encode_attribute(name, data, stride, settings):
+        if name != "POSITION":
+            return encode(name, data, stride, settings)
+        original_bits = meshopt.EXP_FILTER_BITS
+        meshopt.EXP_FILTER_BITS = 19
+        try:
+            return encode(name, data, stride, settings)
+        finally:
+            meshopt.EXP_FILTER_BITS = original_bits
+
+    meshopt.MeshoptEncoder.encode_attribute = staticmethod(encode_attribute)
+    try:
+        yield
+    finally:
+        meshopt.MeshoptEncoder.encode_attribute = staticmethod(encode)
+
+
 def export_chunk(path):
     bpy.ops.export_scene.gltf(
         filepath=str(path),
@@ -425,7 +452,8 @@ def main():
             continue
         root = stage_assets(scene, graph, chunk)
         path = args.output / filename
-        export_chunk(path)
+        with precise_meshopt_positions():
+            export_chunk(path)
         print(f"PREVIEW {chunk}: {len(root.objects)} nodes, {path.stat().st_size:,} bytes", flush=True)
         for obj in list(root.objects):
             bpy.data.objects.remove(obj, do_unlink=True)

@@ -52,35 +52,6 @@ const DETAIL_FILES = {
 };
 type Detail = keyof typeof DETAIL_FILES;
 
-function installDetailFade(root: THREE.Object3D) {
-  const batch = root.getObjectByName('NEXCIV_detail') ?? root.getObjectByName('NEXCIV detail');
-  const visibility = { value: 0 };
-  batch?.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) return;
-    const materials: THREE.Material[] = Array.isArray(object.material) ? object.material : [object.material];
-    const copies = materials.map((source) => {
-      const material = source.clone();
-      material.onBeforeCompile = (shader) => {
-        shader.uniforms.detailVisibility = visibility;
-        shader.fragmentShader = 'uniform float detailVisibility;\n' + shader.fragmentShader.replace(
-          '#include <clipping_planes_fragment>',
-          `#include <clipping_planes_fragment>
-          vec2 grid = mod(gl_FragCoord.xy, 4.0);
-          float threshold = fract(dot(grid, vec2(0.5, 0.25)) + floor(grid.x * 0.5) * 0.125 + floor(grid.y * 0.5) * 0.0625);
-          if (threshold >= detailVisibility) discard;`,
-        );
-      };
-      material.customProgramCacheKey = () => 'nexciv-detail-coverage';
-      return material;
-    });
-    object.material = Array.isArray(object.material) ? copies : copies[0];
-  });
-  return (level: number) => {
-    visibility.value = level;
-    if (batch) batch.visible = level > 0.001;
-  };
-}
-
 function disposeModel(asset: THREE.Object3D) {
   const materials = new Set<THREE.Material>();
   const maps = new Set<THREE.Texture>();
@@ -178,7 +149,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let greetingFraming = 0;
   let followed: AgentId = '01';
   let route: RouteData | undefined;
-  let updateDetail: ((level: number) => void) | undefined;
   let mode: View = initialView;
   let playing = autoPlay;
   let orbitYaw = START_YAW;
@@ -295,7 +265,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
 
     const patrol = agents.get(followed)?.patrol;
-    if (mode === 'follow' && patrol) {
+    const following = mode === 'follow' && patrol;
+    // Use more of the depth buffer for the surfaces visible from the high camera.
+    const near = following ? 0.18 : Math.max(1, orbitDistance * 0.055);
+    if (camera.near !== near) {
+      camera.near = near;
+      camera.updateProjectionMatrix();
+    }
+    if (following) {
       fog.near = 48;
       fog.far = 139;
       const feet = patrol.root.position;
@@ -326,7 +303,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         aim.z + distance * Math.cos(yaw) * Math.cos(pitch),
       );
       camera.lookAt(aim);
-      updateDetail?.(1);
     } else {
       fog.near = north ? 165 : 110;
       fog.far = north ? 275 : 235;
@@ -338,7 +314,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         focus.z + distance * Math.cos(orbitYaw) * Math.cos(orbitPitch),
       );
       camera.lookAt(focus);
-      updateDetail?.(1 - THREE.MathUtils.smoothstep(orbitDistance, 33, 71));
     }
     renderer.render(scene, camera);
     const showStreetDetails = (mode === 'follow' && patrol && patrol.root.position.z > -44) || orbitDistance < 59;
@@ -433,7 +408,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       details.set(kind, asset);
       scene.add(asset);
       for (const proxy of placeholders) proxy.visible = false;
-      if (kind === 'street') updateDetail = installDetailFade(asset);
       renderer.shadowMap.needsUpdate = true;
     }).catch(() => {});
   }
