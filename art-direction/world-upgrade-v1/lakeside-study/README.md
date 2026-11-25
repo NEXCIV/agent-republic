@@ -50,6 +50,14 @@ Edge 验证了 01 号自行从 Corner Market 走到剧场入口，以及西区�
 
 Edge 中验证了 01 号从商铺走到公共建设中心，以及 03 号从议会大厅走到公民注册中心。390 × 844 触屏模拟通过了东区请求失败后的重试和减少动态效果检查。[东区俯视和到访实测截图](renders/NEXCIV_Web_East_District.jpg)。
 
+### 公共建设中心原模修整
+
+建设中心的 Blender 修订版继续链接用户的 Tripo `public construction center 3d model (2).glb` 对应母版。重开场景核对了 1,843,389 个原始三角面、原 UV 与 8192 × 8192 底色贴图，贴图校验值与源 GLB 一致。恢复原穹顶和屋顶景观，停用后加的穹顶与花槽叠层。在现有玻璃门的内侧加入独立铜框和门槛，实测门内有约 2.97 米纵深。现有波浪雨棚、独立台阶、铭牌和入口位置继续沿用。[Blender 城市修订版](NEXCIV_World_300m_Public_Works.blend)
+
+网页近景从原模降至约 48 万三角面、4K 贴图，东区中景和全城共用约 12 万三角面、2K 贴图。`scripts/refine_nexciv_public_works.py` 用于另存 Blender 修订版，`scripts/export_nexciv_walk_preview.py -- --chunk east --chunk works --chunk citywide` 用于重导三个网页包。
+
+建设中心近景包为 7.73 MB，靠近时按需加载。东区包为 10.60 MB，全城包为 33.91 MB。1440 × 900 的桌面 Edge 验证了中近景切换、01 号到访和全城俯视，全城稳定后短测约 94 FPS。Blender 回导的 1,002 个主干道路面采样全部通过。[东区俯视与近景同机位对照](renders/NEXCIV_Web_Public_Works_Refinement.jpg)
+
 选点在试玩页内运行，每次刷新用相同的初始偏好和访问记录启动。这套演示使用独立的路网与状态。[原有南北线及商铺问候的实测截图](renders/NEXCIV_Web_Agent_Routing.jpg)。
 
 ```powershell

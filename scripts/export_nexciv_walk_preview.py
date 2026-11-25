@@ -31,6 +31,7 @@ from build_nexciv_facades import finishes as facade_finishes
 from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
 from civrum_lakeside_blocks import PALETTE, STONE
+from refine_nexciv_public_works import WORKS, refine_public_works
 
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "apps/web/public/nexciv-walk"
@@ -149,7 +150,7 @@ RESIDENCE_ALTERNATE = (
 )
 EAST_HEROES = {
     "HERO_03_Citizen_Registration": "registry",
-    "HERO_04_Public_Construction": "works",
+    WORKS: "works",
 }
 LAYERS = {
     "ROADS",
@@ -519,18 +520,19 @@ def stage_assets(scene, graph, chunk, library=DEST):
     transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
     texture_limit = {
-        "base": 512, "retail": 2048, "registry": 2048, "works": 2048, "center": 4096, "hall": 4096, "citywide": 768,
+        "base": 512, "retail": 2048, "registry": 2048, "works": 4096, "center": 4096, "hall": 4096, "citywide": 768,
     }.get(chunk, 1024)
     pbr = {}
     textures = {}
 
-    def export_material(source):
+    def export_material(source, limit):
         if source.name == "MAT_SHOP_Glass":
             return solid_window if chunk == "base" else glass
-        if source in pbr or not source.use_nodes:
-            return pbr.get(source, source)
+        key = source, limit
+        if key in pbr or not source.use_nodes:
+            return pbr.get(key, source)
         finish = source.copy()
-        pbr[source] = finish
+        pbr[key] = finish
         surface = next((node for node in finish.node_tree.nodes if node.type == "BSDF_PRINCIPLED"), None)
         if surface is None:
             return finish
@@ -556,14 +558,15 @@ def stage_assets(scene, graph, chunk, library=DEST):
             if node.type != "TEX_IMAGE" or node.image is None:
                 continue
             image = node.image
-            if max(image.size) <= texture_limit:
+            if max(image.size) <= limit:
                 continue
-            if image not in textures:
+            image_key = image, limit
+            if image_key not in textures:
                 resized = image.copy()
-                factor = texture_limit / max(image.size)
+                factor = limit / max(image.size)
                 resized.scale(*(max(1, round(n * factor)) for n in image.size))
-                textures[image] = resized
-            node.image = textures[image]
+                textures[image_key] = resized
+            node.image = textures[image_key]
         return finish
 
     crossings = {
@@ -645,12 +648,13 @@ def stage_assets(scene, graph, chunk, library=DEST):
             mesh = asset.data = mesh.copy()
             slots = {slot.material.name: i for i, slot in enumerate(source.material_slots) if slot.material}
             paint_crossing(mesh, transform, slots[WHITE], slots[ASPHALT], *crossing)
+        limit = 2048 if name == WORKS and chunk == "east" else texture_limit
         for index, original in enumerate(source.material_slots):
             if not original.material:
                 continue
             slot = asset.material_slots[index]
             slot.link = "OBJECT"
-            slot.material = export_material(original.material)
+            slot.material = export_material(original.material, limit)
         # Keep repeated asset meshes shared, reducing each large source once.
         if market_proxy:
             tier = "market_proxy"
@@ -658,11 +662,11 @@ def stage_assets(scene, graph, chunk, library=DEST):
             tier = "street_proxy"
         asset["previewTier"] = "detail" if chunk in {"registry", "works", "center", "hall"} else tier
         if chunk == "works":
-            parts.append((asset, 230000))
+            parts.append((asset, 480000))
         elif chunk == "center":
             parts.append((asset, 245000))
         elif chunk == "east" and len(mesh.polygons) > 10000:
-            face_limit = {"registry_proxy": 18500, "works_proxy": 61000}.get(tier, 9000)
+            face_limit = {"registry_proxy": 18500, "works_proxy": 120000}.get(tier, 9000)
             if len(mesh.polygons) > face_limit:
                 parts.append((asset, face_limit))
         elif chunk == "west" and len(mesh.polygons) > 55000:
@@ -806,6 +810,8 @@ def main():
     chunks = args.chunk or CHUNKS
     bpy.ops.wm.open_mainfile(filepath=str(SOURCE))
     scene = bpy.context.scene
+    if any(chunk in chunks for chunk in ("east", "works", "citywide")):
+        refine_public_works(scene)
     scene.frame_set(1)
     graph = bpy.context.evaluated_depsgraph_get()
     route = sidewalk_route(scene, graph, WAYPOINTS)
