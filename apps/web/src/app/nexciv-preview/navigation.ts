@@ -1,6 +1,6 @@
 import type { RoutePoint } from './agent';
 
-const PLACES = ['plaza', 'market', 'governance', 'registry', 'works', 'forum', 'pier'] as const;
+const PLACES = ['plaza', 'market', 'governance', 'registry', 'works', 'forum', 'pier', 'center'] as const;
 export type Place = (typeof PLACES)[number];
 export type AgentStart = Place | 'plazaNorth';
 type Junction = AgentStart | 'eastAvenue';
@@ -10,8 +10,8 @@ export type EastRoutes = Record<'avenue' | 'registry' | 'works', Connection>;
 export type Visits = Record<Place, number>;
 
 const INTERESTS: Record<ResidentId, Visits> = {
-  '01': { plaza: 1.5, market: 3.2, governance: 2.6, registry: 2.6, works: 3.0, forum: 3.12, pier: 2.9 },
-  '03': { plaza: 1.8, market: 2.4, governance: 3.4, registry: 3.15, works: 2.4, forum: 2.65, pier: 3.5 },
+  '01': { plaza: 1.5, market: 3.2, governance: 2.6, registry: 2.6, works: 3.0, forum: 3.12, pier: 2.9, center: 2.85 },
+  '03': { plaza: 1.8, market: 2.4, governance: 3.4, registry: 3.15, works: 2.4, forum: 2.65, pier: 3.5, center: 3.22 },
 };
 
 export const DESTINATION_FACING: Record<Place, [number, number]> = {
@@ -22,6 +22,7 @@ export const DESTINATION_FACING: Record<Place, [number, number]> = {
   works: [95, 78],
   forum: [-95, 88],
   pier: [71, -225],
+  center: [-95, -65],
 };
 
 type Edge = { to: Junction; connection: Connection; lengths: Record<keyof Connection, number> };

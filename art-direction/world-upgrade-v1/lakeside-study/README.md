@@ -2,9 +2,13 @@
 
 ## 网页街区观察
 
-启动 Web 应用后打开 [街区观察](http://127.0.0.1:3137/nexciv-preview)。01 号 Agent 从 Nexus 广场南侧出发，03 号研究员从广场北侧出发。可以在「俯视」「东区」「西区」「湖畔」「跟随 01」与「跟随 03」之间切换，拖动并缩放镜头。按「暂停动画」可观察定格姿势。系统减少动态效果时默认从静止俯视开始，可以主动播放。
+启动 Web 应用后打开 [街区观察](http://127.0.0.1:3137/nexciv-preview)。01 号 Agent 从 Nexus 广场南侧出发，03 号研究员从广场北侧出发。可以在「俯视」「东区」「西区」「湖畔」「研究区」「跟随 01」与「跟随 03」之间切换，拖动并缩放镜头。按「暂停动画」可观察定格姿势。系统减少动态效果时默认从静止俯视开始，可以主动播放。
 
-七个可到访地点是 Nexus 中央广场、Corner Market、议会大厅、公民注册中心、公共建设中心、社区剧场和湖畔码头。01、03 到达后各自从已加载且可达的地点重新选择，按角色偏好、访问次数和路程评分。路径由双向路段拼接，两名 Agent 使用各自的轨迹，湖畔路线在议会大厅侧门附近共用一段窄通道。分区资源加载失败时，已连通的路线仍可通行。
+八个可到访地点是 Nexus 中央广场、Corner Market、议会大厅、公民注册中心、公共建设中心、社区剧场、湖畔码头和 Agent 中心。01、03 到达后各自从已加载且可达的地点重新选择，按角色偏好、访问次数和路程评分。路径由双向路段拼接，两名 Agent 使用各自的轨迹，在议会大厅周边共用部分通道。分区资源加载失败时，已连通的路线仍可通行。
+
+「研究区」视角加载西北街区的 Agent 中心、阅览室、研究广场和沿街建筑。Agent 中心沿用 Blender 母版的 v3 原模型和 8K 贴图源，网页在原地块内把正面宽度从 7 米调整到 14 米。中景保留 68,500 个三角面，近景保留 245,000 个三角面和一张 4K 贴图。NEXCIV 招牌为独立实体，随任一档模型原位显示。近景在镜头接近入口时下载，拉远时切回中景。
+
+研究区底包为 10.95 MB，Agent 中心近景为 5.26 MB，均分开加载。议会大厅到 Agent 中心门前的双向路线约 102 至 103 米，过街漆线写入原车道网格。Blender 回导确认 419 个路面采样点均有地面支撑，标高最大偏差约 1.7 厘米。桌面 Edge 验证 03 号到访、近景资源按需加载及东区切换。[研究区俯视和入口实测截图](renders/NEXCIV_Web_Research_District.jpg)。
 
 「湖畔」视角加载北岸步道、两座木码头、停泊船、黑金湖畔塔和远岸林带。湖泊保留母版的深浅水顶点色，网页用实时法线模拟微波纹。暂停或启用系统减少动态效果时，水面保持静止。北岸分块为 7.60 MB，在点击「湖畔」或 03 号前往议会大厅的行程过半时加载。
 
@@ -57,7 +61,7 @@ Corner Market 门前保留约 4.4 秒的问候。01 号接近时，02 号工人�
 blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/export_nexciv_walk_preview.py
 ```
 
-可在命令末尾加 `-- --chunk governance` 仅导出议会大厅街区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。西区使用 `-- --chunk west`，北岸湖畔使用 `-- --chunk shore`。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
+可在命令末尾加 `-- --chunk governance` 仅导出议会大厅街区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。西区使用 `-- --chunk west`，北岸湖畔使用 `-- --chunk shore`，研究区底包和近景使用 `-- --chunk research` 和 `-- --chunk center`。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
 
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 

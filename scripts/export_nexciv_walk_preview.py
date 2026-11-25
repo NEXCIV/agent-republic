@@ -34,6 +34,11 @@ WEST_CROSSING_STRIPES = tuple((-67.35 + i * 0.60, -67.01 + i * 0.60) for i in ra
 SHORE_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.071"
 SHORE_CROSSING_X = (16.4, 19.7)
 SHORE_CROSSING_STRIPES = tuple((122.63 + i * 0.59, 122.97 + i * 0.59) for i in range(12))
+RESEARCH_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.027"
+RESEARCH_CROSSING_Y = (82.25, 85)
+RESEARCH_CROSSING_STRIPES = WEST_CROSSING_STRIPES
+AGENT_CENTER = "HERO_02_Agent_Center"
+AGENT_CENTER_ANCHOR = (-95, 65, 0.172)
 WAYPOINTS = (
     (0, -21.4),
     (2.3, -29.4),
@@ -111,6 +116,15 @@ SHORE_ALTERNATE = (
     (8.5, 134), (7.5, 136), (7.25, 146.8), (3.15, 151.6),
     (3.15, 166.15), (71.85, 166.15), (71.85, 174), (71.85, 190),
 )
+RESEARCH_APPROACH = ((-4, 76.5), (-19, 76.5), (-21.5, 79))
+RESEARCH_WAYPOINTS = (
+    GOVERNANCE_WAYPOINTS[-1], (-2, 78), *RESEARCH_APPROACH, (-39, 85), (-57.18, 84),
+    (-72.68, 84), (-76, 80), (-89, 66.5), (-89.65, 65),
+)
+RESEARCH_ALTERNATE = (
+    (-2.5, 77.5), *RESEARCH_APPROACH, (-39, 85.6), (-57.18, 83.2),
+    (-72.68, 83.2), (-76, 79.5), (-89, 67), (-89.65, 65.86),
+)
 EAST_HEROES = {
     "HERO_03_Citizen_Registration": "registry",
     "HERO_04_Public_Construction": "works",
@@ -159,6 +173,8 @@ CHUNKS = {
     "works": "public-construction-detail.glb",
     "west": "west-community-district.glb",
     "shore": "north-lakeshore.glb",
+    "research": "northwest-research-district.glb",
+    "center": "research-agent-center-detail.glb",
 }
 SHORE_LAYER_NAMES = {
     "01 | Terrain and shore", "02 | Lake", "03 | Promenade and piers", "04 | Shore trees", "Marina boats",
@@ -182,15 +198,17 @@ def in_slice(obj, matrix, area):
         return not (base or governance) and low_x < WEST and top_x > -151 and top_y > -130 and low_y < 15
     if area == "shore":
         return not (base or governance) and top_y > 116 and low_y < 164 and top_x > -153 and low_x < 153
+    if area == "research":
+        return not (base or governance) and low_x < WEST and top_x > -152 and low_y >= 15 and top_y <= 116
     return governance if area == "governance" else base
 
 
 def world_geometry(scene, graph, area):
     layers = bpy.data.collections
     named_layers = LAYERS.copy()
-    if area in {"governance", "east", "west"}:
+    if area in {"governance", "east", "west", "research"}:
         named_layers.add("05_Street_Assets")
-    if area in {"governance", "east"}:
+    if area in {"governance", "east", "research"}:
         named_layers.add("03_Hero_Landmarks")
     if area == "east":
         named_layers.update(("CONSTRUCTION", "10 | Construction crane", "02 | Public Works at eye level"))
@@ -198,7 +216,7 @@ def world_geometry(scene, graph, area):
         named_layers.update(SHORE_LAYER_NAMES)
         named_layers.update(("05_Street_Assets", "08 | Lakeside tower", "20 | NEXCIV Waterfront Tower"))
     candidates = {ob for name in named_layers for ob in layers[name].objects if ob.name in scene.objects}
-    lot_types = {"governance": "GOVERNANCE", "east": "CONSTRUCTION", "west": "COMMUNITY"}
+    lot_types = {"governance": "GOVERNANCE", "east": "CONSTRUCTION", "west": "COMMUNITY", "research": "RESEARCH"}
     lot = lot_types.get(area)
     for obj in sorted(candidates, key=lambda item: item.name):
         civic_paving = lot and obj.name.startswith((f"CIVRUM_LOT_{lot}", f"CIVRUM_LOT_PAINT_{lot}"))
@@ -208,7 +226,7 @@ def world_geometry(scene, graph, area):
         if obj.hide_render or obj.hide_viewport or (obj.name.startswith(SKIP) and not (civic_paving or scenery)):
             continue
         if obj.name.startswith("HERO_"):
-            heroes = EAST_HEROES if area == "east" else ("HERO_01_Governance_Hall",)
+            heroes = {"east": EAST_HEROES, "research": (AGENT_CENTER,)}.get(area, ("HERO_01_Governance_Hall",))
             if obj.name not in heroes:
                 continue
         if area == "shore" and any(group.name in SHORE_LAYER_NAMES for group in obj.users_collection):
@@ -268,6 +286,10 @@ def world_geometry(scene, graph, area):
                 subgroup = "paving"
             if name in EAST_HEROES:
                 subgroup = f"{EAST_HEROES[name]}_proxy"
+            if name == AGENT_CENTER:
+                subgroup = "center_proxy"
+            if name == "West avenue | skybridge":
+                subgroup = "west_skybridge"
             if lot and (
                 civic_paving or name.startswith(("WALK_Paving_", "CIVRUM_WALK_", "Forecourt | limestone paver"))
             ):
@@ -380,7 +402,7 @@ def stage_assets(scene, graph, chunk):
     shader(glass).inputs["Alpha"].default_value = 0.26
     transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
-    texture_limit = {"base": 512, "retail": 2048, "registry": 2048, "works": 2048}.get(chunk, 1024)
+    texture_limit = {"base": 512, "retail": 2048, "registry": 2048, "works": 2048, "center": 4096}.get(chunk, 1024)
     pbr = {}
     textures = {}
 
@@ -431,14 +453,17 @@ def stage_assets(scene, graph, chunk):
         ("east", EAST_CROSSING_ROAD): (EAST_CROSSING_X, EAST_CROSSING_STRIPES, 0),
         ("west", WEST_CROSSING_ROAD): (WEST_CROSSING_Y, WEST_CROSSING_STRIPES, 1),
         ("shore", SHORE_CROSSING_ROAD): (SHORE_CROSSING_X, SHORE_CROSSING_STRIPES, 0),
+        ("research", RESEARCH_CROSSING_ROAD): (RESEARCH_CROSSING_Y, RESEARCH_CROSSING_STRIPES, 1),
     }
     cache, parts = {}, []
-    area = "east" if chunk in {"east", "registry", "works"} else chunk
+    area = {"registry": "east", "works": "east", "center": "research"}.get(chunk, chunk)
     for source, transform, tier in world_geometry(scene, graph, area):
         name = source.original.name
         if chunk == "retail" and not name.startswith(GARDEN_RETAIL):
             continue
         if chunk in {"registry", "works"} and EAST_HEROES.get(name) != chunk:
+            continue
+        if chunk == "center" and name != AGENT_CENTER:
             continue
         market = name.startswith("Market | ")
         street = tier in ("detail", "buildings") or name.startswith("Courtyard | roses")
@@ -464,6 +489,10 @@ def stage_assets(scene, graph, chunk):
         asset = bpy.data.objects.new(source.name, mesh)
         root.objects.link(asset)
         asset.matrix_world = Matrix.Identity(4) if chunk == "retail" else transform
+        if name == AGENT_CENTER:
+            # Preview the landmark at 14 m across the front, keeping the same lot and base elevation.
+            anchor = Matrix.Translation(AGENT_CENTER_ANCHOR)
+            asset.matrix_world = anchor @ Matrix.Scale(2, 4) @ anchor.inverted() @ transform
         if chunk == "shore" and name == PARKLAND:
             trim_parkland(mesh, transform)
         if name.startswith("CIVRUM_LOT_PAINT_"):
@@ -484,12 +513,14 @@ def stage_assets(scene, graph, chunk):
             tier = "market_proxy"
         elif street_proxy:
             tier = "street_proxy"
-        asset["previewTier"] = "detail" if chunk in {"registry", "works"} else tier
+        asset["previewTier"] = "detail" if chunk in {"registry", "works", "center"} else tier
         if chunk == "retail":
             parts.append((asset, 180000))
             break
         if chunk == "works":
             parts.append((asset, 230000))
+        elif chunk == "center":
+            parts.append((asset, 245000))
         elif chunk == "east" and len(mesh.polygons) > 10000:
             face_limit = {"registry_proxy": 18500, "works_proxy": 61000}.get(tier, 9000)
             if name.startswith(GARDEN_RETAIL):
@@ -500,6 +531,9 @@ def stage_assets(scene, graph, chunk):
             parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 14000))
         elif chunk == "shore" and len(mesh.polygons) > 20000:
             parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 12000))
+        elif chunk == "research" and len(mesh.polygons) > 55000:
+            limit = 68500 if name == AGENT_CENTER else 30000 if name.startswith(GARDEN_RETAIL) else 15500
+            parts.append((asset, limit))
         elif chunk == "governance" and len(mesh.polygons) > 10000:
             parts.append((asset, 52000 if name == "HERO_01_Governance_Hall" else 6500))
         elif name.startswith("Courtyard | roses") and len(mesh.polygons) > 12000:
@@ -510,7 +544,7 @@ def stage_assets(scene, graph, chunk):
 
     if chunk == "retail" and len(parts) != 1:
         raise RuntimeError("Expected a single Garden Roof Retail source mesh")
-    if chunk in {"registry", "works"} and len(root.objects) != 1:
+    if chunk in {"registry", "works", "center"} and len(root.objects) != 1:
         raise RuntimeError(f"Expected one landmark source mesh for {chunk}")
 
     reduced = {}
@@ -522,9 +556,9 @@ def stage_assets(scene, graph, chunk):
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
             reduced[key].validate(clean_customdata=False)
-            if (chunk in {"street", "retail", "east", "west", "shore"} and obj.name.startswith(GARDEN_RETAIL)) or (
+            if (chunk in {"street", "retail", "east", "west", "shore", "research"} and obj.name.startswith(GARDEN_RETAIL)) or (
                 chunk in {"east", "works"} and obj.name in EAST_HEROES
-            ):
+            ) or obj.name == AGENT_CENTER:
                 mesh = reduced[key]
                 mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
                 mesh.set_sharp_from_angle(angle=math.radians(35))
@@ -557,6 +591,7 @@ def stage_assets(scene, graph, chunk):
         "base": ((4, -19, -0.006), (260, 260, 1)),
         "east": ((173, -40, -0.006), (78, 220, 1)),
         "west": ((-165, -40, -0.006), (78, 220, 1)),
+        "research": ((-165, 91, -0.006), (78, 42, 1)),
     }
     if chunk in terrain:
         location, scale = terrain[chunk]
@@ -649,6 +684,13 @@ def main():
             "points": sidewalk_route(scene, graph, SHORE_WAYPOINTS, clearance=0.22),
             "alternate": sidewalk_route(scene, graph, ((end_x, -end_z), *SHORE_ALTERNATE), clearance=0.22),
         }
+    research_route = None
+    if args.chunk in {None, "research"}:
+        end_x, _, end_z = north_lane[-1]
+        research_route = {
+            "points": sidewalk_route(scene, graph, RESEARCH_WAYPOINTS, clearance=0.22),
+            "alternate": sidewalk_route(scene, graph, ((end_x, -end_z), *RESEARCH_ALTERNATE), clearance=0.22),
+        }
     args.output.mkdir(parents=True, exist_ok=True)
     for chunk, filename in CHUNKS.items():
         if args.chunk and chunk != args.chunk:
@@ -688,6 +730,10 @@ def main():
     if shore_route:
         (args.output / "lakeshore-route.json").write_text(
             json.dumps(shore_route, separators=(",", ":")) + "\n", encoding="utf-8"
+        )
+    if research_route:
+        (args.output / "research-route.json").write_text(
+            json.dumps(research_route, separators=(",", ":")) + "\n", encoding="utf-8"
         )
     print(f"PREVIEW PASS {len(route)} market and {len(north_route)} governance route samples", flush=True)
 
