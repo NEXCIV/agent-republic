@@ -8,7 +8,18 @@
 pnpm --filter @agent-republic/web dev --port 3137
 ```
 
-街区 GLB 从下方的道路修正版导出，约 13.4 MB，使用 Meshopt 压缩。斑马线和沥青共用路面网格，缩放时始终可见。小型装饰随距离淡出。[01 号角色库](../../tripo/citizen-01-v1/motion/)提供现成的 `Walk` 与 `Idle`，网页 GLB 约 2.0 MB，保留网格、骨架和动作。浏览器按角色步幅同步位移与步频。路线标记为演示行为。[实际跟拍、过街和到店截图](renders/NEXCIV_Web_Walk_Preview.jpg)。
+街区从下方的道路修正版导出为三份 GLB。首屏加载 2.81 MB 的街区底包与 1.44 MB 的角色包，画面包括完整路面、斑马线、坡道和建筑外轮廓。进入跟拍或拉近俯视后，加载 5.21 MB 的沿街精细包，更新行道树、商铺与小设施。Agent 或镜头距商铺入口不到 29 米时，加载 5.01 MB 的 Corner Market 精细包，原位换入玻璃、金属收边与门厅。细节请求失败时继续显示首屏已经加载的场景。
+
+[01 号角色库](../../tripo/citizen-01-v1/motion/)提供 `Walk` 与 `Idle`。网页版保留网格、骨架和动作，按角色步幅同步位移与步频。路线标记为演示行为。[实际跟拍、过街和到店截图](renders/NEXCIV_Web_Walk_Preview.jpg)。
+
+在本机 Edge、390 × 844 模拟触屏、8 Mbps 和 80 ms 延迟下，各使用两次冷缓存导航复测。计时从打开页面到 Agent 路线进度首次大于零。
+
+| 指标 | 拆分前 | 拆分后 |
+| --- | ---: | ---: |
+| 首次见到 Agent 移动，两次平均 | 14.4 秒 | 7.6 秒 |
+| 首屏 GLB 经 HTTP 压缩后的实际传输量 | 9.26 MB | 2.60 MB |
+
+传输量统计街区和角色 GLB。生产构建连同 JavaScript 的首载体积需要另行测量。
 
 已在 Edge 桌面窗口验证自动出发、到店及折返，在 390 × 844 触屏模拟窗口验证自动出发和镜头操作。单独拦截角色请求时可继续俯视街区，拦截街区请求时显示静态预览。手机真机性能仍需实测。
 
@@ -21,7 +32,7 @@ blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 
 ```powershell
-python -c "import sys; from pathlib import Path; sys.path.insert(0, 'scripts'); from prepare_civrum_hi3d import texture_copy; texture_copy(Path('art-direction/tripo/citizen-01-v1/motion/CIVRUM_Citizen_01.glb'), Path('apps/web/public/nexciv-walk/agent-01.glb'), 768)"
+python -c "import sys; from pathlib import Path; sys.path.insert(0, 'scripts'); from prepare_civrum_hi3d import texture_copy; texture_copy(Path('art-direction/tripo/citizen-01-v1/motion/CIVRUM_Citizen_01.glb'), Path('apps/web/public/nexciv-walk/agent-01.glb'), 512)"
 ```
 
 ## 城区道路标线

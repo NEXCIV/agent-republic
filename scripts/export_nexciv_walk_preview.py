@@ -1,4 +1,4 @@
-"""Export the walkable Nexus to Corner Market slice from the NEXCIV Blender scene."""
+"""Export the Nexus observation scene and its optional street and market detail."""
 
 import argparse
 import json
@@ -53,6 +53,18 @@ SKIP = (
     "Nexus | radial garden",
     "South garden |",
 )
+MARKET_SHELL = (
+    "Market | Level ",
+    "Market | Stone apron",
+    "Market | Wraparound rain canopy",
+    "Market | Roof plant room",
+    "Market | NEXCIV",
+)
+CHUNKS = {
+    "base": "nexus-market.glb",
+    "street": "nexus-street-detail.glb",
+    "market": "corner-market-detail.glb",
+}
 
 
 def in_slice(obj, matrix):
@@ -132,17 +144,19 @@ def sidewalk_route(scene, graph):
     return result
 
 
-def stage_assets(scene, graph):
+def stage_assets(scene, graph, chunk):
     root = bpy.data.collections.new("NEXCIV web export")
     scene.collection.children.link(root)
     glass = material("NEXCIV browser glazing", "B0B9BF", 0.20, 0.25)
     shader(glass).inputs["Alpha"].default_value = 0.26
+    solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
+    texture_limit = 512 if chunk == "base" else 1024
     pbr = {}
     textures = {}
 
     def export_material(source):
         if source.name == "MAT_SHOP_Glass":
-            return glass
+            return solid_window if chunk == "base" else glass
         if source in pbr or not source.use_nodes:
             return pbr.get(source, source)
         finish = source.copy()
@@ -158,11 +172,11 @@ def stage_assets(scene, graph):
             if node.type != "TEX_IMAGE" or node.image is None:
                 continue
             image = node.image
-            if max(image.size) <= 1024:
+            if max(image.size) <= texture_limit:
                 continue
             if image not in textures:
                 resized = image.copy()
-                factor = 1024 / max(image.size)
+                factor = texture_limit / max(image.size)
                 resized.scale(*(max(1, round(n * factor)) for n in image.size))
                 textures[image] = resized
             node.image = textures[image]
@@ -170,10 +184,25 @@ def stage_assets(scene, graph):
 
     cache, parts = {}, []
     for source, transform, tier in world_geometry(scene, graph):
+        name = source.original.name
+        market = name.startswith("Market | ")
+        street = tier in ("detail", "buildings") or name.startswith("Courtyard | roses")
+        street_proxy = street and chunk == "base"
+        market_proxy = market and chunk == "base"
+        if (chunk == "market" and not market) or (chunk == "street" and (market or not street)):
+            continue
+        if market_proxy and not name.startswith(MARKET_SHELL):
+            continue
+        if street_proxy and (source.type != "MESH" or len(source.data.polygons) < 55000):
+            continue
         key = source.original.data
         mesh = cache.get(key) if len(source.modifiers) == 0 and source.type == "MESH" else None
         if mesh is None:
-            mesh = bpy.data.meshes.new_from_object(source.evaluated_get(graph), depsgraph=graph)
+            if market_proxy and source.type == "MESH":
+                mesh = source.original.data.copy()
+            else:
+                mesh = bpy.data.meshes.new_from_object(source.evaluated_get(graph), depsgraph=graph)
+            mesh.validate(clean_customdata=False)
             if source.type == "MESH" and not source.modifiers:
                 cache[key] = mesh
         # Preserve original object-level finish overrides, including the white paint in the road.
@@ -187,28 +216,33 @@ def stage_assets(scene, graph):
             slot.link = "OBJECT"
             slot.material = export_material(original.material)
         # Keep repeated asset meshes shared, reducing each large source once.
-        if len(mesh.polygons) > 55000:
-            asset["previewReduce"] = True
+        if market_proxy:
+            tier = "market_proxy"
+        elif street_proxy:
+            tier = "street_proxy"
         asset["previewTier"] = tier
-        parts.append(asset)
+        if name.startswith("Courtyard | roses") and len(mesh.polygons) > 12000:
+            parts.append((asset, 12000))
+        elif len(mesh.polygons) > 55000:
+            face_limit = 2200 if street_proxy else 30000
+            parts.append((asset, face_limit))
 
     reduced = {}
-    for obj in parts:
-        if not obj.get("previewReduce"):
-            continue
+    for obj, face_limit in parts:
         key = obj.data
         if key not in reduced:
             modifier = obj.modifiers.new("Preview silhouette", "DECIMATE")
-            modifier.ratio = 30000 / len(key.polygons)
+            modifier.ratio = face_limit / len(key.polygons)
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
+            reduced[key].validate(clean_customdata=False)
             obj.modifiers.remove(modifier)
         obj.data = reduced[key]
 
-    # Merge untextured pavement/fixtures by material into two batches while retaining the original UVs.
+    # Batch stable surfaces while keeping repeated meshes shared and both replacements independent.
     bpy.ops.object.select_all(action="DESELECT")
     shared = set(reduced.values())
-    for tier in ("city", "paving", "detail"):
+    for tier in ("city", "paving", "detail", "market_proxy"):
         keep = [
             o
             for o in root.objects
@@ -216,7 +250,9 @@ def stage_assets(scene, graph):
             and o.data not in shared
             and not any(slot.material == glass for slot in o.material_slots)
         ]
-        if not keep:
+        if len(keep) == 1:
+            keep[0].name = "NEXCIV " + tier
+        if len(keep) < 2:
             continue
         for obj in keep:
             obj.select_set(True)
@@ -225,12 +261,13 @@ def stage_assets(scene, graph):
         bpy.ops.object.join()
         head.name = "NEXCIV " + tier
         head.select_set(False)
-    bpy.ops.mesh.primitive_plane_add(size=1, location=(4, -19, -0.006))
-    ground = bpy.context.object
-    ground.name = "NEXCIV terrain"
-    ground.scale = (260, 260, 1)
-    ground.data.materials.append(material("NEXCIV ground", "55564F", 0.89))
-    root.objects.link(ground)
+    if chunk == "base":
+        bpy.ops.mesh.primitive_plane_add(size=1, location=(4, -19, -0.006))
+        ground = bpy.context.object
+        ground.name = "NEXCIV terrain"
+        ground.scale = (260, 260, 1)
+        ground.data.materials.append(material("NEXCIV ground", "55564F", 0.89))
+        root.objects.link(ground)
     bpy.ops.object.select_all(action="DESELECT")
     for obj in root.objects:
         if obj.name in scene.objects:
@@ -238,20 +275,9 @@ def stage_assets(scene, graph):
     return root
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", type=Path, default=DEST)
-    args = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
-    bpy.ops.wm.open_mainfile(filepath=str(SOURCE))
-    scene = bpy.context.scene
-    scene.frame_set(1)
-    graph = bpy.context.evaluated_depsgraph_get()
-    route = sidewalk_route(scene, graph)
-    root = stage_assets(scene, graph)
-    args.output.mkdir(parents=True, exist_ok=True)
-    output = args.output / "nexus-market.glb"
+def export_chunk(path):
     bpy.ops.export_scene.gltf(
-        filepath=str(output),
+        filepath=str(path),
         export_format="GLB",
         use_selection=True,
         export_animations=False,
@@ -263,14 +289,31 @@ def main():
         export_meshopt_compression_enable=True,
         export_meshopt_extension="EXT_meshopt_compression",
     )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, default=DEST)
+    args = parser.parse_args(sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else [])
+    bpy.ops.wm.open_mainfile(filepath=str(SOURCE))
+    scene = bpy.context.scene
+    scene.frame_set(1)
+    graph = bpy.context.evaluated_depsgraph_get()
+    route = sidewalk_route(scene, graph)
+    args.output.mkdir(parents=True, exist_ok=True)
+    for chunk, filename in CHUNKS.items():
+        root = stage_assets(scene, graph, chunk)
+        path = args.output / filename
+        export_chunk(path)
+        print(f"PREVIEW {chunk}: {len(root.objects)} nodes, {path.stat().st_size:,} bytes", flush=True)
+        for obj in list(root.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        bpy.data.collections.remove(root)
     manifest = {"points": route, "target": [1, 0, 24]}
     (args.output / "route.json").write_text(
         json.dumps(manifest, separators=(",", ":")) + "\n", encoding="utf-8"
     )
-    print(
-        f"PREVIEW PASS {len(root.objects)} nodes, {len(route)} walk samples, {output.stat().st_size:,} bytes",
-        flush=True,
-    )
+    print(f"PREVIEW PASS {len(route)} Agent route samples", flush=True)
 
 
 if __name__ == "__main__":

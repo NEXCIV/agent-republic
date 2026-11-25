@@ -29,6 +29,11 @@ const FOLLOW_YAW = -2.54;
 const FOLLOW_PITCH = 0.39;
 const FOLLOW_DISTANCE = 5.6;
 const ASSET_PATH = '/nexciv-walk/';
+const DETAIL_FILES = {
+  street: 'nexus-street-detail.glb',
+  market: 'corner-market-detail.glb',
+};
+type Detail = keyof typeof DETAIL_FILES;
 
 function installDetailFade(root: THREE.Object3D) {
   const batch = root.getObjectByName('NEXCIV_detail') ?? root.getObjectByName('NEXCIV detail');
@@ -79,6 +84,17 @@ function disposeModel(asset: THREE.Object3D) {
   for (const mesh of meshes) mesh.dispose();
 }
 
+function setBuildingShadows(asset: THREE.Object3D) {
+  const pavement = new Set<THREE.Object3D>();
+  asset.getObjectByName('NEXCIV_paving')?.traverse((object) => pavement.add(object));
+  asset.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) return;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    object.castShadow = !materials.some((material) => material.transparent) && object.name !== 'NEXCIV_terrain' && !pavement.has(object);
+    object.receiveShadow = true;
+  });
+}
+
 export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks): WalkController {
   const started = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -123,16 +139,21 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   const focus = new THREE.Vector3(0, 0, 24);
   const aim = new THREE.Vector3();
+  const marketEntrance = new THREE.Vector3();
   const tween = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pointers = new Map<number, { x: number; y: number }>();
   const aborter = new AbortController();
   let ended = false;
   let contextLost = false;
   let model: THREE.Object3D | undefined;
+  const details = new Map<Detail, THREE.Object3D>();
+  const requestedDetails = new Set<Detail>();
+  const proxies = new Map<Detail, THREE.Object3D[]>();
   let actor: GLTF | undefined;
+  let actorLoading = true;
   let patrol: ReturnType<typeof createAgentPatrol> | undefined;
   let route: RouteData | undefined;
-  let updateDetail = (_level: number) => {};
+  let updateDetail: ((level: number) => void) | undefined;
   let mode: View = initialView;
   let playing = autoPlay;
   let orbitYaw = START_YAW;
@@ -149,6 +170,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let measuredAt = performance.now();
   let lastFrame = measuredAt;
   let frameId = 0;
+  let firstCityFrame = 0;
 
   function resize() {
     const width = Math.max(1, host.clientWidth);
@@ -216,7 +238,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         aim.z + followDistance * Math.cos(yaw) * Math.cos(followPitch),
       );
       camera.lookAt(aim);
-      updateDetail(1);
+      updateDetail?.(1);
     } else {
       fog.near = 110;
       fog.far = 235;
@@ -228,9 +250,18 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         focus.z + distance * Math.cos(orbitYaw) * Math.cos(orbitPitch),
       );
       camera.lookAt(focus);
-      updateDetail(1 - THREE.MathUtils.smoothstep(orbitDistance, 33, 71));
+      updateDetail?.(1 - THREE.MathUtils.smoothstep(orbitDistance, 33, 71));
     }
     renderer.render(scene, camera);
+    const showStreetDetails = (mode === 'follow' && patrol) || orbitDistance < 59;
+    const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !patrol || patrol.progress > 0);
+    if (!document.hidden && readyForDetails) {
+      const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (patrol && marketEntrance.distanceTo(patrol.root.position) < 29);
+      if (nearMarket) {
+        loadDetail('market');
+      }
+      if (showStreetDetails) loadDetail('street');
+    }
     frameId = requestAnimationFrame(animate);
   }
 
@@ -293,10 +324,28 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  async function request(name: string) {
-    const response = await fetch(`${ASSET_PATH}${name}`, { signal });
+  async function request(name: string, priority: RequestPriority = 'auto') {
+    const response = await fetch(`${ASSET_PATH}${name}`, { signal, priority });
     if (!response.ok) throw new Error(`Missing preview asset ${name}`);
     return response;
+  }
+
+  function loadDetail(kind: Detail) {
+    const placeholders = proxies.get(kind);
+    if (!placeholders?.length || requestedDetails.has(kind)) return;
+    requestedDetails.add(kind);
+    request(DETAIL_FILES[kind], kind === 'street' ? 'low' : 'auto').then((response) => response.arrayBuffer()).then(async (bytes) => {
+      if (ended || contextLost) return;
+      const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
+      if (ended || contextLost) { disposeModel(asset); return; }
+      setBuildingShadows(asset);
+      // A failed request leaves the original silhouette visible.
+      details.set(kind, asset);
+      scene.add(asset);
+      for (const proxy of placeholders) proxy.visible = false;
+      if (kind === 'street') updateDetail = installDetailFade(asset);
+      renderer.shadowMap.needsUpdate = true;
+    }).catch(() => {});
   }
 
   request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
@@ -307,7 +356,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     connectAgent();
   }).catch(() => {
     if (!ended && !contextLost) callbacks.agent('unavailable', 0);
-  });
+  }).finally(() => { actorLoading = false; });
 
   Promise.all([
     request('route.json').then((response) => response.json() as Promise<RouteData>),
@@ -318,21 +367,20 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (ended || contextLost) { disposeModel(result.scene); return; }
     route = layout;
     focus.set(...route.target);
+    marketEntrance.set(...(route.points.at(-1) ?? route.target));
     model = result.scene;
-    const paving = model.getObjectByName('NEXCIV_paving');
-    const pavement = new Set<THREE.Object3D>();
-    paving?.traverse((object) => pavement.add(object));
-    model.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return;
-      const transparent = (Array.isArray(object.material) ? object.material : [object.material]).some((m) => m.transparent);
-      object.castShadow = !transparent && object.name !== 'NEXCIV_terrain' && !pavement.has(object);
-      object.receiveShadow = true;
-    });
-    updateDetail = installDetailFade(model);
+    for (const kind of ['street', 'market'] as const) {
+      const members: THREE.Object3D[] = [];
+      model.traverse((object) => {
+        if (object.userData.previewTier === `${kind}_proxy`) members.push(object);
+      });
+      proxies.set(kind, members);
+    }
+    setBuildingShadows(model);
     scene.add(model);
     connectAgent();
     renderer.shadowMap.needsUpdate = true;
-    lastFrame = measuredAt = performance.now();
+    firstCityFrame = lastFrame = measuredAt = performance.now();
     animate(lastFrame);
     callbacks.ready(performance.now() - started);
   }).catch(() => {
@@ -359,6 +407,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       patrol?.dispose();
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);
+      for (const detail of details.values()) disposeModel(detail);
       sun.shadow.dispose();
       environment.dispose();
       renderer.forceContextLoss();
