@@ -1,12 +1,25 @@
-# CIVRUM 湖畔城市 · E6-07 氛围样板
+# NEXCIV 湖畔城市 · E6-07 美术样板
+
+## 北岸圆塔
+
+[打开 NEXCIV 湖畔场景](NEXCIV_World_300m_Waterfront.blend)。北岸原圆塔地块位于 `(-83, 145.2)`，新版约 36.7 米高。弧形塔冠朝向湖岸，屋面设独立种植池与座椅。楼层压边、深色立柱上的细金线、内退玻璃和琥珀色窗灯可分别调整。首层雨棚有 NEXCIV 字样，透过门厅玻璃可见接待台和吊灯。
+
+[原塔与新版对比](renders/NEXCIV_Waterfront_Comparison.jpg) · [全城俯视](renders/NEXCIV_Waterfront_Overview.png) · [入口近景](renders/NEXCIV_Waterfront_Lobby.png) · [Corner Market 屋顶招牌](renders/NEXCIV_Waterfront_Market.png)。
+
+新版共 18,802 个三角面。Blender 5.3 已重开验证场景，原共享圆塔仍用于其他六个地块。Corner Market 的可编辑屋顶文字也同步为 NEXCIV。依次重建街角商铺与北岸圆塔可复现当前场景。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_corner_market.py -- --save
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_nexciv_waterfront_tower.py -- --save --views lobby skyline crown market overview before
+```
 
 ## Nexus 东南街角商业楼
 
-[打开街角商业楼场景](CIVRUM_World_300m_Corner_Market.blend)。场景使用已确认的黑金暖黄昏，在 Nexus 东南侧的原商业楼地块放置五层 Corner Market。首层和二层形成连续街墙，三至五层向内退台。金色压边、切角入口和 CIVRUM 屋顶招牌在 `19 | Corner Market` 集合中可单独编辑。
+[打开街角商业楼场景](CIVRUM_World_300m_Corner_Market.blend)。场景使用已确认的黑金暖黄昏，在 Nexus 东南侧的原商业楼地块放置五层 Corner Market。首层和二层形成连续街墙，三至五层向内退台。金色压边、切角入口和 NEXCIV 屋顶招牌在 `19 | Corner Market` 集合中可单独编辑。
 
-[同机位前后对比](renders/CIVRUM_Corner_Market_Comparison.jpg) · [完整街景](renders/CIVRUM_Corner_Market_Street.png) · [入口细节](renders/CIVRUM_Corner_Market_Detail.png) · [全城俯视](renders/CIVRUM_Corner_Market_Overview.png)。
+[建模阶段的同机位对比](renders/CIVRUM_Corner_Market_Comparison.jpg) · [更新后的 NEXCIV 屋顶招牌](renders/NEXCIV_Waterfront_Market.png) · [入口细节](renders/CIVRUM_Corner_Market_Detail.png)。
 
-入口相对切角外轮廓后退 1.13 米。Blender 5.3 重新打开验证后，从南面和西面各抽样一条水平视线，玻璃后分别有约 6.60 米与 4.92 米进深。样板含倒角、文字和植栽共 290,780 个三角面。原广告牌商业楼的其余 12 个实例沿用共享资产。
+入口相对切角外轮廓后退 1.13 米。Blender 5.3 重新打开验证后，从南面和西面各抽样一条水平视线，玻璃后分别有约 6.60 米与 4.92 米进深。含更新后招牌的样板共 289,564 个三角面。原广告牌商业楼的其余 12 个实例沿用共享资产。
 
 ```powershell
 blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_corner_market.py -- --save --views detail street before overview

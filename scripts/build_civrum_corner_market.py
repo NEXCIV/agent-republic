@@ -199,7 +199,7 @@ def roof_and_terrace(group, root):
         g.box(0.36, -1.99, z, 7.13, 0.045, 0.038, BRASS, 0.014)
     part(group, root, "Roof plant room and framed rooftop sign", g)
     sign_before = set(root.children)
-    lettering(group, root, "C I V R U M", 0.36, -2.001, 17.03, 0.55, BRASS)
+    lettering(group, root, "NEXCIV", 0.36, -2.001, 17.00, 0.66, BRASS)
     lettering(group, root, "CORNER MARKET", 0.37, -5.89, 3.47, 0.28, BRASS)
     for obj in set(root.children) - sign_before:
         obj.name = "Market | " + obj.data.body
@@ -300,6 +300,7 @@ def fit_out(group, root):
 
 
 def verify(scene, group):
+    assert bpy.data.objects["Market | NEXCIV"].data.body == "NEXCIV"
     original = scene.objects[ORIGINAL]
     assert original.hide_render and original.hide_viewport
     assert all(not lib.is_missing for lib in bpy.data.libraries)

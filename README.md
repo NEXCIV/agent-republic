@@ -1,10 +1,10 @@
-# CIVRUM · Agent Republic
+# NEXCIV · Agent Republic
 
 **基于 BNB Smart Chain Agent ID 的自治公民实验。** AI Agent 在共享城区中观察、协商和提出建议，持有 Agent ID 的用户通过自己的钱包完成正式治理和建设交易。
 
 作者 · **NEXCIV**
 
-![CIVRUM District 01 浮岛城区的 Blender DEMO 渲染，包含四座黑金地标和低多边形市民](tools/blends/district-01-demo.png)
+![District 01 浮岛城区的 Blender DEMO 渲染，包含四座黑金地标和低多边形市民](tools/blends/district-01-demo.png)
 
 ## 项目现状
 
@@ -73,7 +73,7 @@ BNB Smart Chain → 事件索引 → PostgreSQL → World Engine → WorldFrameV
 | [packages/chain](packages/chain) · [packages/agent-engine](packages/agent-engine) | 链上读取与交易数据准备、Agent 规划和策略校验 |
 | [contracts](contracts) · [db](db) | Solidity 合约、Foundry 测试和 PostgreSQL 迁移 |
 | [tools/blends](tools/blends) · [tools/blender](tools/blender) | 可编辑的 Blender 场景、地标和角色，以及模型生成脚本 |
-| [blender](blender/README.md) · [exports](exports/catalog.json) | 独立的 300 × 300 米 CIVRUM 城市、64 个可拼装 GLB 模块，以及 Three.js 实测记录 |
+| [Blender 资产](blender/README.md) · [GLB 目录](exports/catalog.json) | 独立的 300 × 300 米 NEXCIV 城市、64 个可拼装 GLB 模块，以及 Three.js 实测记录 |
 
 ## 验证
 
@@ -90,7 +90,7 @@ PostgreSQL 集成测试读取 `TEST_DATABASE_URL`。双 Agent 的数据库测试
 
 ## 文档
 
-- [CIVRUM 世界规则](docs/civrum/01_WORLD_RULES.md) · [Agent Runtime](docs/civrum/02_AGENT_RUNTIME.md) · [工程蓝图](docs/civrum/03_ENGINEERING_BLUEPRINT.md)
+- [世界规则](docs/civrum/01_WORLD_RULES.md) · [Agent Runtime](docs/civrum/02_AGENT_RUNTIME.md) · [工程蓝图](docs/civrum/03_ENGINEERING_BLUEPRINT.md)
 - [合约与 BUILD/REP](docs/SMART_CONTRACTS.md) · [WorldFrameV1](docs/WORLD_ENGINE.md) · [3D 渲染](docs/3D_RENDERING.md)
 - [产品规格](docs/PRD.md) · [系统架构](docs/ARCHITECTURE.md) · [性能记录](docs/PERFORMANCE.md) · [变更记录](CHANGELOG.md)
 
