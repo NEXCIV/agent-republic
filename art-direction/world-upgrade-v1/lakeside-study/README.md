@@ -1,5 +1,17 @@
 # CIVRUM 湖畔城市 · E6-07 氛围样板
 
+## Nexus 东南街角商业楼
+
+[打开街角商业楼场景](CIVRUM_World_300m_Corner_Market.blend)。场景使用已确认的黑金暖黄昏，在 Nexus 东南侧的原商业楼地块放置五层 Corner Market。首层和二层形成连续街墙，三至五层向内退台。金色压边、切角入口和 CIVRUM 屋顶招牌在 `19 | Corner Market` 集合中可单独编辑。
+
+[同机位前后对比](renders/CIVRUM_Corner_Market_Comparison.jpg) · [完整街景](renders/CIVRUM_Corner_Market_Street.png) · [入口细节](renders/CIVRUM_Corner_Market_Detail.png) · [全城俯视](renders/CIVRUM_Corner_Market_Overview.png)。
+
+入口相对切角外轮廓后退 1.13 米。Blender 5.3 重新打开验证后，从南面和西面各抽样一条水平视线，玻璃后分别有约 6.60 米与 4.92 米进深。样板含倒角、文字和植栽共 290,780 个三角面。原广告牌商业楼的其余 12 个实例沿用共享资产。
+
+```powershell
+blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/build_civrum_corner_market.py -- --save --views detail street before overview
+```
+
 ## 黑金暖黄昏
 
 [打开黑金暖黄昏场景](CIVRUM_World_300m_Gold_Dusk.blend)。夕阳照亮建筑朝光面，深蓝湖面和石墨灰街道衬托暖色橱窗。中央 Nexus 顶部、广场指路线与退台办公楼的局部收边使用技术黄 `#F0B90B`。园艺商铺用较柔和的金属色，入口雨棚的暖光延伸到人行道。
