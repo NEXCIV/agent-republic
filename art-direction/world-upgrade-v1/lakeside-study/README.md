@@ -56,7 +56,9 @@ Edge 中验证了 01 号从商铺走到公共建设中心，以及 03 号从议�
 
 网页近景从原模降至约 48 万三角面、4K 贴图，东区中景和全城共用约 12 万三角面、2K 贴图。`scripts/refine_nexciv_public_works.py` 用于另存 Blender 修订版，`scripts/export_nexciv_walk_preview.py -- --chunk east --chunk works --chunk citywide` 用于重导三个网页包。
 
-建设中心近景包为 7.73 MB，靠近时按需加载。东区包为 10.60 MB，全城包为 33.91 MB。1440 × 900 的桌面 Edge 验证了中近景切换、01 号到访和全城俯视，全城稳定后短测约 94 FPS。Blender 回导的 1,002 个主干道路面采样全部通过。[东区俯视与近景同机位对照](renders/NEXCIV_Web_Public_Works_Refinement.jpg)
+建设中心近景包为 7.78 MB，靠近时按需加载。东区包为 10.60 MB，全城包为 33.91 MB。1440 × 900 的桌面 Edge 验证了中近景切换、01 号到访和全城俯视。Blender 回导的 1,002 个主干道路面采样全部通过。[东区俯视与近景同机位对照](renders/NEXCIV_Web_Public_Works_Refinement.jpg)
+
+屋顶近景的加载和显示距离按建筑边界计算，镜头从上方靠近时可切换到 4K 版本。冠盖铜边、薄板接缝、检修盖铰链和两段扶手沿原模表面取样拟合。新增几何为 2,724 三角面，近景包增加约 59 KB。近景主体的贴图、面数和位置与上一版一致。[屋顶同机位前后对照](renders/NEXCIV_Web_Public_Works_Roof.jpg)
 
 选点在试玩页内运行，每次刷新用相同的初始偏好和访问记录启动。这套演示使用独立的路网与状态。[原有南北线及商铺问候的实测截图](renders/NEXCIV_Web_Agent_Routing.jpg)。
 

@@ -31,7 +31,7 @@ from build_nexciv_facades import finishes as facade_finishes
 from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
 from civrum_lakeside_blocks import PALETTE, STONE
-from refine_nexciv_public_works import WORKS, refine_public_works
+from refine_nexciv_public_works import ROOF_DETAILS, WORKS, refine_public_works
 
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "apps/web/public/nexciv-walk"
@@ -584,7 +584,11 @@ def stage_assets(scene, graph, chunk, library=DEST):
         name = source.original.name
         if chunk == "retail" and not name.startswith(GARDEN_RETAIL):
             continue
-        if chunk in {"registry", "works"} and EAST_HEROES.get(name) != chunk:
+        if chunk == "registry" and EAST_HEROES.get(name) != chunk:
+            continue
+        if chunk == "works" and name not in (WORKS, ROOF_DETAILS):
+            continue
+        if name == ROOF_DETAILS and chunk != "works":
             continue
         if landmark and name != landmark:
             continue
@@ -660,8 +664,10 @@ def stage_assets(scene, graph, chunk, library=DEST):
             tier = "market_proxy"
         elif street_proxy:
             tier = "street_proxy"
-        asset["previewTier"] = "detail" if chunk in {"registry", "works", "center", "hall"} else tier
-        if chunk == "works":
+        asset["previewTier"] = (
+            "works_roof" if name == ROOF_DETAILS else "detail" if chunk in {"registry", "works", "center", "hall"} else tier
+        )
+        if chunk == "works" and name == WORKS:
             parts.append((asset, 480000))
         elif chunk == "center":
             parts.append((asset, 245000))
@@ -690,8 +696,10 @@ def stage_assets(scene, graph, chunk, library=DEST):
             face_limit = 2200 if street_proxy else 30000
             parts.append((asset, face_limit))
 
-    if chunk in {"registry", "works", "center", "hall", "retail"} and len(root.objects) != 1:
+    if chunk in {"registry", "center", "hall", "retail"} and len(root.objects) != 1:
         raise RuntimeError(f"Expected one landmark source mesh for {chunk}")
+    if chunk == "works" and len(root.objects) != 2:
+        raise RuntimeError("Expected the original construction centre and its fitted roof details")
 
     reduced = {}
     for obj, face_limit in parts:
@@ -811,7 +819,7 @@ def main():
     bpy.ops.wm.open_mainfile(filepath=str(SOURCE))
     scene = bpy.context.scene
     if any(chunk in chunks for chunk in ("east", "works", "citywide")):
-        refine_public_works(scene)
+        refine_public_works(scene, roof_details="works" in chunks)
     scene.frame_set(1)
     graph = bpy.context.evaluated_depsgraph_get()
     route = sidewalk_route(scene, graph, WAYPOINTS)

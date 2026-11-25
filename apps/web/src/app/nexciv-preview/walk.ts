@@ -326,7 +326,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   };
   const centerEntrance = new THREE.Vector3(-90, 1.6, -65);
   const landmarkEntrances = { ...eastEntrances, center: centerEntrance, hall: new THREE.Vector3(0, 1.8, -82) };
-  const retailFrustum = new THREE.Frustum();
+  const streetFrustum = new THREE.Frustum();
+  const worksBounds = new THREE.Box3();
   const viewProjection = new THREE.Matrix4();
   const retailPlacements: { mid: THREE.Object3D; bounds: THREE.Sphere; close?: THREE.Object3D }[] = [];
   const tween = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -501,19 +502,21 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           || (kind === 'hall' && object.name.startsWith('HERO_01_Governance_Hall'))) members.push(object);
       });
       proxies.set(kind, members);
+      if (kind === 'works') {
+        worksBounds.makeEmpty();
+        for (const member of members) worksBounds.expandByObject(member);
+      }
     }
   }
 
   function updateRetail() {
     if (!retailPlacements.length) return;
-    camera.updateMatrixWorld();
-    retailFrustum.setFromProjectionMatrix(viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
     for (const placement of retailPlacements) {
       const { mid, bounds } = placement;
       const distance = camera.position.distanceTo(bounds.center);
       const showing = placement.close?.visible ?? false;
       const near = distance < (showing ? 86 : 76);
-      if (near && !showing && retailFrustum.intersectsSphere(bounds)) {
+      if (near && !showing && streetFrustum.intersectsSphere(bounds)) {
         if (!retailTemplate) {
           loadRetail();
           continue;
@@ -663,13 +666,20 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       );
       camera.lookAt(viewFocus);
     }
+    let worksDistance = Infinity;
     if (!document.hidden && !wide) {
       updateStreetShadow(following ? aim : viewFocus, Boolean(following) || orbitDistance < 66);
+      camera.updateMatrixWorld();
+      streetFrustum.setFromProjectionMatrix(viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      if (!worksBounds.isEmpty() && streetFrustum.intersectsBox(worksBounds)) {
+        worksDistance = worksBounds.distanceToPoint(camera.position);
+      }
       updateRetail();
       for (const kind of LANDMARK_DETAILS) {
         const close = details.get(kind);
         if (!close) continue;
-        const show = landmarkEntrances[kind].distanceTo(camera.position) < (close.visible ? 40 : 33);
+        const distance = kind === 'works' ? worksDistance : landmarkEntrances[kind].distanceTo(camera.position);
+        const show = distance < (close.visible ? 40 : 33);
         if (show === close.visible) continue;
         close.visible = show;
         for (const proxy of proxies.get(kind) ?? []) proxy.visible = !show;
@@ -701,7 +711,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         (agent) => agent.destination === 'registry' && agent.patrol.progress >= 42,
       )) loadDistrict('residential', false);
       for (const kind of LANDMARK_DETAILS) {
-        if (landmarkEntrances[kind].distanceTo(camera.position) < 38) {
+        const distance = kind === 'works' ? worksDistance : landmarkEntrances[kind].distanceTo(camera.position);
+        if (distance < 38) {
           loadDetail(kind);
         }
       }
