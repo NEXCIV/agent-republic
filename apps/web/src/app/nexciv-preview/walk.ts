@@ -46,6 +46,8 @@ const FOLLOW_YAW = -2.54;
 const FOLLOW_PITCH = 0.39;
 const FOLLOW_DISTANCE = 5.6;
 const ASSET_PATH = '/nexciv-walk/';
+const RETAIL_PREFIX = 'HI3DGardenRoofRetail';
+const RETAIL_DETAIL = 'garden-roof-retail-detail.glb';
 const DETAIL_FILES = {
   street: 'nexus-street-detail.glb',
   market: 'corner-market-detail.glb',
@@ -80,6 +82,21 @@ function setBuildingShadows(asset: THREE.Object3D) {
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     object.castShadow = !materials.some((material) => material.transparent) && object.name !== 'NEXCIV_terrain' && !pavement.has(object);
     object.receiveShadow = true;
+  });
+}
+
+function isGardenRetail(object: THREE.Object3D): object is THREE.Mesh {
+  return object instanceof THREE.Mesh && object.name.replace(/[^a-z0-9]/gi, '').startsWith(RETAIL_PREFIX);
+}
+
+function softenRetailWindows(asset: THREE.Object3D) {
+  asset.traverse((object) => {
+    if (!isGardenRetail(object)) return;
+    for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+      if (material instanceof THREE.MeshStandardMaterial && material.emissiveMap) {
+        material.emissiveIntensity = Math.min(material.emissiveIntensity, 0.65);
+      }
+    }
   });
 }
 
@@ -128,6 +145,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const focus = new THREE.Vector3(0, 0, 24);
   const aim = new THREE.Vector3();
   const marketEntrance = new THREE.Vector3();
+  const retailFrustum = new THREE.Frustum();
+  const viewProjection = new THREE.Matrix4();
+  const retailPlacements: { mid: THREE.Mesh; bounds: THREE.Sphere; close?: THREE.Mesh }[] = [];
   const tween = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pointers = new Map<number, { x: number; y: number }>();
   const aborter = new AbortController();
@@ -138,6 +158,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let northRequested = false;
   const details = new Map<Detail, THREE.Object3D>();
   const requestedDetails = new Set<Detail>();
+  let retailSource: THREE.Object3D | undefined;
+  let retailMesh: THREE.Mesh | undefined;
+  let retailRequested = false;
   const proxies = new Map<Detail, THREE.Object3D[]>();
   let actor: GLTF | undefined;
   let actorLoading = true;
@@ -233,6 +256,50 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     actor = undefined;
   }
 
+  function registerRetail(asset: THREE.Object3D) {
+    asset.updateMatrixWorld(true);
+    asset.traverse((object) => {
+      if (!isGardenRetail(object)) return;
+      const bounds = new THREE.Box3().setFromObject(object).getBoundingSphere(new THREE.Sphere());
+      retailPlacements.push({ mid: object, bounds });
+    });
+  }
+
+  function updateRetail() {
+    if (!retailPlacements.length) return;
+    camera.updateMatrixWorld();
+    retailFrustum.setFromProjectionMatrix(viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+    for (const placement of retailPlacements) {
+      const { mid, bounds } = placement;
+      const distance = camera.position.distanceTo(bounds.center);
+      const showing = placement.close?.visible ?? false;
+      const near = distance < (showing ? 86 : 76);
+      if (near && !showing && retailFrustum.intersectsSphere(bounds)) {
+        if (!retailMesh) {
+          loadRetail();
+          continue;
+        }
+        if (!placement.close) {
+          const close = new THREE.Mesh(retailMesh.geometry, retailMesh.material);
+          close.name = `${mid.name}_close`;
+          close.matrix.copy(mid.matrixWorld);
+          close.matrixAutoUpdate = false;
+          close.castShadow = mid.castShadow;
+          close.receiveShadow = mid.receiveShadow;
+          scene.add(close);
+          placement.close = close;
+        }
+        mid.visible = false;
+        placement.close.visible = true;
+        renderer.shadowMap.needsUpdate = true;
+      } else if (!near && showing && placement.close) {
+        placement.close.visible = false;
+        mid.visible = true;
+        renderer.shadowMap.needsUpdate = true;
+      }
+    }
+  }
+
   function animate(now: number) {
     if (ended || contextLost || !model) return;
     const dt = document.hidden ? 0 : Math.min((now - lastFrame) / 1000, 0.075);
@@ -315,6 +382,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       );
       camera.lookAt(focus);
     }
+    if (!document.hidden) updateRetail();
     renderer.render(scene, camera);
     const showStreetDetails = (mode === 'follow' && patrol && patrol.root.position.z > -44) || orbitDistance < 59;
     const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !primary || primary.progress > 0);
@@ -395,6 +463,20 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     return response;
   }
 
+  function loadRetail() {
+    if (retailRequested) return;
+    retailRequested = true;
+    request(RETAIL_DETAIL, 'low').then((response) => response.arrayBuffer()).then(async (bytes) => {
+      if (ended || contextLost) return;
+      const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
+      const mesh = asset.children.find(isGardenRetail);
+      if (ended || contextLost || !mesh) { disposeModel(asset); return; }
+      softenRetailWindows(asset);
+      retailSource = asset;
+      retailMesh = mesh;
+    }).catch(() => {});
+  }
+
   function loadDetail(kind: Detail) {
     const placeholders = proxies.get(kind);
     if (!placeholders?.length || requestedDetails.has(kind)) return;
@@ -407,6 +489,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       // A failed request leaves the original silhouette visible.
       details.set(kind, asset);
       scene.add(asset);
+      if (kind === 'street') {
+        softenRetailWindows(asset);
+        registerRetail(asset);
+      }
       for (const proxy of placeholders) proxy.visible = false;
       renderer.shadowMap.needsUpdate = true;
     }).catch(() => {});
@@ -430,6 +516,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       north = city.scene;
       setBuildingShadows(north);
       scene.add(north);
+      softenRetailWindows(north);
+      registerRetail(north);
       focus.set(...layout.target);
       if (desiredDistance === START_DISTANCE && orbitPitch === START_PITCH) {
         desiredDistance = EXPANDED_DISTANCE;
@@ -503,6 +591,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       proxies.set(kind, members);
     }
     setBuildingShadows(model);
+    softenRetailWindows(model);
     scene.add(model);
     connectPrimary();
     renderer.shadowMap.needsUpdate = true;
@@ -539,6 +628,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);
       if (north) disposeModel(north);
+      if (retailSource) disposeModel(retailSource);
       for (const detail of details.values()) disposeModel(detail);
       sun.shadow.dispose();
       environment.dispose();

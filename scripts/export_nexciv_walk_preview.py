@@ -94,11 +94,13 @@ MARKET_SHELL = (
     "Market | Roof plant room",
     "Market | NEXCIV",
 )
+GARDEN_RETAIL = "HI3D | Garden Roof Retail"
 CHUNKS = {
     "base": "nexus-market.glb",
     "street": "nexus-street-detail.glb",
     "market": "corner-market-detail.glb",
     "governance": "governance-north.glb",
+    "retail": "garden-roof-retail-detail.glb",
 }
 
 
@@ -258,7 +260,7 @@ def stage_assets(scene, graph, chunk):
     glass = material("NEXCIV browser glazing", "B0B9BF", 0.20, 0.25)
     shader(glass).inputs["Alpha"].default_value = 0.26
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
-    texture_limit = 512 if chunk == "base" else 1024
+    texture_limit = {"base": 512, "retail": 2048}.get(chunk, 1024)
     pbr = {}
     textures = {}
 
@@ -293,6 +295,8 @@ def stage_assets(scene, graph, chunk):
     cache, parts = {}, []
     for source, transform, tier in world_geometry(scene, graph, governance=chunk == "governance"):
         name = source.original.name
+        if chunk == "retail" and not name.startswith(GARDEN_RETAIL):
+            continue
         market = name.startswith("Market | ")
         street = tier in ("detail", "buildings") or name.startswith("Courtyard | roses")
         street_proxy = street and chunk == "base"
@@ -316,7 +320,7 @@ def stage_assets(scene, graph, chunk):
         # Preserve original object-level finish overrides, including the white paint in the road.
         asset = bpy.data.objects.new(source.name, mesh)
         root.objects.link(asset)
-        asset.matrix_world = transform
+        asset.matrix_world = Matrix.Identity(4) if chunk == "retail" else transform
         if chunk == "governance" and name == "CIVRUM_LOT_PAINT_GOVERNANCE":
             # The lettering and the top of the stone are both at 0.182 m in the source scene.
             asset.location.z += 0.004
@@ -336,6 +340,9 @@ def stage_assets(scene, graph, chunk):
         elif street_proxy:
             tier = "street_proxy"
         asset["previewTier"] = tier
+        if chunk == "retail":
+            parts.append((asset, 180000))
+            break
         if chunk == "governance" and len(mesh.polygons) > 10000:
             parts.append((asset, 52000 if name == "HERO_01_Governance_Hall" else 6500))
         elif name.startswith("Courtyard | roses") and len(mesh.polygons) > 12000:
@@ -343,6 +350,9 @@ def stage_assets(scene, graph, chunk):
         elif len(mesh.polygons) > 55000:
             face_limit = 2200 if street_proxy else 30000
             parts.append((asset, face_limit))
+
+    if chunk == "retail" and len(parts) != 1:
+        raise RuntimeError("Expected a single Garden Roof Retail source mesh")
 
     reduced = {}
     for obj, face_limit in parts:
@@ -353,6 +363,10 @@ def stage_assets(scene, graph, chunk):
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
             reduced[key].validate(clean_customdata=False)
+            if chunk in {"street", "retail"} and obj.name.startswith(GARDEN_RETAIL):
+                mesh = reduced[key]
+                mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
+                mesh.set_sharp_from_angle(angle=math.radians(35))
             obj.modifiers.remove(modifier)
         obj.data = reduced[key]
 
