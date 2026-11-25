@@ -31,7 +31,9 @@ from build_nexciv_facades import finishes as facade_finishes
 from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
 from civrum_lakeside_blocks import PALETTE, STONE
+from civrum_lakeside_landmarks import REGISTRY
 from refine_nexciv_public_works import ROOF_DETAILS, WORKS, refine_public_works
+from refine_nexciv_registry import refine_registry
 from refine_nexciv_works_railing import RAILING
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,7 +152,7 @@ RESIDENCE_ALTERNATE = (
     (95.05, 41.8), (95.05, 47.8), (94.4, 55.15),
 )
 EAST_HEROES = {
-    "HERO_03_Citizen_Registration": "registry",
+    REGISTRY: "registry",
     WORKS: "works",
 }
 LAYERS = {
@@ -521,7 +523,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
     transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
     texture_limit = {
-        "base": 512, "retail": 2048, "registry": 2048, "works": 4096, "center": 4096, "hall": 4096, "citywide": 768,
+        "base": 512, "retail": 2048, "registry": 4096, "works": 4096, "center": 4096, "hall": 4096, "citywide": 768,
     }.get(chunk, 1024)
     pbr = {}
     textures = {}
@@ -653,7 +655,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
             mesh = asset.data = mesh.copy()
             slots = {slot.material.name: i for i, slot in enumerate(source.material_slots) if slot.material}
             paint_crossing(mesh, transform, slots[WHITE], slots[ASPHALT], *crossing)
-        limit = 2048 if name == WORKS and chunk == "east" else texture_limit
+        limit = 2048 if name in (WORKS, REGISTRY) and chunk == "east" else texture_limit
         for index, original in enumerate(source.material_slots):
             if not original.material:
                 continue
@@ -676,7 +678,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
         elif chunk == "center":
             parts.append((asset, 245000))
         elif chunk == "east" and len(mesh.polygons) > 10000:
-            face_limit = {"registry_proxy": 18500, "works_proxy": 120000}.get(tier, 9000)
+            face_limit = {"registry_proxy": 38000, "works_proxy": 120000}.get(tier, 9000)
             if len(mesh.polygons) > face_limit:
                 parts.append((asset, face_limit))
         elif chunk == "west" and len(mesh.polygons) > 55000:
@@ -822,6 +824,8 @@ def main():
     chunks = args.chunk or CHUNKS
     bpy.ops.wm.open_mainfile(filepath=str(SOURCE))
     scene = bpy.context.scene
+    if any(chunk in chunks for chunk in ("east", "registry", "citywide")):
+        refine_registry(scene)
     if any(chunk in chunks for chunk in ("east", "works", "citywide")):
         refine_public_works(scene, roof_details="works" in chunks)
     scene.frame_set(1)

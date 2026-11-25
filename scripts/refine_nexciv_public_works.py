@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_civrum_lakeside import material
 from build_civrum_world import Geometry, circle
 from detail_civrum_world import rod
+from refine_nexciv_registry import refine_registry
 from refine_nexciv_works_railing import fit_curved_railing
 
 STUDY = Path(__file__).resolve().parents[1] / "art-direction/world-upgrade-v1/lakeside-study"
@@ -159,6 +160,7 @@ def main():
         parser.error("Choose a separate path for the public works revision")
     bpy.ops.wm.open_mainfile(filepath=str(WORLD))
     refine_public_works(bpy.context.scene, roof_details=True)
+    refine_registry(bpy.context.scene)
     bpy.context.preferences.filepaths.save_version = 0
     bpy.ops.wm.save_as_mainfile(filepath=str(args.output.resolve()))
 
