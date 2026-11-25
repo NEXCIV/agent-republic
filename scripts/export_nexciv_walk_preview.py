@@ -31,7 +31,7 @@ from build_nexciv_facades import finishes as facade_finishes
 from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
 from civrum_lakeside_blocks import PALETTE, STONE
-from civrum_lakeside_landmarks import REGISTRY
+from civrum_lakeside_landmarks import AGENT_CENTER, REGISTRY, place_agent_center
 from refine_nexciv_public_works import ROOF_DETAILS, WORKS, refine_public_works
 from refine_nexciv_registry import refine_registry
 from refine_nexciv_works_railing import RAILING
@@ -55,8 +55,6 @@ SHORE_CROSSING_STRIPES = tuple((122.63 + i * 0.59, 122.97 + i * 0.59) for i in r
 RESEARCH_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.027"
 RESEARCH_CROSSING_Y = (82.25, 85)
 RESEARCH_CROSSING_STRIPES = WEST_CROSSING_STRIPES
-AGENT_CENTER = "HERO_02_Agent_Center"
-AGENT_CENTER_ANCHOR = (-95, 65, 0.172)
 WAYPOINTS = (
     (0, -21.4),
     (2.3, -29.4),
@@ -137,11 +135,11 @@ SHORE_ALTERNATE = (
 RESEARCH_APPROACH = ((-4, 76.5), (-19, 76.5), (-21.5, 79))
 RESEARCH_WAYPOINTS = (
     GOVERNANCE_WAYPOINTS[-1], (-2, 78), *RESEARCH_APPROACH, (-39, 85), (-57.18, 84),
-    (-72.68, 84), (-76, 80), (-89, 66.5), (-89.65, 65),
+    (-72.68, 84), (-76, 80), (-89, 66.5), (-92.35, 64.6),
 )
 RESEARCH_ALTERNATE = (
     (-2.5, 77.5), *RESEARCH_APPROACH, (-39, 85.6), (-57.18, 83.2),
-    (-72.68, 83.2), (-76, 79.5), (-89, 67), (-89.65, 65.86),
+    (-72.68, 83.2), (-76, 79.5), (-89, 67), (-92.35, 65.46),
 )
 RESIDENCE_WAYPOINTS = (
     REGISTRY_WAYPOINTS[-1], (90.52, 13.9), (90.52, 27.7), (93.64, 35),
@@ -641,10 +639,6 @@ def stage_assets(scene, graph, chunk, library=DEST):
         asset = bpy.data.objects.new(source.name, mesh)
         root.objects.link(asset)
         asset.matrix_world = Matrix.Identity(4) if chunk == "retail" else transform
-        if name == AGENT_CENTER:
-            # Preview the landmark at 14 m across the front, keeping the same lot and base elevation.
-            anchor = Matrix.Translation(AGENT_CENTER_ANCHOR)
-            asset.matrix_world = anchor @ Matrix.Scale(2, 4) @ anchor.inverted() @ transform
         if chunk == "shore" and name == PARKLAND:
             trim_parkland(mesh, transform)
         if name.startswith("CIVRUM_LOT_PAINT_"):
@@ -824,6 +818,8 @@ def main():
     chunks = args.chunk or CHUNKS
     bpy.ops.wm.open_mainfile(filepath=str(SOURCE))
     scene = bpy.context.scene
+    if any(chunk in chunks for chunk in ("research", "center", "citywide")):
+        place_agent_center(scene)
     if any(chunk in chunks for chunk in ("east", "registry", "citywide")):
         refine_registry(scene)
     if any(chunk in chunks for chunk in ("east", "works", "citywide")):

@@ -186,6 +186,11 @@ function addLakeRipples(asset: THREE.Object3D, time: { value: number }) {
 }
 
 function addCenterNameplate(asset: THREE.Object3D) {
+  let building: THREE.Object3D | undefined;
+  asset.traverse((object) => {
+    if (!building && object.userData.previewTier === 'center_proxy') building = object;
+  });
+  if (!building) return;
   const face = document.createElement('canvas');
   face.width = 1024;
   face.height = 184;
@@ -227,14 +232,14 @@ function addCenterNameplate(asset: THREE.Object3D) {
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 4;
   const frame = new THREE.Mesh(
-    new THREE.BoxGeometry(4.72, 0.85, 0.13),
+    new THREE.BoxGeometry(2.36, 0.425, 0.065),
     new THREE.MeshStandardMaterial({ color: '#402640', roughness: 0.5 }),
   );
   frame.name = 'NEXCIV_Agent_Center_Nameplate';
-  frame.position.set(-90.35, 3.304, -65);
+  frame.position.set(2.325, 1.566, 0);
   frame.rotation.y = Math.PI / 2;
   const lettering = new THREE.Mesh(
-    new THREE.PlaneGeometry(4.69, 0.84),
+    new THREE.PlaneGeometry(2.345, 0.42),
     new THREE.MeshStandardMaterial({
       map: texture,
       roughness: 0.72,
@@ -243,9 +248,11 @@ function addCenterNameplate(asset: THREE.Object3D) {
       emissiveIntensity: 0.15,
     }),
   );
-  lettering.position.z = 0.066;
+  lettering.position.z = 0.033;
   frame.add(lettering);
-  asset.add(frame);
+  building.add(frame);
+  // Keep the source placement, including its scale, when the near mesh replaces the district mesh.
+  asset.attach(frame);
 }
 
 export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks): WalkController {
@@ -324,7 +331,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     registry: new THREE.Vector3(80, 1, -14),
     works: new THREE.Vector3(95, 1, 72),
   };
-  const centerEntrance = new THREE.Vector3(-90, 1.6, -65);
+  const centerEntrance = new THREE.Vector3(-92.35, 1.6, -64.6);
   const landmarkEntrances = { ...eastEntrances, center: centerEntrance, hall: new THREE.Vector3(0, 1.8, -82) };
   const streetFrustum = new THREE.Frustum();
   const worksBounds = new THREE.Box3();

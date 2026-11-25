@@ -125,6 +125,40 @@ def window_bays(g, width, height, bottom, count, wall, lit_seed, entrance=False,
     g.box(width / 2, .25, bottom, .46, .71, height, wall, .04)
 
 
+def council_doors(g, x, y, floor, width, spring, fine):
+    """A pair of inset doors below the fixed transom, flanked by full-height sidelights."""
+    half_opening = 1.12
+    head = floor + 2.37
+    inner = y + .13
+
+    def pane(left, right, depth, lower, upper):
+        start = len(g.verts)
+        g.verts.extend(((x + left, depth, lower), (x + right, depth, lower),
+                        (x + right, depth, upper), (x + left, depth, upper)))
+        g.face(tuple(range(start, start + 4)), GLASS)
+
+    for side in (-1, 1):
+        pane(*sorted((side * half_opening, side * width / 2)), y + .045, floor, spring)
+        pane(*sorted((side * .028, side * half_opening)), inner + .04, floor + .13, head)
+        for jamb in (half_opening, width / 2):
+            g.box(x + side * jamb, y, floor, .105, .22, spring - floor, BRONZE, .016)
+        leaf = x + side * half_opening / 2
+        g.box(leaf, inner, floor + .018, half_opening - .018, .096, .16, BRONZE, .012)
+        g.box(x + side * .029, inner, floor + .16, .047, .09, head - floor - .16, BRONZE)
+        # Full-size pulls remain legible at the district distance. Close views add mounting hardware.
+        pull = x + side * .186
+        rod(g, (pull, inner - .164, floor + .91), (pull, inner - .164, floor + 1.49), .032, GOLD, sides=10)
+        for h in (.96, 1.44):
+            rod(g, (pull, inner - .164, floor + h), (pull, inner + .047, floor + h), .022, BRONZE, sides=8)
+            if fine:
+                g.box(pull, inner + .024, floor + h - .053, .096, .036, .106, GOLD, .014)
+    pane(-half_opening, half_opening, y + .045, head + .14, spring)
+    g.box(x, y - .01, head, 2 * half_opening + .11, .28, .14, BRONZE, .021)
+    g.box(x, y - .161, head + .08, 2 * half_opening, .024, .031, GOLD)
+    g.box(x, y, spring - .04, width + .08, .18, .082, BRONZE)
+    g.box(x, inner - .07, floor - .055, 2 * half_opening + .10, .46, .057, BRONZE, .024)
+
+
 def archway(g, x, front, bottom, spring, radius, fine):
     outer, top, segments = radius + .64, 9.42, 24
     for side in (-1, 1):
@@ -145,7 +179,7 @@ def archway(g, x, front, bottom, spring, radius, fine):
         hx, hz = at(radius - .035, b)
         rod(g, (gx, front + 1.10, gz), (hx, front + 1.10, hz), .047, BRONZE, sides=6)
     glass_y = front + 1.16
-    glazing(g, x, glass_y, bottom + .10, radius * 2 - .08, spring - bottom - .06, 4)
+    council_doors(g, x, glass_y, bottom + .06, radius * 2 - .08, spring, fine)
     fan = len(g.verts)
     g.verts.extend((x + (radius - .043) * math.cos(i * math.pi / segments), glass_y + .045,
                     spring + (radius - .043) * math.sin(i * math.pi / segments)) for i in range(segments + 1))
@@ -154,10 +188,6 @@ def archway(g, x, front, bottom, spring, radius, fine):
         theta = i * math.pi / 6
         rod(g, (x, glass_y, spring), (x + radius * math.cos(theta), glass_y, spring + radius * math.sin(theta)),
             .028, BRONZE)
-    if fine:
-        for direction in (-1, 1):
-            g.box(x + direction * .15, glass_y - .11, bottom + 1.16, .049, .15, .59, GOLD)
-        g.box(x, glass_y, bottom + 2.45, radius * 2 - .08, .12, .052, GOLD)
 
 
 def dome(g, fine):

@@ -11,6 +11,15 @@ from mathutils import Matrix
 REGISTRY = "HERO_03_Citizen_Registration"
 REGISTRY_BODY = "CIVRUM_Citizen_Registry_Textured"
 REGISTRY_SIGN = "CIVRUM_Citizen_Registry_Nameplate"
+AGENT_CENTER = "HERO_02_Agent_Center"
+
+
+def place_agent_center(scene):
+    """Leave the original Tripo mesh in its research courtyard, clear of the reading room roofline."""
+    body = scene.objects[AGENT_CENTER]
+    body.location = (-98.6, 64.6, .172)
+    body.scale = (2.36,) * 3
+    bpy.context.view_layer.update()
 
 
 def enamel_sign(name, artwork, center, size, slope=0):

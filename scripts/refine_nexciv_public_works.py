@@ -12,6 +12,8 @@ from mathutils import Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_civrum_lakeside import material
 from build_civrum_world import Geometry, circle
+from build_nexciv_facades import GOVERNANCE_HALL, council_hall, finishes, fit_mesh
+from civrum_lakeside_landmarks import place_agent_center
 from detail_civrum_world import rod
 from refine_nexciv_registry import refine_registry
 from refine_nexciv_works_railing import fit_curved_railing
@@ -161,6 +163,12 @@ def main():
     bpy.ops.wm.open_mainfile(filepath=str(WORLD))
     refine_public_works(bpy.context.scene, roof_details=True)
     refine_registry(bpy.context.scene)
+    place_agent_center(bpy.context.scene)
+    hall = bpy.context.scene.objects[GOVERNANCE_HALL]
+    finishes()
+    doors_revision = council_hall(True)
+    fit_mesh(doors_revision, hall)
+    hall.data = doors_revision
     bpy.context.preferences.filepaths.save_version = 0
     bpy.ops.wm.save_as_mainfile(filepath=str(args.output.resolve()))
 

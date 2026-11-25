@@ -22,7 +22,7 @@ export const DESTINATION_FACING: Record<Place, [number, number]> = {
   works: [95, 78],
   forum: [-95, 88],
   pier: [71, -225],
-  center: [-95, -65],
+  center: [-98.6, -64.6],
   residence: [95, -58],
 };
 
