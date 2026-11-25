@@ -1,28 +1,43 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createWalk, type WalkController } from './walk';
+import { createWalk, type AgentStatus, type View, type WalkController } from './walk';
 import styles from './preview.module.css';
 
-type View = 'overview' | 'walk';
+const agentActivity: Record<AgentStatus, string> = {
+  loading: '中央广场',
+  outbound: '前往 Corner Market',
+  atMarket: '已到达 Corner Market',
+  inbound: '返回中央广场',
+  atNexus: '已返回中央广场',
+  unavailable: 'Agent 暂未载入',
+};
 
 export function WalkPreview() {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
-  const [view, setView] = useState<View>('overview');
-  const [progress, setProgress] = useState(0);
+  const [view, setView] = useState<View>('follow');
+  const [playing, setPlaying] = useState(true);
+  const [agent, setAgent] = useState<{ status: AgentStatus; progress: number }>({ status: 'loading', progress: 0 });
   const [fps, setFps] = useState(0);
   const [readyTime, setReadyTime] = useState(0);
 
   useEffect(() => {
     const host = viewport.current;
     if (!host) return;
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const initialView = reduceMotion ? 'overview' : 'follow';
+    setView(initialView);
+    setPlaying(!reduceMotion);
     try {
-      const controller = createWalk(host, {
+      const controller = createWalk(host, initialView, !reduceMotion, {
         ready: (elapsed) => { setReadyTime(elapsed); setState('ready'); },
         fallback: () => setState('fallback'),
-        progress: setProgress,
+        agent: (status, progress) => {
+          setAgent({ status, progress });
+          if (status === 'unavailable') setView('overview');
+        },
         fps: setFps,
       });
       world.current = controller;
@@ -37,9 +52,8 @@ export function WalkPreview() {
     setView(next);
   }
 
-  function move(direction: number) {
-    world.current?.step(direction);
-  }
+  const sceneReady = state === 'ready';
+  const agentReady = sceneReady && agent.status !== 'loading' && agent.status !== 'unavailable';
 
   return (
     <div className={styles.page} lang="zh-CN" data-preview="nexciv-walk">
@@ -47,7 +61,7 @@ export function WalkPreview() {
       <header className={styles.header}>
         <span className={styles.brand}>NEXCIV</span>
         <span className={styles.divider} />
-        <h1>街区走查</h1>
+        <h1>街区观察</h1>
         <span className={styles.status} role="status">
           {state === 'ready' ? '实时 3D · DEMO' : state === 'loading' ? '正在载入街区' : '静态预览 · DEMO'}
         </span>
@@ -57,45 +71,34 @@ export function WalkPreview() {
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{view === 'overview' ? 'NEXUS 东南街区' : '步行路线'}</small>
-          <strong>{view === 'overview' ? '中央广场' : progress >= 100 ? '已到达 Corner Market' : '前往 Corner Market'}</strong>
+          <small>{agentReady ? 'AGENT 01 · 模拟行为' : 'NEXUS 东南街区'}</small>
+          <strong role="status">{sceneReady ? agentActivity[agent.status] : '中央广场'}</strong>
         </div>
         {state === 'fallback' && <p className={styles.fallback}>3D 场景暂时无法加载。下方可查看路线的两处实景。</p>}
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         <div className={styles.controls}>
           <div className={styles.switcher} aria-label="视角">
-            <button disabled={state !== 'ready'} aria-pressed={view === 'overview'} onClick={() => select('overview')}>俯视</button>
-            <button disabled={state !== 'ready'} aria-pressed={view === 'walk'} onClick={() => select('walk')}>步行</button>
+            <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>俯视</button>
+            <button disabled={!agentReady} aria-pressed={view === 'follow'} onClick={() => select('follow')}>跟随 Agent</button>
           </div>
-          {view === 'overview' ? (
-            <div className={styles.steps} aria-label="缩放">
-              <button disabled={state !== 'ready'} onClick={() => world.current?.zoom(1.25)} aria-label="缩小">−</button>
-              <button disabled={state !== 'ready'} onClick={() => world.current?.zoom(0.8)} aria-label="放大">+</button>
-            </div>
-          ) : (
-            <div className={styles.steps} aria-label="沿路线行走">
-              <button onClick={() => move(-1)} aria-label="后退">↓</button>
-              <button onClick={() => move(1)} aria-label="前进">↑</button>
-            </div>
-          )}
-          <button disabled={state !== 'ready'} className={styles.reset} onClick={() => { world.current?.reset(); setView('overview'); }}>重置</button>
+          <div className={styles.switcher} aria-label="缩放">
+            <button disabled={!sceneReady} onClick={() => world.current?.zoom(1.25)} aria-label="缩小">−</button>
+            <button disabled={!sceneReady} onClick={() => world.current?.zoom(0.8)} aria-label="放大">+</button>
+          </div>
+          <button disabled={!sceneReady} onClick={() => world.current?.reset()}>重置镜头</button>
+          <button disabled={!agentReady} onClick={() => {
+            world.current?.play(!playing);
+            setPlaying(!playing);
+          }}>{playing ? '暂停动画' : '播放动画'}</button>
           <span className={styles.hint}>
-            <span className={styles.desktopHint}>{view === 'overview' ? '拖动旋转 · 滚轮缩放' : '拖动环顾 · W / S 或箭头行走'}</span>
-            <span className={styles.touchHint}>{view === 'overview' ? '拖动旋转 · 双指缩放' : '拖动环顾 · 点击箭头行走'}</span>
+            <span className={styles.desktopHint}>拖动旋转 · 滚轮缩放</span>
+            <span className={styles.touchHint}>拖动旋转 · 双指缩放</span>
           </span>
         </div>
         <div className={styles.route}>
           <span>中央广场</span>
-          <input
-            aria-label="步行路线进度"
-            type="range" min={0} max={100} value={progress}
-            disabled={state !== 'ready'}
-            onChange={(event) => {
-              select('walk');
-              world.current?.seek(Number(event.target.value));
-            }}
-          />
+          <progress aria-label="Agent 在中央广场与 Corner Market 之间的位置" max={100} value={agent.progress} />
           <span>Corner Market</span>
           <span className={styles.performance} aria-label="本机实时渲染指标">{fps > 0 ? `${fps} FPS · ${(readyTime / 1000).toFixed(1)} s` : ''}</span>
         </div>

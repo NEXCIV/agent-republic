@@ -1,22 +1,23 @@
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { createAgentPatrol, type AgentPhase, type RoutePoint } from './agent';
 
-type View = 'overview' | 'walk';
-type RouteData = { points: [number, number, number][]; target: [number, number, number] };
+export type View = 'overview' | 'follow';
+export type AgentStatus = AgentPhase | 'loading' | 'unavailable';
+type RouteData = { points: RoutePoint[]; target: RoutePoint };
 type Callbacks = {
   ready: (elapsedMs: number) => void;
   fallback: () => void;
-  progress: (percent: number) => void;
+  agent: (status: AgentStatus, percent: number) => void;
   fps: (value: number) => void;
 };
 
 export type WalkController = {
   view: (mode: View) => void;
   zoom: (factor: number) => void;
-  step: (direction: number) => void;
-  seek: (percent: number) => void;
+  play: (enabled: boolean) => void;
   reset: () => void;
   dispose: () => void;
 };
@@ -24,19 +25,10 @@ export type WalkController = {
 const START_YAW = 0.23;
 const START_PITCH = 0.88;
 const START_DISTANCE = 115;
-const EYE_HEIGHT = 1.72;
-const WALK_METRES_PER_SECOND = 1.9;
-
-function markDistances(points: RouteData['points']) {
-  let length = 0;
-  let previous: THREE.Vector3 | undefined;
-  return points.map((point) => {
-    const position = new THREE.Vector3(...point);
-    if (previous) length += position.distanceTo(previous);
-    previous = position;
-    return { position, distance: length };
-  });
-}
+const FOLLOW_YAW = -2.54;
+const FOLLOW_PITCH = 0.39;
+const FOLLOW_DISTANCE = 5.6;
+const ASSET_PATH = '/nexciv-walk/';
 
 function installDetailFade(root: THREE.Object3D) {
   const batch = root.getObjectByName('NEXCIV_detail') ?? root.getObjectByName('NEXCIV detail');
@@ -87,7 +79,7 @@ function disposeModel(asset: THREE.Object3D) {
   for (const mesh of meshes) mesh.dispose();
 }
 
-export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkController {
+export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks): WalkController {
   const started = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   const canvas = renderer.domElement;
@@ -130,41 +122,33 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
   generator.dispose();
 
   const focus = new THREE.Vector3(0, 0, 24);
-  const eye = new THREE.Vector3();
   const aim = new THREE.Vector3();
-  const look = new THREE.Vector3();
   const tween = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const pointers = new Map<number, { x: number; y: number }>();
-  const keys = new Set<string>();
   const aborter = new AbortController();
   let ended = false;
+  let contextLost = false;
   let model: THREE.Object3D | undefined;
+  let actor: GLTF | undefined;
+  let patrol: ReturnType<typeof createAgentPatrol> | undefined;
+  let route: RouteData | undefined;
   let updateDetail = (_level: number) => {};
-  let points: ReturnType<typeof markDistances> = [];
-  let length = 0;
-  let mode: View = 'overview';
+  let mode: View = initialView;
+  let playing = autoPlay;
   let orbitYaw = START_YAW;
   let orbitPitch = START_PITCH;
   let desiredDistance = START_DISTANCE;
   let orbitDistance = START_DISTANCE;
-  let travel = 0;
-  let desiredTravel = 0;
-  let yawOffset = 0;
-  let headTilt = -0.015;
-  let eyeHeight: number | undefined;
-  let shownProgress = 0;
+  let followYaw = FOLLOW_YAW;
+  let followPitch = FOLLOW_PITCH;
+  let followDistance = FOLLOW_DISTANCE;
+  let followHeight: number | undefined;
+  let shownPhase: AgentPhase | undefined;
+  let shownProgress = -1;
   let measurements = 0;
   let measuredAt = performance.now();
   let lastFrame = measuredAt;
   let frameId = 0;
-
-  function positionAt(at: number, out: THREE.Vector3) {
-    if (at >= length) return out.copy(points.at(-1)!.position);
-    const next = points.findIndex((point) => point.distance > at);
-    const from = points[next - 1]!;
-    const to = points[next]!;
-    return out.lerpVectors(from.position, to.position, (at - from.distance) / (to.distance - from.distance));
-  }
 
   function resize() {
     const width = Math.max(1, host.clientWidth);
@@ -176,24 +160,30 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
   }
 
   function zoom(factor: number) {
-    if (mode === 'overview') desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, 139);
+    if (mode === 'follow' && patrol) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 9.5);
+    else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, 139);
   }
 
   function setView(next: View) {
-    if (mode !== next) {
-      keys.clear();
-      yawOffset = 0;
-      headTilt = -0.015;
-      eyeHeight = undefined;
-      mode = next;
-      fog.near = next === 'walk' ? 48 : 130;
-      fog.far = next === 'walk' ? 139 : 230;
+    mode = next;
+    followHeight = undefined;
+  }
+
+  function connectAgent() {
+    if (!model || !route || !actor || patrol || ended || contextLost) return;
+    try {
+      patrol = createAgentPatrol(actor, route.points);
+      scene.add(patrol.root);
+    } catch {
+      disposeModel(actor.scene);
+      actor = undefined;
+      callbacks.agent('unavailable', 0);
     }
   }
 
   function animate(now: number) {
-    if (ended || !model) return;
-    const dt = Math.min((now - lastFrame) / 1000, 0.075);
+    if (ended || contextLost || !model) return;
+    const dt = document.hidden ? 0 : Math.min((now - lastFrame) / 1000, 0.075);
     lastFrame = now;
     measurements++;
     if (now - measuredAt >= 1200) {
@@ -202,7 +192,34 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
       measuredAt = now;
     }
 
-    if (mode === 'overview') {
+    if (patrol) {
+      if (playing) patrol.advance(dt);
+      if (shownPhase !== patrol.phase || shownProgress !== patrol.progress) {
+        shownPhase = patrol.phase;
+        shownProgress = patrol.progress;
+        callbacks.agent(shownPhase, shownProgress);
+      }
+    }
+
+    if (mode === 'follow' && patrol) {
+      fog.near = 48;
+      fog.far = 139;
+      const feet = patrol.root.position;
+      followHeight = followHeight === undefined || !tween ? feet.y : THREE.MathUtils.damp(followHeight, feet.y, 12, dt);
+      aim.set(feet.x, followHeight + 0.94, feet.z);
+      // Frame the shop from the street side as the Agent passes the entrance tree.
+      const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
+      const yaw = followYaw + streetSide * 1.14;
+      camera.position.set(
+        aim.x + followDistance * Math.sin(yaw) * Math.cos(followPitch),
+        aim.y + followDistance * Math.sin(followPitch),
+        aim.z + followDistance * Math.cos(yaw) * Math.cos(followPitch),
+      );
+      camera.lookAt(aim);
+      updateDetail(1);
+    } else {
+      fog.near = 110;
+      fog.far = 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
       const distance = orbitDistance * (camera.aspect < 0.8 ? 1.09 : 1);
       camera.position.set(
@@ -212,31 +229,6 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
       );
       camera.lookAt(focus);
       updateDetail(1 - THREE.MathUtils.smoothstep(orbitDistance, 33, 71));
-    } else {
-      const forward = keys.has('w') || keys.has('arrowup');
-      const backward = keys.has('s') || keys.has('arrowdown');
-      if (forward !== backward) {
-        const speed = forward ? WALK_METRES_PER_SECOND : -WALK_METRES_PER_SECOND;
-        desiredTravel = THREE.MathUtils.clamp(desiredTravel + speed * dt, 0, length);
-      }
-      travel = tween ? THREE.MathUtils.damp(travel, desiredTravel, 15, dt) : desiredTravel;
-      if (Math.abs(travel - desiredTravel) < 0.015) travel = desiredTravel;
-      positionAt(travel, eye);
-      look.copy(positionAt(Math.min(length, travel + 2.2), aim)).sub(eye);
-      const approach = THREE.MathUtils.smoothstep(travel, length - 3.2, length - 0.25);
-      if (approach > 0) look.lerp(aim.set(13.70, eye.y, 54.91).sub(eye), approach);
-      const yaw = Math.atan2(look.x, look.z) + yawOffset;
-      const ground = eye.y + EYE_HEIGHT;
-      eyeHeight = eyeHeight === undefined || !tween ? ground : THREE.MathUtils.damp(eyeHeight, ground, 12, dt);
-      camera.position.set(eye.x, eyeHeight, eye.z);
-      aim.set(Math.sin(yaw), Math.tan(headTilt + approach * 0.13), Math.cos(yaw)).add(camera.position);
-      camera.lookAt(aim);
-      updateDetail(1);
-      const percent = Math.round(100 * travel / length);
-      if (shownProgress !== percent) {
-        shownProgress = percent;
-        callbacks.progress(percent);
-      }
     }
     renderer.render(scene, camera);
     frameId = requestAnimationFrame(animate);
@@ -264,12 +256,12 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
     }
     const dx = next.x - previous.x;
     const dy = next.y - previous.y;
-    if (mode === 'overview') {
+    if (mode === 'follow' && patrol) {
+      followYaw -= dx * 0.006;
+      followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.006, 0.16, 1.18);
+    } else {
       orbitYaw -= dx * 0.006;
       orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, 0.48, 1.45);
-    } else {
-      yawOffset -= dx * 0.007;
-      headTilt = THREE.MathUtils.clamp(headTilt + dy * 0.007, -0.83, 0.78);
     }
   }
 
@@ -278,29 +270,13 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
   }
 
   function onWheel(event: WheelEvent) {
-    if (mode !== 'overview') return;
     event.preventDefault();
     zoom(Math.exp(THREE.MathUtils.clamp(event.deltaY * 0.0012, -0.24, 0.24)));
   }
 
-  function onKey(event: KeyboardEvent) {
-    if (mode !== 'walk' || /^(INPUT|TEXTAREA|SELECT)$/.test((event.target as HTMLElement).tagName ?? '')) return;
-    const key = event.key.toLowerCase();
-    if (!['w', 's', 'arrowup', 'arrowdown'].includes(key)) return;
-    if (event.type === 'keydown') {
-      event.preventDefault();
-      keys.add(key);
-    } else {
-      keys.delete(key);
-    }
-  }
-
-  function clearKeys() {
-    keys.clear();
-  }
-
   function onContextLost(event: Event) {
     event.preventDefault();
+    contextLost = true;
     cancelAnimationFrame(frameId);
     callbacks.fallback();
   }
@@ -313,29 +289,34 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
   canvas.addEventListener('lostpointercapture', onPointerEnd, { signal });
   canvas.addEventListener('wheel', onWheel, { passive: false, signal });
   canvas.addEventListener('webglcontextlost', onContextLost, { signal });
-  window.addEventListener('keydown', onKey, { signal });
-  window.addEventListener('keyup', onKey, { signal });
-  window.addEventListener('blur', clearKeys, { signal });
   resize();
 
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
+  async function request(name: string) {
+    const response = await fetch(`${ASSET_PATH}${name}`, { signal });
+    if (!response.ok) throw new Error(`Missing preview asset ${name}`);
+    return response;
+  }
+
+  request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
+    if (ended || contextLost) return;
+    const result = await loader.parseAsync(bytes, ASSET_PATH);
+    if (ended || contextLost) { disposeModel(result.scene); return; }
+    actor = result;
+    connectAgent();
+  }).catch(() => {
+    if (!ended && !contextLost) callbacks.agent('unavailable', 0);
+  });
+
   Promise.all([
-    fetch('/nexciv-walk/route.json', { signal }).then((response) => {
-      if (!response.ok) throw new Error('Route unavailable');
-      return response.json() as Promise<RouteData>;
-    }),
-    fetch('/nexciv-walk/nexus-market.glb', { signal }).then((response) => {
-      if (!response.ok) throw new Error('Model unavailable');
-      return response.arrayBuffer();
-    }),
-  ]).then(async ([route, bytes]) => {
-    if (ended) return;
-    const result = await loader.parseAsync(bytes, '/nexciv-walk/');
-    if (ended) { disposeModel(result.scene); return; }
-    points = markDistances(route.points);
-    length = points.at(-1)?.distance ?? 0;
-    if (length <= 0) { disposeModel(result.scene); throw new Error('Invalid walk route'); }
+    request('route.json').then((response) => response.json() as Promise<RouteData>),
+    request('nexus-market.glb').then((response) => response.arrayBuffer()),
+  ]).then(async ([layout, bytes]) => {
+    if (ended || contextLost) return;
+    const result = await loader.parseAsync(bytes, ASSET_PATH);
+    if (ended || contextLost) { disposeModel(result.scene); return; }
+    route = layout;
     focus.set(...route.target);
     model = result.scene;
     const paving = model.getObjectByName('NEXCIV_paving');
@@ -349,35 +330,34 @@ export function createWalk(host: HTMLDivElement, callbacks: Callbacks): WalkCont
     });
     updateDetail = installDetailFade(model);
     scene.add(model);
+    connectAgent();
     renderer.shadowMap.needsUpdate = true;
     lastFrame = measuredAt = performance.now();
     animate(lastFrame);
     callbacks.ready(performance.now() - started);
   }).catch(() => {
-    if (ended) return;
-    callbacks.fallback();
+    if (!ended && !contextLost) callbacks.fallback();
   });
 
   return {
     view: setView,
     zoom,
-    step(direction) {
-      if (mode === 'walk') desiredTravel = THREE.MathUtils.clamp(desiredTravel + 2.7 * direction, 0, length);
-    },
-    seek(percent) { desiredTravel = THREE.MathUtils.clamp(percent / 100, 0, 1) * length; },
+    play(enabled) { playing = enabled; },
     reset() {
-      setView('overview');
       orbitYaw = START_YAW;
       orbitPitch = START_PITCH;
       orbitDistance = desiredDistance = START_DISTANCE;
-      travel = desiredTravel = shownProgress = 0;
-      callbacks.progress(0);
+      followYaw = FOLLOW_YAW;
+      followPitch = FOLLOW_PITCH;
+      followDistance = FOLLOW_DISTANCE;
     },
     dispose() {
       ended = true;
       aborter.abort();
       cancelAnimationFrame(frameId);
       sizeObserver.disconnect();
+      patrol?.dispose();
+      if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);
       sun.shadow.dispose();
       environment.dispose();

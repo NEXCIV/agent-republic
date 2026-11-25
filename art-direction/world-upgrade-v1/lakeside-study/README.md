@@ -1,21 +1,27 @@
 # NEXCIV 湖畔城市 · E6-07 美术样板
 
-## 网页步行样板
+## 网页街区观察
 
-启动 Web 应用后打开 [街区试玩](http://127.0.0.1:3137/nexciv-preview)。可以拖动俯视镜头，使用滚轮、双指或按钮缩放。切到「步行」后，使用 W / S、方向键或屏幕按钮，从 Nexus 中央广场经过斑马线和路缘坡道走到 Corner Market。进度条可以跳到沿途位置，拖动视野可以低头检查标线和铺装。
+启动 Web 应用后打开 [街区观察](http://127.0.0.1:3137/nexciv-preview)。01 号 Agent 沿路点从 Nexus 中央广场出发，经斑马线和路缘坡道到 Corner Market，停留后折返。页面默认为跟随视角，也可切换俯视，两个视角均可拖动和缩放镜头。按「暂停动画」可观察定格姿势。系统减少动态效果时默认从静止俯视开始，可以主动播放。
 
 ```powershell
 pnpm --filter @agent-republic/web dev --port 3137
 ```
 
-样板从下方的道路修正版导出，复用实际广场铺装、道路和商铺。GLB 大小约 13.4 MB，使用 Meshopt 压缩。斑马线和沥青共用路面网格，缩放时始终可见。小型装饰随距离淡出。页面在三维模型加载失败时提供静态预览。[浏览器俯视、过街及到店截图](renders/NEXCIV_Web_Walk_Preview.jpg)。
+街区 GLB 从下方的道路修正版导出，约 13.4 MB，使用 Meshopt 压缩。斑马线和沥青共用路面网格，缩放时始终可见。小型装饰随距离淡出。[01 号角色库](../../tripo/citizen-01-v1/motion/)提供现成的 `Walk` 与 `Idle`，网页 GLB 约 2.0 MB，保留网格、骨架和动作。浏览器按角色步幅同步位移与步频。路线标记为演示行为。[实际跟拍、过街和到店截图](renders/NEXCIV_Web_Walk_Preview.jpg)。
 
-已在 Edge 桌面窗口和同一台电脑的 390 × 844 触屏模拟窗口验证镜头操作与到店，并通过拦截模型请求验证静态预览。手机真机性能仍需实测。
+已在 Edge 桌面窗口验证自动出发、到店及折返，在 390 × 844 触屏模拟窗口验证自动出发和镜头操作。单独拦截角色请求时可继续俯视街区，拦截街区请求时显示静态预览。手机真机性能仍需实测。
 
 在仓库根目录用 Blender 5.3 重新导出网页模型与路线。
 
 ```powershell
 blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/export_nexciv_walk_preview.py
+```
+
+安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
+
+```powershell
+python -c "import sys; from pathlib import Path; sys.path.insert(0, 'scripts'); from prepare_civrum_hi3d import texture_copy; texture_copy(Path('art-direction/tripo/citizen-01-v1/motion/CIVRUM_Citizen_01.glb'), Path('apps/web/public/nexciv-walk/agent-01.glb'), 768)"
 ```
 
 ## 城区道路标线
