@@ -14,12 +14,14 @@ const PLACES: Record<Place, string> = {
   forum: '社区剧场',
   pier: '湖畔码头',
   center: 'Agent 中心',
+  residence: '花园住宅',
 };
 const DISTRICTS = {
   east: { button: '东区', title: '东部街区', places: '公民注册中心与公共建设中心' },
   west: { button: '西区', title: '西部街区', places: '社区剧场与展亭' },
   shore: { button: '湖畔', title: '北岸湖畔', places: '滨水步道与码头' },
   research: { button: '研究区', title: '西北研究区', places: 'Agent 中心与阅览室' },
+  residential: { button: '住宅区', title: '东北住宅区', places: '花园住宅与邻里庭院' },
 };
 const STARTING: AgentReport = { status: 'loading', progress: 0 };
 
@@ -39,7 +41,9 @@ export function WalkPreview() {
   const world = useRef<WalkController | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');
-  const [districts, setDistricts] = useState<Record<District, DistrictStatus>>({ east: 'idle', west: 'idle', shore: 'idle', research: 'idle' });
+  const [districts, setDistricts] = useState<Record<District, DistrictStatus>>({
+    east: 'idle', west: 'idle', shore: 'idle', research: 'idle', residential: 'idle',
+  });
   const [selected, setSelected] = useState<AgentId>('01');
   const [playing, setPlaying] = useState(true);
   const [reports, setReports] = useState<Record<AgentId, AgentReport>>({ '01': STARTING, '03': STARTING });
@@ -112,10 +116,11 @@ export function WalkPreview() {
         <div className={styles.controls}>
           <div className={styles.switcher} role="group" aria-label="视角">
             <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>俯视</button>
-            <button disabled={!sceneReady} aria-pressed={view === 'east'} onClick={() => select('east')}>东区</button>
-            <button disabled={!sceneReady} aria-pressed={view === 'west'} onClick={() => select('west')}>西区</button>
-            <button disabled={!sceneReady} aria-pressed={view === 'shore'} onClick={() => select('shore')}>湖畔</button>
-            <button disabled={!sceneReady} aria-pressed={view === 'research'} onClick={() => select('research')}>研究区</button>
+            {(Object.keys(DISTRICTS) as District[]).map((side) => (
+              <button key={side} disabled={!sceneReady} aria-pressed={view === side} onClick={() => select(side)}>
+                {DISTRICTS[side].button}
+              </button>
+            ))}
             <button disabled={!sceneReady || reports['01'].status === 'unavailable'} aria-label="跟随 Agent 01" aria-pressed={view === 'follow' && selected === '01'} onClick={() => select('follow', '01')}>跟随 01</button>
             <button disabled={!sceneReady || reports['03'].status === 'unavailable'} aria-label="跟随 Agent 03" aria-pressed={view === 'follow' && selected === '03'} onClick={() => select('follow', '03')}>跟随 03</button>
           </div>

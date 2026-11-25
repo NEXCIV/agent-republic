@@ -6,7 +6,7 @@ import { createAgentPatrol, type RoutePoint } from './agent';
 import { createMarketGreeting } from './marketGreeting';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
-export type District = 'east' | 'west' | 'shore' | 'research';
+export type District = 'east' | 'west' | 'shore' | 'research' | 'residential';
 export type View = 'overview' | 'follow' | District;
 export type DistrictStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 export type AgentId = ResidentId;
@@ -45,14 +45,19 @@ const START_PITCH = 0.88;
 const START_DISTANCE = 115;
 const EXPANDED_PITCH = 1.08;
 const EXPANDED_DISTANCE = 166;
-const EAST_PITCH = 1.02;
-const EAST_DISTANCE = 143;
-const WEST_DISTANCE = 130;
+const DISTRICT_ORBIT: Record<District, [yaw: number, pitch: number, distance: number]> = {
+  east: [START_YAW, 1.02, 143],
+  west: [-0.18, 1.02, 130],
+  shore: [START_YAW, 0.76, 169],
+  research: [0.62, 0.84, 94],
+  residential: [-0.44, 0.84, 94],
+};
 const DISTRICT_FILES: Record<District, [string, string]> = {
   east: ['east-routes.json', 'east-civic-district.glb'],
   west: ['west-route.json', 'west-community-district.glb'],
   shore: ['lakeshore-route.json', 'north-lakeshore.glb'],
   research: ['research-route.json', 'northwest-research-district.glb'],
+  residential: ['residential-route.json', 'northeast-garden-residences.glb'],
 };
 const FOLLOW_YAW = -2.54;
 const FOLLOW_PITCH = 0.39;
@@ -254,10 +259,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   generator.dispose();
 
   const focus = new THREE.Vector3(0, 0, 24);
-  const eastFocus = new THREE.Vector3(83, 0, 44);
-  const westFocus = new THREE.Vector3(-83, 0, 61);
-  const shoreFocus = new THREE.Vector3(4, 0, -178);
-  const researchFocus = new THREE.Vector3(-93, 0, -65);
+  const districtFocus: Record<District, THREE.Vector3> = {
+    east: new THREE.Vector3(83, 0, 44),
+    west: new THREE.Vector3(-83, 0, 61),
+    shore: new THREE.Vector3(4, 0, -178),
+    research: new THREE.Vector3(-93, 0, -65),
+    residential: new THREE.Vector3(94, 0, -64),
+  };
+  const residenceEntrance = new THREE.Vector3(95, 1, -55.15);
   const pierEntrance = new THREE.Vector3(71, 0.09, -190);
   const lakeTime = { value: 0 };
   const forumEntrance = new THREE.Vector3(-94, 1, 75);
@@ -282,11 +291,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let north: THREE.Object3D | undefined;
   let northLoading: Promise<void> | undefined;
   let northFailed = false;
-  const districts: Record<District, { asset?: THREE.Object3D; status: DistrictStatus }> = {
+  const districts: Record<District, { asset?: THREE.Object3D; pending?: Promise<void>; status: DistrictStatus }> = {
     east: { status: 'idle' },
     west: { status: 'idle' },
     shore: { status: 'idle' },
     research: { status: 'idle' },
+    residential: { status: 'idle' },
   };
   const details = new Map<Detail, THREE.Object3D>();
   const requestedDetails = new Set<Detail>();
@@ -342,18 +352,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     greetingFraming = 0;
   }
 
-  function sideDistrictLoaded() { return Boolean(districts.east.asset || districts.west.asset || districts.research.asset); }
+  function sideDistrictLoaded() { return Boolean(districts.east.asset || districts.west.asset || districts.research.asset || districts.residential.asset); }
 
   function resetOrbit() {
-    orbitYaw = mode === 'west' ? -0.18 : START_YAW;
-    if (mode === 'research') {
-      orbitYaw = 0.62;
-      orbitPitch = 0.84;
-      desiredDistance = 94;
+    if (mode !== 'overview' && mode !== 'follow') {
+      [orbitYaw, orbitPitch, desiredDistance] = DISTRICT_ORBIT[mode];
       return;
     }
-    orbitPitch = mode === 'shore' ? 0.76 : mode === 'east' || mode === 'west' ? EAST_PITCH : north ? EXPANDED_PITCH : START_PITCH;
-    desiredDistance = mode === 'west' ? WEST_DISTANCE : mode === 'east' ? EAST_DISTANCE : mode === 'shore' ? 169 : north ? EXPANDED_DISTANCE : START_DISTANCE;
+    orbitYaw = START_YAW;
+    orbitPitch = north ? EXPANDED_PITCH : START_PITCH;
+    desiredDistance = north ? EXPANDED_DISTANCE : START_DISTANCE;
   }
 
   function setView(next: View, id = followed) {
@@ -372,7 +380,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function attachAgent(id: AgentId, asset: GLTF, junction: AgentStart) {
     try {
       const from = placeAt(junction);
-      const visits: Visits = { plaza: 0, market: 0, governance: 0, registry: 0, works: 0, forum: 0, pier: 0, center: 0 };
+      const visits: Visits = {
+        plaza: 0, market: 0, governance: 0, registry: 0, works: 0, forum: 0, pier: 0, center: 0, residence: 0,
+      };
       visits[from] = 1;
       const choice = navigation.choose(id, junction, visits);
       if (!choice) throw new Error('No reachable observation destination');
@@ -514,11 +524,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const forumFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(forumEntrance), 3, 20);
       const pierFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(pierEntrance), 4, 23);
       const centerFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(centerEntrance), 4, 17);
-      const entranceFrame = Math.max(registryFrame, worksFrame, forumFrame, pierFrame, centerFrame);
+      const residenceFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(residenceEntrance), 4, 21);
+      const entranceFrame = Math.max(registryFrame, worksFrame, forumFrame, pierFrame, centerFrame, residenceFrame);
       aim.y += 0.58 * entranceFrame;
-      aim.y += 1.45 * centerFrame;
+      aim.y += 1.45 * centerFrame + 1.08 * residenceFrame;
       aim.x -= 1.1 * centerFrame;
-      aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame;
+      aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame - 1.2 * residenceFrame;
       const frameGuest = followed === '01' && greeting.active ? 1 : 0;
       greetingFraming = tween ? THREE.MathUtils.damp(greetingFraming, frameGuest, 7, dt) : frameGuest;
       if (followed === '01' && marketGuest) {
@@ -527,7 +538,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         aim.z = THREE.MathUtils.lerp(aim.z, guest.z, greetingFraming * 0.5);
       }
       const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
-      const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming) + 2.2 * entranceFrame + 1.8 * forumFrame + 3.3 * centerFrame;
+      const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming)
+        + 2.2 * entranceFrame + 1.8 * forumFrame + 3.3 * centerFrame + 3.3 * residenceFrame;
       // Frame the shop from the street side as the Agent passes the entrance tree.
       const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
       const northSide = 1 - THREE.MathUtils.smoothstep(feet.z, -22, 18);
@@ -536,13 +548,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const landmarkYaw = THREE.MathUtils.lerp(registryYaw, -2.76, worksFrame);
       const forumYaw = THREE.MathUtils.lerp(landmarkYaw, -2.85, forumFrame);
       const pierYaw = THREE.MathUtils.lerp(forumYaw, 0.64, pierFrame);
-      const yaw = followYaw + THREE.MathUtils.lerp(pierYaw, 1.13, centerFrame);
+      const centerYaw = THREE.MathUtils.lerp(pierYaw, 1.13, centerFrame);
+      const yaw = followYaw + THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
       const northCrossing = THREE.MathUtils.smoothstep(feet.z, -82, -74)
         * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
-      const pitch = Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame) - 0.12 * greetingFraming);
+      const pitch = Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
+        - 0.12 * greetingFraming - 0.07 * residenceFrame);
       camera.position.set(
         aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
         aim.y + distance * Math.sin(pitch),
@@ -553,9 +567,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       fog.near = seeingLake ? 177 : north || sideDistrictLoaded() ? 165 : 110;
       fog.far = seeingLake ? 510 : north || sideDistrictLoaded() ? 275 : 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
-      const target = mode === 'research' && districts.research.asset ? researchFocus
-        : mode === 'shore' && districts.shore.asset ? shoreFocus
-        : mode === 'east' && districts.east.asset ? eastFocus : mode === 'west' && districts.west.asset ? westFocus : focus;
+      const target = mode !== 'overview' && mode !== 'follow' && districts[mode].asset ? districtFocus[mode] : focus;
       if (tween) viewFocus.lerp(target, 1 - Math.exp(-8 * dt));
       else viewFocus.copy(target);
       const distance = orbitDistance * (camera.aspect < 0.8 ? 1.09 : 1);
@@ -599,6 +611,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (playing && researcher?.destination === 'governance' && researcher.patrol.progress >= 50 && districts.shore.status === 'idle') {
         loadDistrict('shore', false);
       }
+      if (playing && districts.residential.status === 'idle' && [...agents.values()].some(
+        (agent) => agent.destination === 'registry' && agent.patrol.progress >= 42,
+      )) loadDistrict('residential', false);
       for (const kind of LANDMARK_DETAILS) {
         if (landmarkEntrances[kind].distanceTo(camera.position) < 38) {
           loadDetail(kind);
@@ -712,26 +727,31 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }).catch(() => {});
   }
 
-  function loadDistrict(side: District, interactive: boolean) {
+  function loadDistrict(side: District, interactive: boolean): Promise<void> | undefined {
     const district = districts[side];
-    if (!model || ended || contextLost || district.status === 'ready' || district.status === 'loading') return;
+    if (district.pending || !model || ended || contextLost || district.status === 'ready') return district.pending;
     district.status = 'loading';
     callbacks.district(side, district.status);
     const [routeFile, meshFile] = DISTRICT_FILES[side];
     const priority = interactive ? 'auto' : 'low';
     const needsGovernance = side === 'shore' || side === 'research';
-    Promise.all([
+    const dependency = side === 'residential'
+      ? Promise.all([loadDistrict('east', interactive), loadNorth(interactive)])
+      : needsGovernance ? loadNorth(interactive) : undefined;
+    district.pending = Promise.all([
       request(routeFile, priority).then((response) => response.json() as Promise<EastRoutes | Connection>),
       request(meshFile, priority).then((response) => response.arrayBuffer()),
-      needsGovernance ? loadNorth(interactive) : undefined,
+      dependency,
     ]).then(async ([layout, bytes]) => {
       if (ended || contextLost) return;
       if (needsGovernance && !north) throw new Error('The connection requires the governance district');
+      if (side === 'residential' && !districts.east.asset) throw new Error('The connection requires the east district');
       const { scene: asset } = await loader.parseAsync(bytes, ASSET_PATH);
       if (ended || contextLost) { disposeModel(asset); return; }
       try {
         if (side === 'east') navigation.connectEast(layout as EastRoutes);
         else if (side === 'west') navigation.connect('plaza', 'forum', layout as Connection);
+        else if (side === 'residential') navigation.connect('registry', 'residence', layout as Connection);
         else navigation.connect('governance', side === 'shore' ? 'pier' : 'center', layout as Connection);
       } catch (error) {
         disposeModel(asset);
@@ -752,11 +772,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (side === 'research') registerProxies(asset, ['center']);
       registerRetail(asset);
       const entrances = side === 'east' ? Object.values(eastEntrances)
-        : [side === 'west' ? forumEntrance : side === 'shore' ? pierEntrance : centerEntrance];
+        : [side === 'west' ? forumEntrance : side === 'shore' ? pierEntrance : side === 'research' ? centerEntrance : residenceEntrance];
       for (const entrance of entrances) {
-        const lamp = new THREE.PointLight('#ffd08b', side === 'research' ? 22 : 65, 14, 2);
+        const lamp = new THREE.PointLight('#ffd08b', side === 'research' ? 22 : side === 'residential' ? 30 : 65, 14, 2);
         lamp.position.copy(entrance);
         if (side === 'research') lamp.position.set(-88.9, 1.9, -64.4);
+        else if (side === 'residential') lamp.position.set(95.3, 2.65, -56.4);
         else lamp.position.y = 3.5;
         scene.add(lamp);
       }
@@ -771,7 +792,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (ended || contextLost) return;
       district.status = 'unavailable';
       callbacks.district(side, district.status);
+    }).finally(() => {
+      district.pending = undefined;
     });
+    return district.pending;
   }
 
   function loadNorth(interactive = false) {

@@ -15,8 +15,21 @@ from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from build_civrum_lakeside import material, shader
+from build_civrum_world import Geometry, circle
 from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
+from civrum_lakeside_blocks import (
+    AMBER,
+    BASALT,
+    GLASS,
+    GOLD,
+    LEAF,
+    LIGHT,
+    METAL,
+    PALETTE,
+    STONE,
+    WOOD,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "apps/web/public/nexciv-walk"
@@ -39,6 +52,7 @@ RESEARCH_CROSSING_Y = (82.25, 85)
 RESEARCH_CROSSING_STRIPES = WEST_CROSSING_STRIPES
 AGENT_CENTER = "HERO_02_Agent_Center"
 AGENT_CENTER_ANCHOR = (-95, 65, 0.172)
+RESIDENCE = "CIVRUM_PH_RESIDENTIAL_HOUSE"
 WAYPOINTS = (
     (0, -21.4),
     (2.3, -29.4),
@@ -125,6 +139,14 @@ RESEARCH_ALTERNATE = (
     (-2.5, 77.5), *RESEARCH_APPROACH, (-39, 85.6), (-57.18, 83.2),
     (-72.68, 83.2), (-76, 79.5), (-89, 67), (-89.65, 65.86),
 )
+RESIDENCE_WAYPOINTS = (
+    REGISTRY_WAYPOINTS[-1], (90.52, 13.9), (90.52, 27.7), (93.64, 35),
+    (96.25, 41.8), (96.25, 47.8), (95.7, 55.15),
+)
+RESIDENCE_ALTERNATE = (
+    REGISTRY_ALTERNATE[-1], (89.62, 14.51), (89.62, 27.7), (92.72, 35),
+    (95.05, 41.8), (95.05, 47.8), (94.4, 55.15),
+)
 EAST_HEROES = {
     "HERO_03_Citizen_Registration": "registry",
     "HERO_04_Public_Construction": "works",
@@ -175,6 +197,7 @@ CHUNKS = {
     "shore": "north-lakeshore.glb",
     "research": "northwest-research-district.glb",
     "center": "research-agent-center-detail.glb",
+    "residential": "northeast-garden-residences.glb",
 }
 SHORE_LAYER_NAMES = {
     "01 | Terrain and shore", "02 | Lake", "03 | Promenade and piers", "04 | Shore trees", "Marina boats",
@@ -200,13 +223,17 @@ def in_slice(obj, matrix, area):
         return not (base or governance) and top_y > 116 and low_y < 164 and top_x > -153 and low_x < 153
     if area == "research":
         return not (base or governance) and low_x < WEST and top_x > -152 and low_y >= 15 and top_y <= 116
+    if area == "residential":
+        if obj.name.startswith(("CIVRUM_LOT_RESIDENTIAL", "CIVRUM_LOT_PAINT_RESIDENTIAL")):
+            return True
+        return not (base or governance) and top_x > EAST and low_x < 153 and low_y >= 44 and top_y <= 116
     return governance if area == "governance" else base
 
 
 def world_geometry(scene, graph, area):
     layers = bpy.data.collections
     named_layers = LAYERS.copy()
-    if area in {"governance", "east", "west", "research"}:
+    if area in {"governance", "east", "west", "research", "residential"}:
         named_layers.add("05_Street_Assets")
     if area in {"governance", "east", "research"}:
         named_layers.add("03_Hero_Landmarks")
@@ -216,7 +243,10 @@ def world_geometry(scene, graph, area):
         named_layers.update(SHORE_LAYER_NAMES)
         named_layers.update(("05_Street_Assets", "08 | Lakeside tower", "20 | NEXCIV Waterfront Tower"))
     candidates = {ob for name in named_layers for ob in layers[name].objects if ob.name in scene.objects}
-    lot_types = {"governance": "GOVERNANCE", "east": "CONSTRUCTION", "west": "COMMUNITY", "research": "RESEARCH"}
+    lot_types = {
+        "governance": "GOVERNANCE", "east": "CONSTRUCTION", "west": "COMMUNITY",
+        "research": "RESEARCH", "residential": "RESIDENTIAL",
+    }
     lot = lot_types.get(area)
     for obj in sorted(candidates, key=lambda item: item.name):
         civic_paving = lot and obj.name.startswith((f"CIVRUM_LOT_{lot}", f"CIVRUM_LOT_PAINT_{lot}"))
@@ -259,7 +289,8 @@ def world_geometry(scene, graph, area):
             name = obj.name
             if name.startswith("CIVRUM_BANNER_DISTRICT_CODE"):
                 continue
-            if name.startswith(("CIVRUM_PH_", "CIVRUM_Streetfront_")) and "NEXUS" not in name:
+            keep_placeholder = area == "residential" and name == RESIDENCE
+            if name.startswith(("CIVRUM_PH_", "CIVRUM_Streetfront_")) and "NEXUS" not in name and not keep_placeholder:
                 continue
             if min(obj.dimensions.x, obj.dimensions.y) > 95:
                 continue
@@ -393,6 +424,93 @@ def trim_parkland(mesh, transform):
     bm.to_mesh(mesh)
     bm.free()
     mesh.update()
+
+
+def stage_residence(root, graph):
+    """Finish the residential shell at pedestrian and roof-garden scale."""
+    frontage = Geometry()
+    frontage.box(0, -7.34, 0.016, 7.8, 1.05, 0.13, STONE, 0.13)
+    frontage.box(0, -7.17, 0.14, 7.55, 0.9, 0.14, STONE, 0.12)
+    frontage.box(0, -7.04, 0.28, 6.6, 0.18, 2.5, BASALT, 0.07)
+    frontage.box(0, -7.162, 0.49, 2.88, 0.045, 2.12, GLASS)
+    for x in (-1.46, 0, 1.46):
+        frontage.box(x, -7.193, 0.46, 0.073, 0.081, 2.18, METAL)
+    for x in (-0.13, 0.13):
+        frontage.box(x, -7.245, 1.26, 0.042, 0.064, 0.41, GOLD)
+    frontage.box(0, -7.205, 2.58, 3.02, 0.061, 0.060, METAL)
+    for side in (-1, 1):
+        frontage.box(side * 2.39, -7.156, 0.61, 1.13, 0.035, 1.79, AMBER)
+        frontage.box(side * 2.99, -7.205, 0.56, 0.08, 0.073, 1.95, METAL)
+        frontage.box(side * 3.58, -8.09, 0.132, 0.20, 0.20, 3.10, METAL)
+        frontage.box(side * 2.52, -7.61, 3.11, 0.74, 0.11, 0.025, LIGHT)
+        frontage.box(side * 5.46, -7.127, 0.68, 2.58, 0.1, 1.82, GLASS)
+        frontage.box(side * 5.46, -7.199, 0.63, 0.08, 0.07, 1.96, METAL)
+        frontage.box(side * 5.46, -7.30, 0.55, 2.71, 0.41, 0.13, STONE)
+    frontage.box(0, -7.64, 3.12, 7.65, 1.55, 0.27, BASALT, 0.17)
+    frontage.box(0, -8.402, 3.32, 7.35, 0.031, 0.031, GOLD)
+    frontage.box(0, -8.423, 2.73, 4.3, 0.035, 0.53, BASALT, 0.012)
+    for level in range(3):
+        offset = 0.8 if level % 2 else -0.8
+        bottom = 3.12 + level * 3.4
+        for side in (-1, 1):
+            y = side * 7.59
+            for bay, x in enumerate((-8, -4, 0, 4, 8)):
+                x += offset
+                if (level * 3 + bay * 2 + side) % 7 in (0, 1):
+                    # A warm window inset is partially shaded by a lowered blind.
+                    frontage.box(x + 0.81, y, bottom + 0.19, 1.36, 0.045, 1.15, AMBER)
+                    frontage.box(x + 0.81, side * 7.625, bottom + 1.11, 1.41, 0.041, 0.43, GLASS)
+                for edge in (-1.63, 1.63):
+                    frontage.box(x + edge, y, bottom, 0.086, 0.09, 1.88, METAL)
+                frontage.box(x, side * 7.634, bottom + 1.25, 3.28, 0.027, 0.044, METAL)
+                frontage.box(x, y, bottom + 1.84, 3.32, 0.09, 0.085, BASALT)
+                frontage.box(x, side * 7.64, bottom - 0.04, 3.31, 0.29, 0.116, STONE)
+
+    roof = Geometry()
+    for y in (-5.25, 5.65):
+        for x in (-5.5, 0, 5.5):
+            roof.box(x, y, 13.69, 3.5, 0.78, 0.30, STONE, 0.14)
+            roof.box(x, y, 13.98, 3.25, 0.52, 0.03, LEAF, 0.11)
+            for dx in (-1.05, -0.35, 0.35, 1.05):
+                roof.loft(circle(0.14, 6, x + dx, y), circle(0.27, 6, x + dx, y, 0.26), 14.01, 14.19, LEAF)
+                roof.loft(circle(0.27, 6, x + dx, y, 0.26), circle(0.13, 6, x + dx, y), 14.19, 14.39, LEAF)
+    for x in (-4.1, 4.1):
+        roof.box(x, 0.8, 13.71, 2.8, 0.62, 0.38, METAL, 0.11)
+        roof.box(x, 0.8, 14.08, 2.94, 0.68, 0.12, WOOD, 0.10)
+
+    approach = Geometry()
+    for row in range(6):
+        for column in range(8):
+            x, y = (column - 3.5) * 0.97, -15.35 + row * 1.18
+            approach.box(x, y, 0.001, 0.955, 1.165, 0.013, STONE)
+    for name, geometry, tier in (
+        ("Garden residences entrance", frontage, "residence"),
+        ("Residence roof planters", roof, "residence"),
+        ("Residential forecourt pavers", approach, "paving"),
+    ):
+        asset = bpy.data.objects.new(name, geometry.mesh(name, PALETTE))
+        root.objects.link(asset)
+        asset.location = (95, 65, 0.172)
+        asset["previewTier"] = tier
+
+    lettering = bpy.data.curves.new("Garden residences title", "FONT")
+    lettering.body = "NEXCIV / GARDEN RESIDENCES"
+    lettering.align_x = "CENTER"
+    lettering.align_y = "CENTER"
+    lettering.size = 0.265
+    lettering.materials.append(bpy.data.materials["MAT_WARM_WHITE"])
+    label = bpy.data.objects.new("Residence title", lettering)
+    root.objects.link(label)
+    label.location = (95, 56.549, 3.17)
+    label.rotation_euler.x = math.pi / 2
+    bpy.context.view_layer.update()
+    mesh = bpy.data.meshes.new_from_object(label.evaluated_get(graph), depsgraph=graph)
+    sign = bpy.data.objects.new("Garden residences title", mesh)
+    root.objects.link(sign)
+    sign.matrix_world = label.matrix_world
+    sign["previewTier"] = "residence"
+    bpy.data.objects.remove(label, do_unlink=True)
+    bpy.data.curves.remove(lettering)
 
 
 def stage_assets(scene, graph, chunk):
@@ -531,7 +649,7 @@ def stage_assets(scene, graph, chunk):
             parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 14000))
         elif chunk == "shore" and len(mesh.polygons) > 20000:
             parts.append((asset, 30000 if name.startswith(GARDEN_RETAIL) else 12000))
-        elif chunk == "research" and len(mesh.polygons) > 55000:
+        elif chunk in {"research", "residential"} and len(mesh.polygons) > 55000:
             limit = 68500 if name == AGENT_CENTER else 30000 if name.startswith(GARDEN_RETAIL) else 15500
             parts.append((asset, limit))
         elif chunk == "governance" and len(mesh.polygons) > 10000:
@@ -556,7 +674,7 @@ def stage_assets(scene, graph, chunk):
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
             reduced[key].validate(clean_customdata=False)
-            if (chunk in {"street", "retail", "east", "west", "shore", "research"} and obj.name.startswith(GARDEN_RETAIL)) or (
+            if (chunk in {"street", "retail", "east", "west", "shore", "research", "residential"} and obj.name.startswith(GARDEN_RETAIL)) or (
                 chunk in {"east", "works"} and obj.name in EAST_HEROES
             ) or obj.name == AGENT_CENTER:
                 mesh = reduced[key]
@@ -564,6 +682,9 @@ def stage_assets(scene, graph, chunk):
                 mesh.set_sharp_from_angle(angle=math.radians(35))
             obj.modifiers.remove(modifier)
         obj.data = reduced[key]
+
+    if chunk == "residential":
+        stage_residence(root, graph)
 
     # Batch stable surfaces while keeping repeated meshes shared and both replacements independent.
     bpy.ops.object.select_all(action="DESELECT")
@@ -592,6 +713,7 @@ def stage_assets(scene, graph, chunk):
         "east": ((173, -40, -0.006), (78, 220, 1)),
         "west": ((-165, -40, -0.006), (78, 220, 1)),
         "research": ((-165, 91, -0.006), (78, 42, 1)),
+        "residential": ((173, 90.5, -0.006), (78, 41, 1)),
     }
     if chunk in terrain:
         location, scale = terrain[chunk]
@@ -691,6 +813,12 @@ def main():
             "points": sidewalk_route(scene, graph, RESEARCH_WAYPOINTS, clearance=0.22),
             "alternate": sidewalk_route(scene, graph, ((end_x, -end_z), *RESEARCH_ALTERNATE), clearance=0.22),
         }
+    residence_route = None
+    if args.chunk in {None, "residential"}:
+        residence_route = {
+            "points": sidewalk_route(scene, graph, RESIDENCE_WAYPOINTS, clearance=0.22),
+            "alternate": sidewalk_route(scene, graph, RESIDENCE_ALTERNATE, clearance=0.22),
+        }
     args.output.mkdir(parents=True, exist_ok=True)
     for chunk, filename in CHUNKS.items():
         if args.chunk and chunk != args.chunk:
@@ -734,6 +862,10 @@ def main():
     if research_route:
         (args.output / "research-route.json").write_text(
             json.dumps(research_route, separators=(",", ":")) + "\n", encoding="utf-8"
+        )
+    if residence_route:
+        (args.output / "residential-route.json").write_text(
+            json.dumps(residence_route, separators=(",", ":")) + "\n", encoding="utf-8"
         )
     print(f"PREVIEW PASS {len(route)} market and {len(north_route)} governance route samples", flush=True)
 
