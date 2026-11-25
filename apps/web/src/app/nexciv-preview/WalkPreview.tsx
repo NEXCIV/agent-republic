@@ -13,6 +13,7 @@ function activity(id: AgentId, status: AgentStatus) {
     loading: id === '03' ? '正在载入议会大厅街区' : '中央广场',
     outbound: `前往 ${DESTINATIONS[id]}`,
     arrived: `已到达 ${DESTINATIONS[id]}`,
+    greeting: '和 02 号打招呼',
     inbound: '返回中央广场',
     atNexus: '已返回中央广场',
     unavailable: 'Agent 暂未载入',

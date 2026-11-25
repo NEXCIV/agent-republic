@@ -3,12 +3,15 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type AgentPhase, type RoutePoint } from './agent';
+import { createMarketGreeting } from './marketGreeting';
 
 export type View = 'overview' | 'follow';
 export type AgentId = '01' | '03';
-export type AgentStatus = AgentPhase | 'loading' | 'unavailable';
+type Activity = AgentPhase | 'greeting';
+export type AgentStatus = Activity | 'loading' | 'unavailable';
 type RouteData = { points: RoutePoint[]; target: RoutePoint };
-type ActiveAgent = { asset: GLTF; patrol: ReturnType<typeof createAgentPatrol>; phase?: AgentPhase; progress: number };
+type Patrol = ReturnType<typeof createAgentPatrol>;
+type ActiveAgent = { asset: GLTF; patrol: Patrol; activity?: Activity; progress: number };
 type Callbacks = {
   ready: (elapsedMs: number) => void;
   fallback: () => void;
@@ -158,6 +161,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let actor: GLTF | undefined;
   let actorLoading = true;
   const agents = new Map<AgentId, ActiveAgent>();
+  const marketGreeting = createMarketGreeting();
+  let marketGuest: { asset: GLTF; patrol: Patrol } | undefined;
+  let marketGuestRequested = false;
+  let greetingFraming = 0;
   let followed: AgentId = '01';
   let route: RouteData | undefined;
   let updateDetail: ((level: number) => void) | undefined;
@@ -196,6 +203,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     followPitch = followed === '03' ? 0.28 : FOLLOW_PITCH;
     followDistance = followed === '03' ? 7.4 : FOLLOW_DISTANCE;
     followHeight = undefined;
+    greetingFraming = 0;
   }
 
   function setView(next: View, id = followed) {
@@ -236,13 +244,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       measuredAt = now;
     }
 
+    const primary = agents.get('01')?.patrol;
+    const greeting = marketGreeting(playing ? dt : 0, primary, marketGuest?.patrol);
+    if (playing) marketGuest?.patrol.advance(dt, greeting.visitor);
     for (const [id, agent] of agents) {
       const { patrol } = agent;
-      if (playing) patrol.advance(dt);
-      if (agent.phase !== patrol.phase || agent.progress !== patrol.progress) {
-        agent.phase = patrol.phase;
+      if (playing) patrol.advance(dt, id === '01' ? greeting.resident : undefined);
+      const activity = id === '01' && greeting.active ? 'greeting' : patrol.phase;
+      if (agent.activity !== activity || agent.progress !== patrol.progress) {
+        agent.activity = activity;
         agent.progress = patrol.progress;
-        callbacks.agent(id, agent.phase, agent.progress);
+        callbacks.agent(id, activity, agent.progress);
       }
     }
 
@@ -253,13 +265,23 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const feet = patrol.root.position;
       followHeight = followHeight === undefined || !tween ? feet.y : THREE.MathUtils.damp(followHeight, feet.y, 12, dt);
       aim.set(feet.x, followHeight + 0.94, feet.z);
+      const frameGuest = followed === '01' && greeting.active ? 1 : 0;
+      greetingFraming = tween ? THREE.MathUtils.damp(greetingFraming, frameGuest, 7, dt) : frameGuest;
+      if (followed === '01' && marketGuest) {
+        const guest = marketGuest.patrol.root.position;
+        aim.x = THREE.MathUtils.lerp(aim.x, guest.x, greetingFraming * 0.5);
+        aim.z = THREE.MathUtils.lerp(aim.z, guest.z, greetingFraming * 0.5);
+      }
+      const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
+      const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming);
       // Frame the shop from the street side as the Agent passes the entrance tree.
       const streetSide = followed === '01' ? THREE.MathUtils.smoothstep(feet.z, 47, 56) : 0;
-      const yaw = followYaw + streetSide * 1.14;
+      const yaw = followYaw + streetSide * 1.14 + 0.32 * greetingFraming;
+      const pitch = followPitch - 0.12 * greetingFraming;
       camera.position.set(
-        aim.x + followDistance * Math.sin(yaw) * Math.cos(followPitch),
-        aim.y + followDistance * Math.sin(followPitch),
-        aim.z + followDistance * Math.cos(yaw) * Math.cos(followPitch),
+        aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
+        aim.y + distance * Math.sin(pitch),
+        aim.z + distance * Math.cos(yaw) * Math.cos(pitch),
       );
       camera.lookAt(aim);
       updateDetail?.(1);
@@ -277,13 +299,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       updateDetail?.(1 - THREE.MathUtils.smoothstep(orbitDistance, 33, 71));
     }
     renderer.render(scene, camera);
-    const primary = agents.get('01')?.patrol;
     const showStreetDetails = (mode === 'follow' && followed === '01' && patrol) || orbitDistance < 59;
     const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !primary || primary.progress > 0);
     if (!document.hidden && readyForDetails) {
       const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (primary && marketEntrance.distanceTo(primary.root.position) < 29);
       if (nearMarket) {
         loadDetail('market');
+        loadMarketGuest();
       }
       if (showStreetDetails) loadDetail('street');
       if (playing && (!primary || primary.progress >= 10)) loadNorth();
@@ -411,6 +433,26 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     });
   }
 
+  function loadMarketGuest() {
+    if (!route || marketGuestRequested || ended || contextLost) return;
+    marketGuestRequested = true;
+    Promise.all([
+      request('market-greeting.json', 'low').then((response) => response.json() as Promise<{ points: RoutePoint[] }>),
+      request('agent-02.glb', 'low').then((response) => response.arrayBuffer()),
+    ]).then(async ([layout, bytes]) => {
+      if (ended || contextLost) return;
+      const asset = await loader.parseAsync(bytes, ASSET_PATH);
+      if (ended || contextLost) { disposeModel(asset.scene); return; }
+      try {
+        const patrol = createAgentPatrol(asset, layout.points, [marketEntrance.x, marketEntrance.z]);
+        marketGuest = { asset, patrol };
+        scene.add(patrol.root);
+      } catch {
+        disposeModel(asset.scene);
+      }
+    }).catch(() => {});
+  }
+
   request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
     if (ended || contextLost) return;
     const result = await loader.parseAsync(bytes, ASSET_PATH);
@@ -468,6 +510,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       for (const agent of agents.values()) {
         agent.patrol.dispose();
         disposeModel(agent.asset.scene);
+      }
+      if (marketGuest) {
+        marketGuest.patrol.dispose();
+        disposeModel(marketGuest.asset.scene);
       }
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);

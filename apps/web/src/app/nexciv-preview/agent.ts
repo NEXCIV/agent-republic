@@ -3,10 +3,29 @@ import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 
 export type RoutePoint = [number, number, number];
 export type AgentPhase = 'outbound' | 'arrived' | 'inbound' | 'atNexus';
+export type PatrolCue = {
+  hold?: 'start' | 'end';
+  face?: THREE.Vector3;
+  gesture?: 'wave' | 'nod';
+};
 
 const SPEED = 1.25;
 const STOP_SECONDS = 4;
 const UP = new THREE.Vector3(0, 1, 0);
+const PITCH_AXIS = new THREE.Vector3(1, 0, 0);
+
+function createNod(asset: GLTF, mixer: THREE.AnimationMixer) {
+  const head = asset.scene.getObjectByName('Head');
+  if (!head) return undefined;
+  const angles = [0, 0.19, 0.13, 0];
+  const times = [0, 0.24, 0.40, 0.76];
+  const rotation = new THREE.Quaternion();
+  const track = new THREE.QuaternionKeyframeTrack(`${head.uuid}.quaternion`, times,
+    angles.flatMap((angle) => rotation.setFromAxisAngle(PITCH_AXIS, angle).toArray()),
+  );
+  const clip = new THREE.AnimationClip('Acknowledge', times.at(-1)!, [track], THREE.AdditiveAnimationBlendMode);
+  return mixer.clipAction(clip).setLoop(THREE.LoopOnce, 1);
+}
 
 export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination: [number, number]) {
   let length = 0;
@@ -40,6 +59,11 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination
   const idle = mixer.clipAction(idleClip).play();
   const walk = mixer.clipAction(walkClip);
   walk.setEffectiveTimeScale(SPEED * walkClip.duration / stride);
+  const waveClip = THREE.AnimationClip.findByName(asset.animations, 'Wave');
+  const wave = waveClip ? mixer.clipAction(waveClip).setLoop(THREE.LoopOnce, 1) : undefined;
+  if (wave) wave.clampWhenFinished = true;
+  let nod: THREE.AnimationAction | undefined;
+  let nodding = false;
   let action = idle;
   let distance = 0;
   let direction = 1;
@@ -58,24 +82,31 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination
     return target.lerpVectors(from.position, to.position, (distance - from.distance) / (to.distance - from.distance));
   }
 
-  function updatePose(dt: number) {
+  function updatePose(dt: number, cue?: PatrolCue, heldAtStart = false) {
     positionAt(distance, root.position);
     const tangent = positionAt(distance + 0.45, ahead).sub(positionAt(distance - 0.45, behind));
     const alongRoute = Math.atan2(tangent.x * direction, tangent.z * direction);
     let yaw = alongRoute;
     if (phase === 'arrived') yaw = Math.atan2(destination[0] - root.position.x, destination[1] - root.position.z);
     if (dwell > STOP_SECONDS - 1.1) yaw = alongRoute + Math.PI;
+    if (cue?.face) yaw = Math.atan2(cue.face.x - root.position.x, cue.face.z - root.position.z);
     heading.setFromAxisAngle(UP, yaw);
     if (dt > 0) root.quaternion.rotateTowards(heading, dt * 3.2);
     else root.quaternion.copy(heading);
 
-    const moving = phase === 'outbound' || phase === 'inbound';
-    const next = moving ? walk : idle;
+    const moving = !heldAtStart && (phase === 'outbound' || phase === 'inbound');
+    const next = moving ? walk : (cue?.gesture === 'wave' && wave) || idle;
     if (dt > 0 && next !== action) {
       next.reset().setEffectiveWeight(1).play();
       next.crossFadeFrom(action, 0.18, false);
       action = next;
     }
+    const shouldNod = cue?.gesture === 'nod';
+    if (shouldNod && !nodding) {
+      nod ??= createNod(asset, mixer);
+      nod?.reset().play();
+    }
+    nodding = shouldNod;
     mixer.update(dt);
   }
 
@@ -84,21 +115,23 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], destination
     root,
     get phase() { return phase; },
     get progress() { return Math.round(100 * distance / length); },
-    advance(dt: number) {
+    advance(dt: number, cue?: PatrolCue) {
       if (dt <= 0) return;
+      const heldAtStart = cue?.hold === 'start' && distance === 0;
+      const heldAtEnd = cue?.hold === 'end' && phase === 'arrived';
       if (phase === 'arrived' || phase === 'atNexus') {
         dwell += dt;
-        if (dwell >= STOP_SECONDS) {
+        if (dwell >= STOP_SECONDS && !heldAtStart && !heldAtEnd) {
           dwell = 0;
           direction *= -1;
           phase = direction > 0 ? 'outbound' : 'inbound';
         }
-      } else {
+      } else if (!heldAtStart) {
         distance = THREE.MathUtils.clamp(distance + direction * SPEED * dt, 0, length);
         if (distance === length) phase = 'arrived';
         if (distance === 0) phase = 'atNexus';
       }
-      updatePose(dt);
+      updatePose(dt, cue, heldAtStart);
     },
     dispose() {
       mixer.stopAllAction();

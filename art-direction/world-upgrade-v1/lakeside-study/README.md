@@ -12,7 +12,11 @@ pnpm --filter @agent-republic/web dev --port 3137
 
 北线约 76.3 米，包含 157 个地面采样点。北区以约 4.90 MB 的独立 GLB 接在已有路网上。议会大厅前的 12 道斑马线划入原沥青网格。默认在 01 号起步后下载北区与 03 号模型，点击「跟随 03」也可以提前加载。北区请求失败时仍可继续观察 01 号。[北线出发、过街及到场截图](renders/NEXCIV_Web_Governance_Preview.jpg)。
 
-网页版复用两个角色的网格、骨架、`Walk` 和 `Idle`，按各自步幅同步位移与步频。路线标记为演示行为。[01 号角色库](../../tripo/citizen-01-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/) · [南线跟拍、过街和到店截图](renders/NEXCIV_Web_Walk_Preview.jpg)。
+Corner Market 门前增加了约 4.4 秒的问候。01 号接近时，02 号工人沿门前人行道走 4.25 米，等候在离 01 号停点 1.5 米的位置。两人停步转向彼此，01 号挥手，02 号点头，然后各自折返。跟随 01 时，镜头会同时框住两人。01 号复用 `Wave`，02 号在待机上叠加一次头部点头。跟拍及暂停可以观察动作细节。[问候实测截图](renders/NEXCIV_Web_Market_Greeting.jpg)。
+
+02 号角色包约 0.86 MB，在镜头或 01 号接近商铺时下载。角色包请求失败时，01 号正常停留与折返。相遇属于网页演示行为。已在 Edge 验证出发、问候、暂停恢复和离开，并在触屏模拟窗口验证双人跟拍。
+
+网页版复用三个角色的网格、骨架、`Walk` 和 `Idle`，按各自步幅同步位移与步频。路线标记为演示行为。[01 号角色库](../../tripo/citizen-01-v1/motion/) · [02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/) · [南线跟拍、过街和到店截图](renders/NEXCIV_Web_Walk_Preview.jpg)。
 
 南线分块基线在本机 Edge、390 × 844 模拟触屏、8 Mbps 和 80 ms 延迟下测量，各使用两次冷缓存导航。计时从打开页面到 01 号路线进度首次大于零。
 
@@ -31,7 +35,7 @@ pnpm --filter @agent-republic/web dev --port 3137
 blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/export_nexciv_walk_preview.py
 ```
 
-只需重新导出北区时，在命令末尾加 `-- --chunk governance`。03 号模型直接复用角色库的 `CIVRUM_Researcher_03.glb`，复制到 `apps/web/public/nexciv-walk/agent-03.glb`。
+只需重新导出北区时，在命令末尾加 `-- --chunk governance`。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
 
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 

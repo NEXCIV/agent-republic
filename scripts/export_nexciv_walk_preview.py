@@ -31,8 +31,8 @@ WAYPOINTS = (
     (10.52, -37.57),
     (10.6, -39.7),
     (6.3, -43.7),
-    (6.3, -57.85),
-    (11.45, -57.85),
+    (6.3, -58.15),
+    (11.45, -58.15),
 )
 GOVERNANCE_WAYPOINTS = (
     (8.0, 19.7),
@@ -47,6 +47,7 @@ GOVERNANCE_WAYPOINTS = (
     (0.0, 73.6),
     (0.0, 81.10),
 )
+MARKET_GREETING_WAYPOINTS = ((7.2, -59.65), (11.45, -59.65))
 LAYERS = {
     "ROADS",
     "PLAZA",
@@ -378,6 +379,9 @@ def main():
     graph = bpy.context.evaluated_depsgraph_get()
     route = sidewalk_route(scene, graph, WAYPOINTS)
     north_route = sidewalk_route(scene, graph, GOVERNANCE_WAYPOINTS, clearance=0.23)
+    market_guest = sidewalk_route(scene, graph, MARKET_GREETING_WAYPOINTS, clearance=0.32)
+    if any(point[1] < 0.15 for point in market_guest):
+        raise RuntimeError("The Market greeting approach must stay on the sidewalk")
     args.output.mkdir(parents=True, exist_ok=True)
     for chunk, filename in CHUNKS.items():
         if args.chunk and chunk != args.chunk:
@@ -396,6 +400,9 @@ def main():
     (args.output / "governance-route.json").write_text(
         json.dumps({"points": north_route, "target": [0, 0, -15]}, separators=(",", ":")) + "\n",
         encoding="utf-8",
+    )
+    (args.output / "market-greeting.json").write_text(
+        json.dumps({"points": market_guest}, separators=(",", ":")) + "\n", encoding="utf-8"
     )
     print(f"PREVIEW PASS {len(route)} market and {len(north_route)} governance route samples", flush=True)
 
