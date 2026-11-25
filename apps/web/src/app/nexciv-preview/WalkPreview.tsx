@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createWalk, type AgentId, type AgentReport, type EastStatus, type View, type WalkController } from './walk';
+import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type View, type WalkController } from './walk';
 import type { Place } from './navigation';
 import styles from './preview.module.css';
 
@@ -11,12 +11,11 @@ const PLACES: Record<Place, string> = {
   governance: '议会大厅',
   registry: '公民注册中心',
   works: '公共建设中心',
+  forum: '社区剧场',
 };
-const EAST_LABEL: Record<EastStatus, string> = {
-  idle: '公民注册中心与公共建设中心',
-  loading: '正在载入东区',
-  ready: '公民注册中心与公共建设中心',
-  unavailable: '东区载入失败，点击东区重试',
+const DISTRICTS = {
+  east: { button: '东区', title: '东部街区', places: '公民注册中心与公共建设中心' },
+  west: { button: '西区', title: '西部街区', places: '社区剧场与展亭' },
 };
 const STARTING: AgentReport = { status: 'loading', progress: 0 };
 
@@ -36,7 +35,7 @@ export function WalkPreview() {
   const world = useRef<WalkController | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');
-  const [eastStatus, setEastStatus] = useState<EastStatus>('idle');
+  const [districts, setDistricts] = useState<Record<District, DistrictStatus>>({ east: 'idle', west: 'idle' });
   const [selected, setSelected] = useState<AgentId>('01');
   const [playing, setPlaying] = useState(true);
   const [reports, setReports] = useState<Record<AgentId, AgentReport>>({ '01': STARTING, '03': STARTING });
@@ -55,7 +54,7 @@ export function WalkPreview() {
         ready: (elapsed) => { setReadyTime(elapsed); setState('ready'); },
         fallback: () => setState('fallback'),
         agent: (id, report) => setReports((previous) => ({ ...previous, [id]: report })),
-        east: setEastStatus,
+        district: (side, status) => setDistricts((previous) => ({ ...previous, [side]: status })),
         fps: setFps,
       });
       world.current = controller;
@@ -77,6 +76,13 @@ export function WalkPreview() {
   const destination = agent.destination ? PLACES[agent.destination] : '';
   const agentReady = sceneReady && agent.status !== 'loading' && agent.status !== 'unavailable';
   const playbackReady = sceneReady && Object.values(reports).some(({ status }) => status !== 'loading' && status !== 'unavailable');
+  const district = view === 'east' || view === 'west' ? { ...DISTRICTS[view], status: districts[view] } : undefined;
+  const districtMessage = district && {
+    idle: district.places,
+    loading: `正在载入${district.button}`,
+    ready: district.places,
+    unavailable: `${district.button}载入失败，点击${district.button}重试`,
+  }[district.status];
 
   return (
     <div className={styles.page} lang="zh-CN" data-preview="nexciv-walk">
@@ -93,8 +99,8 @@ export function WalkPreview() {
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{view === 'east' ? '东部街区' : agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区'}</small>
-          <strong role="status">{view === 'east' ? EAST_LABEL[eastStatus] : sceneReady ? activity(selected, agent) : '中央广场'}</strong>
+          <small>{district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
+          <strong role="status">{districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
         </div>
         {state === 'fallback' && <p className={styles.fallback}>3D 场景暂时无法加载。下方可查看路线的两处实景。</p>}
       </section>
@@ -103,6 +109,7 @@ export function WalkPreview() {
           <div className={styles.switcher} aria-label="视角">
             <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>俯视</button>
             <button disabled={!sceneReady} aria-pressed={view === 'east'} onClick={() => select('east')}>东区</button>
+            <button disabled={!sceneReady} aria-pressed={view === 'west'} onClick={() => select('west')}>西区</button>
             <button disabled={!sceneReady || reports['01'].status === 'unavailable'} aria-label="跟随 Agent 01" aria-pressed={view === 'follow' && selected === '01'} onClick={() => select('follow', '01')}>跟随 01</button>
             <button disabled={!sceneReady || reports['03'].status === 'unavailable'} aria-label="跟随 Agent 03" aria-pressed={view === 'follow' && selected === '03'} onClick={() => select('follow', '03')}>跟随 03</button>
           </div>

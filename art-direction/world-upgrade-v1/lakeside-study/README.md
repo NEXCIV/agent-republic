@@ -2,9 +2,13 @@
 
 ## 网页街区观察
 
-启动 Web 应用后打开 [街区观察](http://127.0.0.1:3137/nexciv-preview)。01 号 Agent 从 Nexus 广场南侧出发，03 号研究员从广场北侧出发。可以在「俯视」「东区」「跟随 01」与「跟随 03」之间切换，拖动并缩放镜头。按「暂停动画」可观察定格姿势。系统减少动态效果时默认从静止俯视开始，可以主动播放。
+启动 Web 应用后打开 [街区观察](http://127.0.0.1:3137/nexciv-preview)。01 号 Agent 从 Nexus 广场南侧出发，03 号研究员从广场北侧出发。可以在「俯视」「东区」「西区」「跟随 01」与「跟随 03」之间切换，拖动并缩放镜头。按「暂停动画」可观察定格姿势。系统减少动态效果时默认从静止俯视开始，可以主动播放。
 
-五个可到访地点是 Nexus 中央广场、Corner Market、议会大厅、公民注册中心和公共建设中心。01、03 到达后各自从已加载且可达的地点重新选择，按角色偏好、访问次数和路程评分。路径由双向路段拼接，两名 Agent 使用独立的步行轨迹。北侧或东侧的资源加载失败时，已连通的路线仍可通行。
+六个可到访地点是 Nexus 中央广场、Corner Market、议会大厅、公民注册中心、公共建设中心和社区剧场。01、03 到达后各自从已加载且可达的地点重新选择，按角色偏好、访问次数和路程评分。路径由双向路段拼接，两名 Agent 使用独立的步行轨迹。分区资源加载失败时，已连通的路线仍可通行。
+
+西区底包为 11.76 MB，沿用湖畔母版的露天剧场、展亭、建筑模型展品、景观水池和临街商铺。点击「西区」立即加载，正常播放时在东区请求结束、01 号首次行程过半后后台加载。由 Nexus 至剧场入口的两条轨迹分别约 139 米和 141 米。西侧过街线写入车道路面网格。Blender 回导确认 578 个采样点均有地面支撑，高度最大偏差约 1.5 厘米。
+
+Edge 验证了 01 号自行从 Corner Market 走到剧场入口，以及西区加载后切换东区。390 × 844 触屏模拟通过西区失败重试和减少动态效果检查。[西区俯视与到访截图](renders/NEXCIV_Web_West_District.jpg)。
 
 东区复用湖畔母版的铺装、景观水池、临街商铺、地标入口和施工区。两个入口间约 97 米，过街标线直接写入车道路面网格。将网页 GLB 导回 Blender 后，两条轨迹的 825 个新增采样点全部命中地面，与母版的支撑高度最大相差约 1.5 厘米。
 
@@ -49,7 +53,7 @@ Corner Market 门前保留约 4.4 秒的问候。01 号接近时，02 号工人�
 blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/export_nexciv_walk_preview.py
 ```
 
-可在命令末尾加 `-- --chunk governance` 仅导出北区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
+可在命令末尾加 `-- --chunk governance` 仅导出北区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。西区使用 `-- --chunk west`。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
 
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 
