@@ -3,6 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
+import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { createFishingGear, FISHING_SPOT } from './fishing';
@@ -330,13 +331,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const viewFocus = focus.clone();
   const aim = new THREE.Vector3();
   const marketEntrance = new THREE.Vector3();
-  const counter = new THREE.Vector3(11.45, 0.184, 58.15);
-  const coworker = new THREE.Vector3(11.45, 0.18, 59.65);
-  const seat = new THREE.Vector3(7.2, 0.18, 59.65);
-  const seatedHips = seat.clone().add(new THREE.Vector3(0, 0, 0.16));
-  const seatFront = seat.clone().add(new THREE.Vector3(0, 0, 0.65));
-  const counterFacing = counter.clone().add(new THREE.Vector3(1, 0, 0));
-  const seatFacing = seatFront.clone().add(new THREE.Vector3(0, 0, 1));
+  const counter = new THREE.Vector3(...CAFE_COUNTER);
+  const coworker = new THREE.Vector3(...CAFE_HOST);
+  const seat = new THREE.Vector3(...CAFE_BENCH);
+  const seatedHips = seat.clone().add(new THREE.Vector3(0, 0, -0.16));
+  const seatFront = seat.clone().add(new THREE.Vector3(0, 0, -0.65));
+  const counterFacing = new THREE.Vector3(...CAFE_STALL);
+  const seatFacing = seatFront.clone().add(new THREE.Vector3(0, 0, -1));
   const observedPosition = new THREE.Vector3();
   const cafeProps = new THREE.Group();
   let cafeSnapshot: CafeSnapshot | null = null;
@@ -736,7 +737,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const pierYaw = THREE.MathUtils.lerp(forumYaw, 0.64, pierFrame);
       const centerYaw = THREE.MathUtils.lerp(pierYaw, 1.13, centerFrame);
       const closeCafe = cafeMode && !travelling && !byPier;
-      const yaw = followYaw + (byPier && !travelling ? observer ? 0.10 : 0.49 : closeCafe ? -0.64 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame));
+      const yaw = followYaw + (byPier && !travelling ? observer ? 0.10 : 0.49 : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame));
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
@@ -978,7 +979,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (side === 'shore' && cafeMode) {
           const path = navigation.path('01', 'market', 'pier');
           if (!path) throw new Error('No connected route to the fishing spot');
-          pierRoute = path.points;
+          pierRoute = joinCafeToPier(path.points);
         }
       } catch (error) {
         disposeModel(asset);
@@ -1115,16 +1116,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     street.add(model);
     if (cafeMode) {
       street.add(cafeProps);
+      cafeProps.add(createCafePaving());
       if (fishingGear) cafeProps.add(fishingGear.group);
       for (const file of ['cafe-bench.glb', 'coffee-stall.glb']) {
         request(file).then((response) => response.arrayBuffer())
         .then((bytes) => loader.parseAsync(bytes, ASSET_PATH)).then(({ scene: prop }) => {
           if (ended || contextLost) { disposeModel(prop); return; }
+          prop.rotation.y = Math.PI;
           if (file === 'cafe-bench.glb') prop.position.copy(seat);
           else {
             prop.scale.setScalar(2.75 / 97.84);
-            prop.rotation.y = -Math.PI / 2;
-            prop.position.set(13.1, counter.y, counter.z);
+            prop.position.set(...CAFE_STALL);
             prepareEnvironment(prop, streetAnisotropy);
           }
           cafeProps.add(prop);
