@@ -115,6 +115,8 @@ blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/
 
 可在命令末尾加 `-- --chunk governance` 仅导出议会大厅街区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。西区使用 `-- --chunk west`，北岸湖畔使用 `-- --chunk shore`，研究区底包和近景使用 `-- --chunk research` 和 `-- --chunk center`，住宅区使用 `-- --chunk residential`。全城使用 `-- --chunk citywide`，复用已生成的 `governance`、`research` 和 `east` 分块里的四座主地标。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
 
+公共建设中心的网页近景由[原建筑库](../landmark-masters/buildings/Public_Construction.blend)导出，使用 6144 × 6144 底色贴图和约 68.6 万三角面。减面时保护原模型的入口顶点。玻璃后的展板、接待台饰面和门外两台终端的屏幕使用独立几何。近景 GLB 约 10.43 MiB，在镜头接近建设中心时加载。只更新网页近景时可以先把 `--chunk works` 导出到临时目录，再把其中的 `public-construction-detail.glb` 放进 `apps/web/public/nexciv-walk/`。
+
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 
 ```powershell

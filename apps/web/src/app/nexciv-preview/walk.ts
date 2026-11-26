@@ -80,7 +80,7 @@ const DETAIL_FILES = {
   street: 'nexus-street-detail.glb',
   market: 'corner-market-detail.glb',
   registry: 'citizen-registry-detail.glb',
-  works: 'public-construction-detail.glb',
+  works: 'public-construction-detail.glb?v=2',
   center: 'research-agent-center-detail.glb',
   hall: 'governance-hall-detail.glb',
 };

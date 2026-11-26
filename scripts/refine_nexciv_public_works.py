@@ -24,6 +24,7 @@ WORKS = "HERO_04_Public_Construction"
 OLD_ROOF = ("Public works | geometric glass dome", "Public works | roof planters and pavers")
 REVEALS = "Vestibule | recessed bronze returns"
 ROOF_DETAILS = "Public works | fitted roof details"
+ENTRANCE_DETAILS = "Public works | entrance detail"
 
 
 def fit_roof_details(scene, body):
@@ -128,7 +129,70 @@ def fit_roof_details(scene, body):
     obj.parent = body
 
 
-def refine_public_works(scene, *, roof_details=False):
+def fit_entrance_details(scene, body):
+    if scene.objects.get(ENTRANCE_DETAILS):
+        return
+    finishes = (
+        ("Works Interior Plaster", "9B8D76", .79, 0, 0),
+        ("Works Entrance Bronze", "514638", .42, .58, 0),
+        ("Works Drafting Board", "204449", .55, .08, 0),
+        ("Works Plan Lines", "ADD3C9", .61, 0, .22),
+        ("Works Warm Strip", "F2DEB0", .48, 0, .65),
+        ("Works Desk Enamel", "3C5955", .62, .14, 0),
+    )
+    for name, color, roughness, metallic, emission in finishes:
+        if "MAT_" + name not in bpy.data.materials:
+            material("MAT_" + name, color, roughness, metallic, emission)
+    palette = tuple((name,) for name, *_ in finishes)
+    detail = Geometry()
+    # Fit a small vestibule display behind the existing glass and reception desk.
+    for x in (93.23, 96.57):
+        detail.box(x, -78.67, 1.23, .08, .10, 2.19, 1, .011)
+    detail.box(94.90, -78.74, 1.24, 3.28, .09, 2.17, 0, .012)
+    detail.box(94.90, -78.67, 1.24, 3.26, .035, .19, 1, .006)
+    detail.box(94.90, -78.67, 1.93, 3.20, .047, .052, 1, .009)
+    detail.box(94.90, -78.64, 2.12, 2.56, .060, 1.00, 1, .024)
+    detail.box(94.90, -78.60, 2.17, 2.43, .027, .89, 2, .014)
+    for x, z, w in ((94.37, 2.86, 1.25), (94.21, 2.77, .93),
+                     (95.75, 2.91, .45), (95.75, 2.81, .45), (95.74, 2.71, .43)):
+        detail.box(x, -78.58, z, w, .009, .016, 3)
+    for x, start, width, height in (
+        (94.17, 2.30, .27, .28), (94.49, 2.30, .29, .40), (94.83, 2.30, .29, .33), (95.16, 2.30, .24, .23),
+    ):
+        for dx in (-width * .5, width * .5):
+            detail.box(x + dx, -78.58, start, .015, .009, height, 3)
+        detail.box(x, -78.58, start + height, width, .009, .016, 3)
+    detail.box(94.64, -78.58, 2.29, 1.40, .009, .016, 3)
+    detail.box(94.90, -78.56, 3.23, 2.45, .042, .023, 4, .008)
+
+    detail.box(96, -77.976, 1.31, .83, .035, .64, 5, .017)
+    detail.box(96, -77.946, 1.38, .83, .017, .030, 1, .006)
+    for x in (95.68, 95.84, 96.0, 96.16, 96.32):
+        detail.box(x, -77.947, 1.48, .012, .024, .44, 1, .004)
+
+    # Align the terminal bezels to the depth of the two original kiosk faces.
+    inverse = body.matrix_world.inverted()
+    front_ray = inverse.to_3x3() @ Vector((0, -1, 0))
+    for x in (91.26, 98.67):
+        z = 2.42
+        hit, point, *_ = body.ray_cast(inverse @ Vector((x, -72.5, z)), front_ray)
+        y = (body.matrix_world @ point).y if hit else 0
+        if not -75.80 < y < -75.30:
+            raise RuntimeError(f"Construction centre terminal no longer aligns at {x}")
+        detail.box(x, y + .032, z - .17, .445, .087, .38, 1, .021)
+        detail.box(x, y + .081, z - .126, .36, .025, .29, 2, .012)
+        for offset, width in ((.027, .211), (-.023, .164)):
+            detail.box(x, y + .095, z + offset, width, .006, .012, 3)
+        detail.box(x + .119, y + .095, z - .082, .025, .006, .022, 4, .005)
+
+    mesh = detail.mesh(ENTRANCE_DETAILS, palette)
+    mesh.transform(inverse)
+    obj = bpy.data.objects.new(ENTRANCE_DETAILS, mesh)
+    body.users_collection[0].objects.link(obj)
+    obj.parent = body
+
+
+def refine_public_works(scene, *, roof_details=False, entrance_details=False):
     body = scene.objects[WORKS]
     body.material_slots[0].link = "DATA"
     for name in OLD_ROOF:
@@ -151,6 +215,8 @@ def refine_public_works(scene, *, roof_details=False):
         bpy.data.collections["02 | Public Works at eye level"].objects.link(obj)
     if roof_details:
         fit_roof_details(scene, body)
+    if entrance_details:
+        fit_entrance_details(scene, body)
     fit_curved_railing(scene, body)
 
 
@@ -161,7 +227,7 @@ def main():
     if args.output.resolve() == WORLD.resolve():
         parser.error("Choose a separate path for the public works revision")
     bpy.ops.wm.open_mainfile(filepath=str(WORLD))
-    refine_public_works(bpy.context.scene, roof_details=True)
+    refine_public_works(bpy.context.scene, roof_details=True, entrance_details=True)
     refine_registry(bpy.context.scene)
     place_agent_center(bpy.context.scene)
     hall = bpy.context.scene.objects[GOVERNANCE_HALL]

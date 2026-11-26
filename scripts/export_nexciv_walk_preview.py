@@ -32,7 +32,7 @@ from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
 from civrum_lakeside_blocks import PALETTE, STONE
 from civrum_lakeside_landmarks import AGENT_CENTER, REGISTRY, place_agent_center
-from refine_nexciv_public_works import ROOF_DETAILS, WORKS, refine_public_works
+from refine_nexciv_public_works import ENTRANCE_DETAILS, ROOF_DETAILS, WORKS, refine_public_works
 from refine_nexciv_registry import refine_registry
 from refine_nexciv_works_railing import RAILING
 
@@ -521,7 +521,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
     transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
     texture_limit = {
-        "base": 512, "retail": 2048, "registry": 4096, "works": 4096, "center": 4096, "hall": 4096, "citywide": 768,
+        "base": 512, "retail": 2048, "registry": 4096, "works": 6144, "center": 4096, "hall": 4096, "citywide": 768,
     }.get(chunk, 1024)
     pbr = {}
     textures = {}
@@ -587,9 +587,9 @@ def stage_assets(scene, graph, chunk, library=DEST):
             continue
         if chunk == "registry" and EAST_HEROES.get(name) != chunk:
             continue
-        if chunk == "works" and name not in (WORKS, ROOF_DETAILS, RAILING):
+        if chunk == "works" and name not in (WORKS, ROOF_DETAILS, RAILING, ENTRANCE_DETAILS):
             continue
-        if name == ROOF_DETAILS and chunk != "works":
+        if name in (ROOF_DETAILS, ENTRANCE_DETAILS) and chunk != "works":
             continue
         if landmark and name != landmark:
             continue
@@ -665,10 +665,12 @@ def stage_assets(scene, graph, chunk, library=DEST):
             asset["previewTier"] = "works_proxy" if chunk == "east" else "works_railing"
         elif name == ROOF_DETAILS:
             asset["previewTier"] = "works_roof"
+        elif name == ENTRANCE_DETAILS:
+            asset["previewTier"] = "works_entrance"
         else:
             asset["previewTier"] = "detail" if chunk in {"registry", "works", "center", "hall"} else tier
         if chunk == "works" and name == WORKS:
-            parts.append((asset, 480000))
+            parts.append((asset, 680000))
         elif chunk == "center":
             parts.append((asset, 245000))
         elif chunk == "east" and len(mesh.polygons) > 10000:
@@ -698,8 +700,8 @@ def stage_assets(scene, graph, chunk, library=DEST):
 
     if chunk in {"registry", "center", "hall", "retail"} and len(root.objects) != 1:
         raise RuntimeError(f"Expected one landmark source mesh for {chunk}")
-    if chunk == "works" and len(root.objects) != 3:
-        raise RuntimeError("Expected the construction centre, its fitted roof details and its terrace railing")
+    if chunk == "works" and len(root.objects) != 4:
+        raise RuntimeError("Expected the original construction centre, roof details, railing and entrance detail")
 
     reduced = {}
     for obj, face_limit in parts:
@@ -707,10 +709,25 @@ def stage_assets(scene, graph, chunk, library=DEST):
         if key not in reduced:
             modifier = obj.modifiers.new("Preview silhouette", "DECIMATE")
             modifier.ratio = min(1.0, face_limit / len(key.polygons))
+            is_works_body = chunk == "works" and obj["previewTier"] == "detail"
+            if is_works_body:
+                frame = obj.matrix_world.copy()
+                protected = []
+                for vertex in key.vertices:
+                    x, y, z = frame @ vertex.co
+                    if 90.5 <= x <= 99.4 and -79.8 <= y <= -74.8 and 1.16 <= z <= 4.25:
+                        protected.append(vertex.index)
+                if not protected:
+                    raise RuntimeError("The original Works entrance vertices could not be located")
+                group = obj.vertex_groups.new(name="Keep original entrance geometry")
+                group.add(protected, 1.0, "REPLACE")
+                modifier.vertex_group = group.name
+                modifier.invert_vertex_group = True
+                print(f"WORKS entrance protected: {len(protected):,} source vertices", flush=True)
             bpy.context.view_layer.update()
             reduced[key] = bpy.data.meshes.new_from_object(obj.evaluated_get(graph), depsgraph=graph)
             reduced[key].validate(clean_customdata=False)
-            if (chunk in {"east", "works"} and obj.name in EAST_HEROES) or obj.name == AGENT_CENTER:
+            if is_works_body or (chunk == "east" and obj.name in EAST_HEROES) or obj.name == AGENT_CENTER:
                 mesh = reduced[key]
                 mesh.polygons.foreach_set("use_smooth", [True] * len(mesh.polygons))
                 mesh.set_sharp_from_angle(angle=math.radians(35))
@@ -793,7 +810,7 @@ def precise_meshopt_positions():
         meshopt.MeshoptEncoder.encode_attribute = staticmethod(encode)
 
 
-def export_chunk(path, gpu_instances=False):
+def export_chunk(path, gpu_instances=False, jpeg_quality=83):
     bpy.ops.export_scene.gltf(
         filepath=str(path),
         export_format="GLB",
@@ -804,7 +821,7 @@ def export_chunk(path, gpu_instances=False):
         export_lights=False,
         export_gpu_instances=gpu_instances,
         export_image_format="JPEG",
-        export_jpeg_quality=83,
+        export_jpeg_quality=jpeg_quality,
         export_meshopt_compression_enable=True,
         export_meshopt_extension="EXT_meshopt_compression",
     )
@@ -823,7 +840,7 @@ def main():
     if any(chunk in chunks for chunk in ("east", "registry", "citywide")):
         refine_registry(scene)
     if any(chunk in chunks for chunk in ("east", "works", "citywide")):
-        refine_public_works(scene, roof_details="works" in chunks)
+        refine_public_works(scene, roof_details="works" in chunks, entrance_details="works" in chunks)
     scene.frame_set(1)
     graph = bpy.context.evaluated_depsgraph_get()
     route = sidewalk_route(scene, graph, WAYPOINTS)
@@ -875,7 +892,7 @@ def main():
         root = stage_assets(scene, graph, chunk, args.output)
         path = args.output / filename
         with precise_meshopt_positions():
-            export_chunk(path, gpu_instances=chunk == "citywide")
+            export_chunk(path, gpu_instances=chunk == "citywide", jpeg_quality=91 if chunk == "works" else 83)
         print(f"PREVIEW {chunk}: {len(root.objects)} nodes, {path.stat().st_size:,} bytes", flush=True)
         for obj in list(root.objects):
             bpy.data.objects.remove(obj, do_unlink=True)
