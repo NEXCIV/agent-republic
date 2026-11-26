@@ -5,6 +5,7 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
 import { createMarketGreeting } from './marketGreeting';
 import type { CafeSnapshot } from '../../lib/cafe-life';
+import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
 export type District = 'east' | 'west' | 'shore' | 'research' | 'residential';
@@ -339,6 +340,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const observedPosition = new THREE.Vector3();
   const cafeProps = new THREE.Group();
   let cafeSnapshot: CafeSnapshot | null = null;
+  const fishingGear = cafeMode ? createFishingGear() : undefined;
+  const fishingSpot = new THREE.Vector3(...FISHING_SPOT);
+  const waterFacing = fishingSpot.clone().add(new THREE.Vector3(1, 0, 0));
+  let pierRoute: RoutePoint[] | undefined;
+  let pierTraveller: Patrol | undefined;
   let receivedAt = 0;
   const eastEntrances = {
     registry: new THREE.Vector3(80, 1, -14),
@@ -576,16 +582,31 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const primary = primaryAgent?.patrol;
     const greeting = marketGreeting(!cafeMode && playing ? dt : 0, !cafeMode && primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
     const shift = cafeSnapshot?.run;
+    const byPier = cafeMode && shift?.place === 'pier';
     const social = shift?.phase === 'inviting' || shift?.phase === 'chatting';
     if (cafeMode) {
       const poseDt = playing ? dt : 0;
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
-      if (shift?.phase === 'walking' && shift.until && cafeSnapshot) {
-        const time = cafeSnapshot.serverTime + (playing ? now - receivedAt : 0);
-        const progress = THREE.MathUtils.clamp((time - shift.since) / (shift.until - shift.since), 0, 1);
+      const time = (cafeSnapshot?.serverTime ?? 0) + (playing ? now - receivedAt : 0);
+      const duration = shift?.until ? shift.until - shift.since : 0;
+      const progress = shift && duration > 0 ? THREE.MathUtils.clamp((time - shift.since) / duration, 0, 1) : 0;
+      if (shift?.requestedActivity === 'fish' && districts.shore.status === 'idle') loadDistrict('shore', true);
+      const phase = shift?.phase;
+      const fishing = phase === 'casting' || phase === 'fishing' || phase === 'reeling';
+      if (!fishing) fishingGear?.hide();
+      if (byPier && pierRoute && primary) {
+        primary.observe(poseDt, fishingSpot, waterFacing);
+        if (fishing) fishingGear?.update(primary.root, phase, progress, playing);
+      } else if (shift?.phase === 'toPier' && pierRoute && primary) {
+        if (pierTraveller !== primary) {
+          primary.plan(pierRoute, [waterFacing.x, waterFacing.z]);
+          pierTraveller = primary;
+        }
+        primary.observeJourney(poseDt, progress, duration / 1000);
+      } else if (shift?.phase === 'walking') {
         observedPosition.lerpVectors(counter, seatFront, progress);
         primary?.observe(poseDt, observedPosition, seatFront, true);
-      } else if (shift?.phase === 'resting' || shift?.phase === 'done') {
+      } else if (shift?.place === 'bench') {
         const sitting = shift.phase === 'resting';
         primary?.observe(poseDt, sitting ? seatedHips : seatFront, seatFacing, false, undefined, sitting);
       } else {
@@ -653,6 +674,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       aim.y += 1.45 * centerFrame + 1.08 * residenceFrame;
       aim.x -= 1.1 * centerFrame;
       aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame - 1.2 * residenceFrame;
+      if (byPier) {
+        aim.x += 1.42;
+        aim.y -= 1.20;
+        aim.z += 0.55;
+      }
       const frameGuest = followed === '01' && (cafeMode ? social : greeting.active) ? 1 : 0;
       greetingFraming = tween ? THREE.MathUtils.damp(greetingFraming, frameGuest, 7, dt) : frameGuest;
       if (followed === '01' && marketGuest) {
@@ -672,7 +698,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const forumYaw = THREE.MathUtils.lerp(landmarkYaw, -2.85, forumFrame);
       const pierYaw = THREE.MathUtils.lerp(forumYaw, 0.64, pierFrame);
       const centerYaw = THREE.MathUtils.lerp(pierYaw, 1.13, centerFrame);
-      const yaw = followYaw + (cafeMode ? -0.64 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame));
+      const travelling = shift?.phase === 'toPier' && pierRoute;
+      const closeCafe = cafeMode && !travelling && !byPier;
+      const yaw = followYaw + (byPier ? 0.49 : closeCafe ? -0.64 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame));
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
@@ -911,6 +939,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         else if (side === 'west') navigation.connect('plaza', 'forum', layout as Connection);
         else if (side === 'residential') navigation.connect('registry', 'residence', layout as Connection);
         else navigation.connect('governance', side === 'shore' ? 'pier' : 'center', layout as Connection);
+        if (side === 'shore' && cafeMode) {
+          const path = navigation.path('01', 'market', 'pier');
+          if (!path) throw new Error('No connected route to the fishing spot');
+          pierRoute = [...path.points, [...FISHING_SPOT]];
+        }
       } catch (error) {
         disposeModel(asset);
         throw error;
@@ -946,6 +979,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (ended || contextLost) return;
       district.status = 'unavailable';
       callbacks.district(side, district.status);
+      if (side === 'shore' && cafeMode) callbacks.fallback();
     }).finally(() => {
       district.pending = undefined;
     });
@@ -960,7 +994,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       request('governance-route.json', priority).then((response) => response.json() as Promise<RouteData>),
       request('nexus-connector.json', priority).then((response) => response.json() as Promise<Connection>),
       request('governance-north.glb', priority).then((response) => response.arrayBuffer()),
-      request('agent-03.glb', priority).then((response) => response.arrayBuffer()).catch(() => undefined),
+      cafeMode ? undefined : request('agent-03.glb', priority).then((response) => response.arrayBuffer()).catch(() => undefined),
     ]).then(async ([layout, connector, cityBytes, agentBytes]) => {
       if (ended || contextLost) return;
       const city = await loader.parseAsync(cityBytes, ASSET_PATH);
@@ -983,6 +1017,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       entranceLight.position.set(0, 4, -83);
       street.add(entranceLight);
 
+      if (cafeMode) return;
       if (!agentBytes) throw new Error('Researcher asset unavailable');
       const agent = await loader.parseAsync(agentBytes, ASSET_PATH);
       if (ended || contextLost) { disposeModel(agent.scene); return; }
@@ -1044,6 +1079,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     street.add(model);
     if (cafeMode) {
       street.add(cafeProps);
+      if (fishingGear) cafeProps.add(fishingGear.group);
       for (const file of ['cafe-bench.glb', 'coffee-stall.glb']) {
         request(file).then((response) => response.arrayBuffer())
         .then((bytes) => loader.parseAsync(bytes, ASSET_PATH)).then(({ scene: prop }) => {
@@ -1097,6 +1133,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (model) disposeModel(model);
       if (north) disposeModel(north);
       disposeModel(cafeProps);
+      fishingGear?.dispose();
       if (citywide) disposeModel(citywide);
       for (const { asset } of Object.values(districts)) {
         if (asset) disposeModel(asset);

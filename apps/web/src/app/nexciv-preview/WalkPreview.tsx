@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { CafeShift, phaseLabel } from './CafeShift';
+import { CafeShift, shiftLabel } from './CafeShift';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type View, type WalkController } from './walk';
 import type { Place } from './navigation';
@@ -47,7 +47,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const updateCafe = useCallback((data: CafeSnapshot | null) => {
     latest.current = data;
     world.current?.syncCafe(data);
-    setShift(data ? phaseLabel[data.run.phase] : '等待开班');
+    setShift(data ? shiftLabel(data.run) : '等待开班');
   }, []);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');

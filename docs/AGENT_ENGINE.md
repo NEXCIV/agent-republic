@@ -88,7 +88,7 @@ export type ProposedAction = {
 
 ## 4. 世界快照（事实来源）：v1.1 统一为 AgentObservationV1
 
-隔离的咖啡街试玩使用可选的 `cafeDemo` 观测字段。服务端提供当前地点、精力、附近同伴、可用活动、是否收工、上次邀约结果和个人偏好。居民据此提出行动，同伴忙碌时可以拒绝。正式链上观测沿用原有字段。试玩经过仅保存在该班次中，详见[城市生活实施规划](civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。
+隔离的咖啡街试玩使用可选的 `cafeDemo` 观测字段。服务端提供当前地点、精力、附近同伴、可用活动、是否收工、上次邀约结果、个人偏好和最新活动建议。居民据此提出行动，同伴忙碌时可以拒绝。去北岸是可达目的地，钓鱼能力则由到达钓位和精力条件解锁。试玩经过仅保存在该班次中，详见[城市生活实施规划](civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。
 
 `WorldFrameV1` 在 `packages/domain/src/world-v1.ts` 定义，作为**唯一世界状态协议**；不得在 Agent Engine 中另行定义 v1.0 的平行 `WorldSnapshot`。由后端生成 `AgentObservationV1`：
 

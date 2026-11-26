@@ -117,5 +117,5 @@ export function createNavigation() {
     return chosen;
   }
 
-  return { connect, connectEast, choose };
+  return { connect, connectEast, choose, path };
 }

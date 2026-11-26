@@ -10,6 +10,12 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 const local = globalThis as typeof globalThis & { nexcivCafeStore?: CafeDemoStore };
 
 function store() {
+  if (local.nexcivCafeStore && !(local.nexcivCafeStore instanceof CafeDemoStore)) {
+    // Refresh the scheduler when Next replaces the module in development.
+    const previous: CafeDemoStore = local.nexcivCafeStore;
+    previous.close();
+    local.nexcivCafeStore = undefined;
+  }
   if (!local.nexcivCafeStore) {
     const file = process.env.NEXCIV_CAFE_DEMO_DB || path.resolve('cache/nexciv-cafe-v1.sqlite');
     mkdirSync(path.dirname(file), { recursive: true });
@@ -28,8 +34,8 @@ function checkRuntime() {
 
 function snapshot(data: ReturnType<CafeDemoStore['read']>) {
   if (!data) return null;
-  const { phase, since, until, place, energy, events } = data.run;
-  return { ...data, run: { phase, since, until, place, energy, events } };
+  const { phase, since, until, place, energy, events, requestedActivity, fishResult } = data.run;
+  return { ...data, run: { phase, since, until, place, energy, events, requestedActivity, fishResult } };
 }
 
 export function GET(request: NextRequest) {

@@ -142,7 +142,13 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   return {
     root,
     observe(dt: number, position: THREE.Vector3, face: THREE.Vector3, moving = false, gesture?: PatrolCue['gesture'], seated = false) {
+      if (moving) walk.setEffectiveTimeScale(SPEED * walkClip.duration / stride);
       updatePose(dt, { face, gesture }, false, position, moving, seated);
+    },
+    observeJourney(dt: number, progress: number, duration: number) {
+      distance = progress * length;
+      walk.setEffectiveTimeScale(length / duration * walkClip.duration / stride);
+      updatePose(dt, undefined, false, undefined, progress < 1);
     },
     get phase() { return phase; },
     get progress() { return Math.round(100 * distance / length); },

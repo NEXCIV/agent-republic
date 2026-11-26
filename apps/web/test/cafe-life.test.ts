@@ -2,11 +2,45 @@ import { describe, expect, it } from 'vitest';
 import { advanceCafe, beginCafe, suggestCafe } from '../src/lib/cafe-life';
 
 describe('isolated café activities', () => {
-  it('rejects fishing without producing a reward or altering the current shift', () => {
+  it('rejects unknown activities without altering the current shift', () => {
     const run = beginCafe(1000, 'social', false);
     const before = structuredClone(run);
-    expect(suggestCafe(run, 'fish')).toEqual({ accepted: false, reason: '北岸尚未开放钓鱼。' });
+    expect(suggestCafe(run, 'smith')).toEqual({ accepted: false, reason: '街区尚未开放这项活动。' });
     expect(run).toEqual(before);
+  });
+  it.each([[1, 'released'], [3, 'noCatch']] as const)('settles fishing start %d as %s after the pier visit and reel', (startedAt, result) => {
+    const run = beginCafe(startedAt, 'social', false);
+    expect(suggestCafe(run, 'fish').accepted).toBe(true);
+    expect(run.phase).toBe('working');
+    for (const phase of ['toPier', 'casting', 'fishing', 'reeling'] as const) {
+      advanceCafe(run, run.until!);
+      expect(run.phase).toBe(phase);
+      expect(run.place).toBe(phase === 'toPier' ? 'counter' : 'pier');
+      expect(run.fishResult).toBeUndefined();
+      expect(run.energy).toBe(40);
+    }
+    expect(suggestCafe(run, 'fish').accepted).toBe(false);
+    advanceCafe(run, run.until!);
+    expect(run.phase).toBe('done');
+    expect(run.energy).toBe(32);
+    expect(run.fishResult).toBe(result);
+    const settled = structuredClone(run);
+    advanceCafe(run, 900000);
+    expect(run).toEqual(settled);
+  });
+  it('replays the same catch after an interruption and lets a later paper note replace fishing', () => {
+    const run = beginCafe(3000, 'social', true);
+    expect(suggestCafe(run, 'fish').accepted).toBe(true);
+    const offline = structuredClone(run);
+    const changed = structuredClone(run);
+    while (run.until !== null) advanceCafe(run, run.until);
+    expect(run.place).toBe('pier');
+    advanceCafe(offline, 1000000);
+    expect(offline).toEqual(run);
+    suggestCafe(changed, 'rest');
+    advanceCafe(changed, 1000000);
+    expect(changed.place).toBe('bench');
+    expect(changed.fishResult).toBeUndefined();
   });
   it('replans after a busy friend declines and restores energy only after reaching the seat', () => {
     const run = beginCafe(1000, 'social', true);

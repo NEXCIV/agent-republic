@@ -24,17 +24,23 @@ describe.skipIf(!supported)('café shift persistence', () => {
     while (folders.length) rmSync(folders.pop()!, { recursive: true, force: true });
   });
 
-  it('settles without a page or a read request', async () => {
+  it.each(['rest', 'fish'] as const)('settles %s without a page or a read request', async (activity) => {
     vi.useFakeTimers();
     const file = fixture();
-    open(file, true).start('resident', true);
-    await vi.advanceTimersByTimeAsync(40000);
+    const resident = open(file, true);
+    resident.start('resident', true);
+    if (activity === 'fish') expect(resident.note('resident', 'paper', 'fish')?.accepted).toBe(true);
+    await vi.advanceTimersByTimeAsync(100000);
     const sqlite = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
     const inspector = new sqlite.DatabaseSync(file, { readOnly: true });
     try {
       const stored = inspector.prepare('SELECT state,next_at FROM shifts').get()!;
       expect(stored.next_at).toBeNull();
-      expect(JSON.parse(String(stored.state))).toMatchObject({ phase: 'done', energy: 75, meeting: 'declined' });
+      const state = JSON.parse(String(stored.state));
+      if (activity === 'fish') {
+        expect(state).toMatchObject({ phase: 'done', place: 'pier', energy: 32 });
+        expect(['released', 'noCatch']).toContain(state.fishResult);
+      } else expect(state).toMatchObject({ phase: 'done', energy: 75, meeting: 'declined' });
     } finally { inspector.close(); }
   });
 

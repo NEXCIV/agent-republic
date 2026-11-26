@@ -1,15 +1,20 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { CafeSnapshot } from '../../lib/cafe-life';
+import type { CafeSnapshot, CafeSuggestion, CafeView } from '../../lib/cafe-life';
 import styles from './preview.module.css';
 
 export const phaseLabel = {
   working: '在咖啡摊帮工', inviting: '邀请阿禾聊两句', chatting: '和阿禾聊天',
   walking: '走向街边长椅', resting: '坐下休息', done: '休息结束',
+  toPier: '前往北岸码头 · 行程快进', casting: '在北岸码头抛竿', fishing: '等鱼咬钩', reeling: '收线起竿',
 };
+export function shiftLabel(run: CafeView) {
+  if (run.phase === 'done' && run.fishResult) return run.fishResult === 'released' ? '钓到小鱼，已放回湖里' : '这一竿没钓到鱼';
+  return phaseLabel[run.phase];
+}
 const endpoint = '/api/nexciv-preview/cafe';
-type Command = { action: 'start'; busy: boolean } | { action: 'note'; suggestion: 'chat' | 'rest' | 'fish' };
+type Command = { action: 'start'; busy: boolean } | { action: 'note'; suggestion: CafeSuggestion };
 
 export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) => void }) {
   const [snapshot, setSnapshot] = useState<CafeSnapshot | null>(null);
@@ -83,7 +88,7 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
           <span>给 01 号递纸条</span>
           <button disabled={pending || run.phase !== 'working'} onClick={() => send({ action: 'note', suggestion: 'chat' })}>找阿禾聊聊</button>
           <button disabled={pending || run.phase !== 'working'} onClick={() => send({ action: 'note', suggestion: 'rest' })}>早点休息</button>
-          <button disabled={pending} onClick={() => send({ action: 'note', suggestion: 'fish' })}>去钓鱼</button>
+          <button disabled={pending || run.phase !== 'working'} onClick={() => send({ action: 'note', suggestion: 'fish' })}>去北岸钓鱼</button>
         </> : <>
           <label>阿禾的班次 <select value={busy ? 'busy' : 'free'} onChange={(event) => setBusy(event.target.value === 'busy')}>
             <option value="busy">正在收摊</option><option value="free">已经下班</option>
