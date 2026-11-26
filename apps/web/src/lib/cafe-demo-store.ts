@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { createHash, randomBytes } from 'node:crypto';
 import { advanceCafe, beginCafe, observeExternalChoice, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
 import type { ObserverDriver } from './cafe-observer';
 import { writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
@@ -7,7 +8,12 @@ import type { CafeSnapshot } from './cafe-life';
 
 type Response = Omit<CafeSnapshot, 'run'> & { run: CafeRun };
 type Row = { state: string };
+export type CafeActor = string | { mcpToken: string };
+export class InvalidCafeMcpConnection extends Error {}
 export const CAFE_RETENTION_DAYS = 30;
+const PAIR_CODE_LIFETIME = 5 * 60 * 1000;
+const MCP_CONNECTION_LIFETIME = 24 * 60 * 60 * 1000;
+const hashCredential = (value: string) => createHash('sha256').update(value).digest('hex');
 
 export class CafeDemoStore {
   private readonly db: DatabaseSync;
@@ -33,6 +39,13 @@ export class CafeDemoStore {
         shift TEXT PRIMARY KEY REFERENCES shifts(id) ON DELETE CASCADE,
         issue TEXT NOT NULL,
         published INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS cafe_mcp_connections (
+        resident TEXT PRIMARY KEY NOT NULL,
+        code_hash TEXT UNIQUE,
+        code_expires INTEGER,
+        token_hash TEXT UNIQUE,
+        token_expires INTEGER
       );
     `);
     this.transaction(() => {
@@ -107,9 +120,58 @@ export class CafeDemoStore {
     return typeof row?.id === 'string' ? row.id : undefined;
   }
 
-  start(id: string, busy: boolean, resident: string, kind: CafeShiftKind = 'cafe', driver: ObserverDriver = 'rules'): Response | { error: string } {
+  mcpStatus(resident: string) {
+    const at = this.clock();
+    const row = this.db.prepare('SELECT code_expires,token_expires FROM cafe_mcp_connections WHERE resident=?').get(resident);
+    const expiresAt = typeof row?.token_expires === 'number' && row.token_expires > at ? row.token_expires : null;
+    const codeExpiresAt = typeof row?.code_expires === 'number' && row.code_expires > at ? row.code_expires : null;
+    return { connected: expiresAt !== null, expiresAt, codeExpiresAt };
+  }
+
+  issueMcpCode(resident: string) {
+    const at = this.clock();
+    const code = randomBytes(18).toString('base64url');
+    const codeExpiresAt = at + PAIR_CODE_LIFETIME;
+    this.transaction(() => {
+      this.db.prepare('DELETE FROM cafe_mcp_connections WHERE COALESCE(code_expires,0)<=? AND COALESCE(token_expires,0)<=?')
+        .run(at, at);
+      this.db.prepare(`
+        INSERT INTO cafe_mcp_connections(resident,code_hash,code_expires) VALUES (?,?,?)
+        ON CONFLICT(resident) DO UPDATE SET code_hash=excluded.code_hash, code_expires=excluded.code_expires
+      `).run(resident, hashCredential(code), codeExpiresAt);
+    });
+    return { code, codeExpiresAt };
+  }
+
+  redeemMcpCode(code: string) {
+    const at = this.clock();
+    const token = `nxc_mcp_${randomBytes(32).toString('base64url')}`;
+    const expiresAt = at + MCP_CONNECTION_LIFETIME;
+    const result = this.db.prepare(`
+      UPDATE cafe_mcp_connections
+      SET token_hash=?, token_expires=?, code_hash=NULL, code_expires=NULL
+      WHERE code_hash=? AND code_expires>?
+    `).run(hashCredential(token), expiresAt, hashCredential(code), at);
+    return result.changes === 1 ? { token, expiresAt } : null;
+  }
+
+  disconnectMcp(resident: string) {
+    this.db.prepare('DELETE FROM cafe_mcp_connections WHERE resident=?').run(resident);
+    return { connected: false, expiresAt: null, codeExpiresAt: null };
+  }
+
+  private authorizedResident(actor: CafeActor) {
+    if (typeof actor === 'string') return actor;
+    const row = this.db.prepare('SELECT resident FROM cafe_mcp_connections WHERE token_hash=? AND token_expires>?')
+      .get(hashCredential(actor.mcpToken), this.clock());
+    if (typeof row?.resident !== 'string') throw new InvalidCafeMcpConnection();
+    return row.resident;
+  }
+
+  start(id: string, busy: boolean, actor: CafeActor, kind: CafeShiftKind = 'cafe', driver: ObserverDriver = 'rules'): Response | { error: string } {
     const at = this.clock();
     const result = this.transaction(() => {
+      const resident = this.authorizedResident(actor);
       this.db.prepare('DELETE FROM shifts WHERE started < ?').run(at - CAFE_RETENTION_DAYS * 86400000);
       const owner = this.db.prepare('SELECT resident FROM shifts WHERE id=?').get(id);
       if (owner) {
@@ -135,14 +197,15 @@ export class CafeDemoStore {
     return result;
   }
 
-  observeExternal(resident: string) {
-    const snapshot = this.read(resident);
+  observeExternal(actor: CafeActor) {
+    const snapshot = this.read(actor);
     return snapshot ? observeExternalChoice(snapshot.run, snapshot.serverTime) : null;
   }
 
-  read(resident: string, migrateLegacy = false, seenAt?: number): Response | null {
+  read(actor: CafeActor, migrateLegacy = false, seenAt?: number): Response | null {
     const serverTime = this.clock();
     return this.transaction(() => {
+      const resident = this.authorizedResident(actor);
       if (migrateLegacy) {
         this.db.prepare('UPDATE shifts SET resident=? WHERE id=? AND resident IS NULL').run(resident, resident);
       }
@@ -159,10 +222,11 @@ export class CafeDemoStore {
     });
   }
 
-  newspaper(resident: string, issueId?: string): NewspaperSnapshot | null {
+  newspaper(actor: CafeActor, issueId?: string): NewspaperSnapshot | null {
     const serverTime = this.clock();
     const cutoff = serverTime - CAFE_RETENTION_DAYS * 86400000;
     return this.transaction(() => {
+      const resident = this.authorizedResident(actor);
       const latest = this.latestId(resident);
       if (latest) this.current(latest, serverTime);
 
@@ -190,9 +254,10 @@ export class CafeDemoStore {
     });
   }
 
-  note(resident: string, shiftStartedAt: number, request: string, suggestion: string): Response | null {
+  note(actor: CafeActor, shiftStartedAt: number, request: string, suggestion: string): Response | null {
     const serverTime = this.clock();
     const result = this.transaction(() => {
+      const resident = this.authorizedResident(actor);
       const id = this.latestId(resident);
       if (!id) return null;
       const run = this.current(id, serverTime)!;

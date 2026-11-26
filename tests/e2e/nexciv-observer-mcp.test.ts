@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, rmdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
@@ -10,11 +10,38 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
   const resident = 'nexciv_cafe_resident=12267b56-45c0-41e9-a75e-f3eab629eb02';
   const folder = mkdtempSync(join(tmpdir(), 'nexciv-mcp-'));
   const sessionFile = join(folder, 'session');
+  const token = `nxc_mcp_${'a'.repeat(43)}`;
+  const code = 'A'.repeat(24);
   let writes = 0;
   let initializations = 0;
+  let redeemed = false;
+  let revoked = false;
   const api: Server = createServer(async (request, response) => {
     response.setHeader('Content-Type', 'application/json');
-    if (!request.headers.cookie) {
+    let input;
+    if (request.method === 'POST') {
+      let body = '';
+      for await (const part of request) body += String(part);
+      input = JSON.parse(body);
+    }
+    if (input?.action === 'redeemMcpCode' && !request.headers.cookie && !request.headers.authorization) {
+      if (redeemed || input.code !== code) {
+        response.writeHead(410).end(JSON.stringify({ error: '配对码已使用或过期。' }));
+        return;
+      }
+      redeemed = true;
+      response.end(JSON.stringify({ token, expiresAt: 100000 }));
+      return;
+    }
+    if (request.headers.authorization) {
+      if (request.headers.authorization !== `Bearer ${token}` || request.headers.cookie || revoked) {
+        response.writeHead(401).end(JSON.stringify({ error: '连接已断开。' }));
+        return;
+      }
+      response.end(JSON.stringify({ run: { phase: 'briefing' } }));
+      return;
+    }
+    if (!request.headers.cookie && request.method === 'GET') {
       initializations++;
       response.setHeader('Set-Cookie', resident);
       response.end('null');
@@ -26,9 +53,6 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
     }
     if (request.method === 'POST') {
       writes++;
-      let body = '';
-      for await (const part of request) body += String(part);
-      const input = JSON.parse(body);
       response.end(JSON.stringify({ accepted: input.action === 'choose' && input.choice === 'visitPier', run: { phase: 'toPier' } }));
     } else {
       response.end(JSON.stringify({ actions: ['visitPier'], shiftStartedAt: 1000 }));
@@ -53,7 +77,7 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
   try {
     client = await connect();
     expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
-      'start_observer', 'observe_observer', 'choose_interview', 'read_shift', 'read_newspaper',
+      'pair_browser', 'start_observer', 'observe_observer', 'choose_interview', 'read_shift', 'read_newspaper',
     ]);
     const observation = await client.callTool({ name: 'observe_observer', arguments: {} });
     expect(JSON.stringify(observation)).toContain('visitPier');
@@ -67,10 +91,21 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
     expect(JSON.stringify(accepted)).toContain('toPier');
     expect(initializations).toBe(1);
     expect(writes).toBe(1);
+
+    const paired = await client.callTool({ name: 'pair_browser', arguments: { code } });
+    expect(JSON.stringify(paired)).toContain('expiresAt');
+    expect(JSON.stringify(paired)).not.toContain(token);
+    expect((await client.callTool({ name: 'pair_browser', arguments: { code } })).isError).toBe(true);
+    await client.close();
+    client = await connect();
+    expect(JSON.stringify(await client.callTool({ name: 'read_shift', arguments: {} }))).toContain('briefing');
+    revoked = true;
+    expect((await client.callTool({ name: 'read_shift', arguments: {} })).isError).toBe(true);
+    expect(initializations).toBe(1);
   } finally {
     await client?.close();
     await new Promise<void>((close) => api.close(() => close()));
-    rmSync(sessionFile, { force: true });
+    for (const file of readdirSync(folder)) rmSync(join(folder, file), { force: true });
     rmdirSync(folder);
   }
 }, 20000);

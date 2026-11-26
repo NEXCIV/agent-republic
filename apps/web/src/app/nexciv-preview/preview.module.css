@@ -91,6 +91,11 @@
 .cafeLog summary { cursor: pointer; padding: 4px 0; }
 .cafeLog time { color: #c8bea8; margin-right: 12px; }
 .cafePanel > .cafeLink { justify-self: start; padding: 5px 0; }
+.cafePairing { width: min(100%, 600px); color: #ede9df; font-size: 14px; }
+.cafePairing summary { width: fit-content; padding: 6px 0; cursor: pointer; color: #f2cb67; }
+.pairingContent { display: grid; gap: 10px; padding: 12px 15px; background: #202226; border-left: 2px solid var(--gold); }
+.pairingContent p { color: #ede9df; line-height: 1.6; }
+.pairingContent code { padding: 9px 12px; background: #141619; overflow-wrap: anywhere; user-select: all; }
 .postcard { padding: 11px 15px; background: #202226; border-left: 2px solid var(--gold); line-height: 1.6; }
 .postcard summary { color: #f6eed8; font-weight: 650; cursor: pointer; }
 .postcard p { margin-top: 8px; color: #c8bea8; font-size: 14px; }

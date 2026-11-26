@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -11,6 +11,7 @@ import { createDemoCity } from './nexciv-demo-city.mjs';
 const city = createDemoCity();
 const sessionPath = process.env.NEXCIV_MCP_SESSION_FILE
   ?? fileURLToPath(new URL('../cache/nexciv-observer-mcp.session', import.meta.url));
+const pairingPath = `${sessionPath}.pairing`;
 
 async function localSession() {
   try {
@@ -29,10 +30,35 @@ async function localSession() {
   }
 }
 
+async function savedPairing() {
+  try {
+    return await readFile(pairingPath, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return null;
+  }
+}
+
+async function pairBrowser(code) {
+  await mkdir(dirname(pairingPath), { recursive: true });
+  const { token, expiresAt } = await city.redeemMcpCode(code, randomUUID());
+  const temporary = `${pairingPath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, token, { flag: 'wx', mode: 0o600 });
+    await rename(temporary, pairingPath);
+  } catch {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw new Error('无法保存本机 Agent 连接，请在咖啡街重新生成配对码。');
+  }
+  return { connected: true, expiresAt };
+}
+
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-observer', version: '0.1.0' });
+  const server = new McpServer({ name: 'nexciv-observer', version: '0.2.0' });
   let connection;
-  function request(query, command) {
+  async function request(query, command) {
+    const token = await savedPairing();
+    if (token !== null) return city.useMcpToken(token)(query, command);
     connection ??= localSession().then(city.useSession).catch((error) => {
       connection = undefined;
       throw error;
@@ -56,7 +82,11 @@ serveStdio(() => {
     });
   }
 
-  tool('start_observer', '在隔离的本地试玩中为 01 号开启一次外部 Agent 观察员班次。已有进行中的班次请先查看。', z.strictObject({
+  tool('pair_browser', '使用玩家从本机 NEXCIV 咖啡街生成的一次性配对码，连接当前网页的 01 号。只在玩家明确要求配对时使用。', z.strictObject({
+    code: z.string().trim().regex(/^[A-Za-z0-9_-]{24}$/).describe('咖啡街网页生成的 24 字符配对码'),
+  }), false, ({ code }) => pairBrowser(code));
+
+  tool('start_observer', '为 01 号开启一次外部 Agent 观察员班次。配对时班次会同步到玩家的咖啡街网页。已有进行中的班次请先查看。', z.strictObject({
     busy: z.boolean().default(true).describe('开班时阿禾是否正在收摊'),
     requestId: z.uuidv4().optional().describe('重试同一开班请求时可复用的 UUID'),
   }), false, ({ busy, requestId = randomUUID() }) =>

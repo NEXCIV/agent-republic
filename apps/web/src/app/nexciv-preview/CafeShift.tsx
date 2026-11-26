@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { CafeMcpPairing } from './CafeMcpPairing';
 import type { CafeShiftKind, CafeSnapshot, CafeSuggestion, CafeView } from '../../lib/cafe-life';
 import type { CafePostcard } from '../../lib/cafe-postcard';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC } from '../../lib/cafe-observer';
@@ -176,6 +177,7 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
         </>}
         {run && <span className={styles.energy}>01 号精力 <b>{run.energy}</b> / 100</span>}
       </div>
+      <CafeMcpPairing endpoint={endpoint} ready={ready} />
       {(run?.observer || (!active && kind === 'observer')) && <span>采访议题 · {OBSERVER_TOPIC}</span>}
       <Link className={styles.cafeLink} href="/nexciv-preview/cafe/news">
         {run?.observer && run.phase === 'done' ? '阅读本班次的《城邦早报》' : '阅读《城邦早报》'}

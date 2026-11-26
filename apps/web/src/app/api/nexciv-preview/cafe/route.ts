@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
-import { CAFE_RETENTION_DAYS, CafeDemoStore } from '../../../../lib/cafe-demo-store';
+import { CAFE_RETENTION_DAYS, CafeDemoStore, InvalidCafeMcpConnection, type CafeActor } from '../../../../lib/cafe-demo-store';
 import { OBSERVER_ACTIONS, type ObserverAction } from '../../../../lib/cafe-observer';
 
 export const runtime = 'nodejs';
@@ -48,16 +48,47 @@ function setResident(response: NextResponse, request: NextRequest, resident: str
   });
 }
 
+function loopback(request: NextRequest) {
+  return /^(127\.0\.0\.1|localhost)(:\d+)?$/i.test(request.headers.get('host') ?? '');
+}
+
+function mcpAction(request: NextRequest, perform: (actor: CafeActor) => NextResponse) {
+  const token = /^Bearer (nxc_mcp_[A-Za-z0-9_-]{43})$/.exec(request.headers.get('authorization') ?? '')?.[1];
+  if (!token || !loopback(request)) return json({ error: '请在本机咖啡街重新配对。' }, 401);
+  try {
+    return perform({ mcpToken: token });
+  } catch (error) {
+    if (!(error instanceof InvalidCafeMcpConnection)) throw error;
+    return json({ error: 'Agent 连接已过期或断开，请在咖啡街重新配对。' }, 401);
+  }
+}
+
 export function GET(request: NextRequest) {
   const unavailable = checkRuntime();
   if (unavailable) return unavailable;
   const resident = request.cookies.get(residentCookie)?.value;
-  if (request.nextUrl.searchParams.get('control') === 'observer') {
+  const params = request.nextUrl.searchParams;
+  const control = params.get('control');
+  const newspaper = params.get('newspaper');
+  if (request.headers.has('authorization')) {
+    return mcpAction(request, (actor) => {
+      if (control === 'observer') return json(store().observeExternal(actor));
+      if (newspaper === 'latest') return json(store().newspaper(actor));
+      if (!request.nextUrl.search) return json(snapshot(store().read(actor)));
+      return json({ error: '此连接仅限观察员班次和最新早报。' }, 403);
+    });
+  }
+  if (control === 'pairing') {
+    if (!loopback(request)) return json({ error: '配对仅用于本机咖啡街试玩。' }, 403);
+    return resident && uuid.test(resident)
+      ? json(store().mcpStatus(resident))
+      : json({ error: '请刷新试玩页后重试。' }, 409);
+  }
+  if (control === 'observer') {
     return resident && uuid.test(resident)
       ? json(store().observeExternal(resident))
       : json({ error: '此班次需要本地试玩凭据。' }, 401);
   }
-  const newspaper = request.nextUrl.searchParams.get('newspaper');
   if (newspaper !== null) {
     const requested = newspaper === 'latest' ? undefined : newspaper;
     if (requested !== undefined && !uuid.test(requested)) return json({ error: '找不到这期早报。' }, 404);
@@ -68,7 +99,7 @@ export function GET(request: NextRequest) {
     return requested ? json({ error: '找不到这期早报。' }, 404) : json({ issues: [], current: null });
   }
   if (resident && uuid.test(resident)) {
-    const cursor = request.nextUrl.searchParams.get('seenAt');
+    const cursor = params.get('seenAt');
     const seenAt = cursor && /^\d{1,15}$/.test(cursor) ? Number(cursor) : undefined;
     return json(snapshot(store().read(resident, false, seenAt)));
   }
@@ -88,8 +119,28 @@ export async function POST(request: NextRequest) {
   }
   const input = await request.json().catch(() => null);
   if (!input || typeof input.requestId !== 'string' || !uuid.test(input.requestId)) return json({ error: '无效的请求编号。' }, 400);
+  if (request.headers.has('authorization')) {
+    return mcpAction(request, (actor) => {
+      if (input.action === 'start' && input.kind === 'observer' && input.driver === 'external' && typeof input.busy === 'boolean') {
+        const result = store().start(input.requestId, input.busy, actor, 'observer', 'external');
+        return 'error' in result ? json(result, 409) : json(snapshot(result));
+      }
+      if (input.action === 'choose') return applyNote(actor, input);
+      return json({ error: '此连接仅允许开始观察员班次或选择采访对象。' }, 403);
+    });
+  }
+  if (input.action === 'redeemMcpCode') {
+    if (!loopback(request)) return json({ error: '配对仅用于本机咖啡街试玩。' }, 403);
+    if (typeof input.code !== 'string' || !/^[A-Za-z0-9_-]{24}$/.test(input.code)) return json({ error: '配对码格式不正确。' }, 400);
+    const redeemed = store().redeemMcpCode(input.code);
+    return redeemed ? json(redeemed) : json({ error: '配对码已使用或过期，请在咖啡街生成新的配对码。' }, 410);
+  }
   const resident = request.cookies.get(residentCookie)?.value;
   if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
+  if (input.action === 'issueMcpCode' || input.action === 'disconnectMcp') {
+    if (!loopback(request)) return json({ error: '配对仅用于本机咖啡街试玩。' }, 403);
+    return json(input.action === 'issueMcpCode' ? store().issueMcpCode(resident) : store().disconnectMcp(resident));
+  }
   if (input.action === 'start' && typeof input.busy === 'boolean') {
     if (input.kind !== undefined && input.kind !== 'cafe' && input.kind !== 'observer') return json({ error: '这个班次尚未开放。' }, 400);
     if (input.driver !== undefined && (input.kind !== 'observer' || input.driver !== 'external')) return json({ error: '无效的采访控制方式。' }, 400);
@@ -99,13 +150,25 @@ export async function POST(request: NextRequest) {
     setResident(response, request, resident);
     return response;
   }
-  const note = input.action === 'note' && ['chat', 'rest', 'fish', 'aheFirst', 'regularFirst', 'askSafety', 'askImpact'].includes(input.suggestion);
-  const choice = input.action === 'choose' && typeof input.choice === 'string' && Object.hasOwn(OBSERVER_ACTIONS, input.choice);
-  if (!note && !choice) {
+  return applyNote(resident, input);
+}
+
+function applyNote(
+  actor: CafeActor,
+  input: { action?: unknown; suggestion?: unknown; choice?: unknown; shiftStartedAt?: unknown; requestId: string },
+) {
+  const note = input.action === 'note' && typeof input.suggestion === 'string'
+    && ['chat', 'rest', 'fish', 'aheFirst', 'regularFirst', 'askSafety', 'askImpact'].includes(input.suggestion)
+    ? input.suggestion : undefined;
+  const choice = input.action === 'choose' && typeof input.choice === 'string' && Object.hasOwn(OBSERVER_ACTIONS, input.choice)
+    ? OBSERVER_ACTIONS[input.choice as ObserverAction] : undefined;
+  const suggestion = choice ?? note;
+  if (!suggestion) {
     return json({ error: '街区尚未开放这项动作。' }, 400);
   }
-  if (!Number.isSafeInteger(input.shiftStartedAt)) return json({ error: '纸条缺少班次信息，请刷新后重试。' }, 400);
-  const suggestion = choice ? OBSERVER_ACTIONS[input.choice as ObserverAction] : input.suggestion;
-  const result = store().note(resident, input.shiftStartedAt, input.requestId, suggestion);
+  if (typeof input.shiftStartedAt !== 'number' || !Number.isSafeInteger(input.shiftStartedAt)) {
+    return json({ error: '纸条缺少班次信息，请刷新后重试。' }, 400);
+  }
+  const result = store().note(actor, input.shiftStartedAt, input.requestId, suggestion);
   return result ? json(snapshot(result)) : json({ error: '班次已过期，请重新开始。' }, 410);
 }

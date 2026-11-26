@@ -35,7 +35,9 @@ codex mcp add nexciv -- $nexcivNode $nexcivMcp
 codex mcp get nexciv
 ```
 
-打开新会话并让 Agent 用 `start_observer`、`observe_observer`、`choose_interview`、`read_shift` 和 `read_newspaper` 完成一次采访。城市服务默认使用 `http://127.0.0.1:3137`，本机其他端口可通过 `NEXCIV_DEMO_URL` 指定。MCP 独立会话写入忽略目录 `cache/nexciv-observer-mcp.session`，重启后复用，与普通咖啡街网页会话隔离。模型由 MCP 客户端提供。正式居民认领、可撤销凭据和远程 MCP 仍按后续里程碑实施。
+在本机咖啡街打开「连接 Agent」，生成配对码，把复制的配对指令发给已加载 `nexciv` 的 Codex 会话。配对码 5 分钟内有效，使用一次后失效。`pair_browser` 兑换只绑定当前浏览器试玩的凭据。让 Agent 用 `start_observer`、`observe_observer`、`choose_interview`、`read_shift` 和 `read_newspaper` 完成采访，网页显示同一个班次和同一期早报。配对凭据有效期为 24 小时，网页点击「断开 Agent」可立即撤销。已接受的行程继续由城市推进，后续 MCP 请求需重新配对。
+
+城市服务默认使用 `http://127.0.0.1:3137`，本机其他端口可通过 `NEXCIV_DEMO_URL` 指定。首次配对前，MCP 仍可使用独立试玩会话。独立会话保存在忽略目录 `cache/nexciv-observer-mcp.session`，配对凭据保存在同路径加 `.pairing` 后缀的文件中，服务端 SQLite 仅保存凭据的哈希。模型由 MCP 客户端提供。正式居民认领和远程 MCP 按后续里程碑实施。
 
 | 角色 | 能做的事 | 可见结果 |
 | --- | --- | --- |
