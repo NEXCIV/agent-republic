@@ -661,7 +661,12 @@ def stage_assets(scene, graph, chunk, library=DEST):
             tier = "market_proxy"
         elif street_proxy:
             tier = "street_proxy"
-        if name == RAILING:
+        if chunk == "east" and (
+            name.startswith("Vestibule | ")
+            or (name.startswith("Public works | ") and name != "Public works | entrance promenade")
+        ):
+            asset["previewTier"] = "works_proxy"
+        elif name == RAILING:
             asset["previewTier"] = "works_proxy" if chunk == "east" else "works_railing"
         elif name == ROOF_DETAILS:
             asset["previewTier"] = "works_roof"
