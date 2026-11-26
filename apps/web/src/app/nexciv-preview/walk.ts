@@ -7,7 +7,7 @@ import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, join
 import { createMarketGreeting } from './marketGreeting';
 import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING, COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
 import type { CafeSnapshot } from '../../lib/cafe-life';
-import { cityWalkTiming, type CityObservation, type CityRegion } from '../../lib/city-movement';
+import { cityWalkTiming, type CityMovement, type CityObservation, type CityRegion } from '../../lib/city-movement';
 import type { CityPoint } from '../../lib/cafe-geometry';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
@@ -22,7 +22,11 @@ export type DistrictStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 export type AgentId = ResidentId;
 export type FollowId = AgentId | '02';
 export type WalkLandmarkId = 'registry' | 'works' | 'center' | 'governance' | 'market';
-export type WalkSelection = { kind: 'building'; id: WalkLandmarkId } | { kind: 'resident'; id: FollowId };
+const WORKS_MANAGER = 'works.manager';
+type ActorId = FollowId | typeof WORKS_MANAGER;
+export type WalkSelection = { kind: 'building'; id: WalkLandmarkId }
+  | { kind: 'resident'; id: FollowId }
+  | { kind: 'person'; id: typeof WORKS_MANAGER };
 type Activity = 'outbound' | 'arrived' | 'greeting';
 export type AgentStatus = Activity | 'loading' | 'unavailable';
 export type AgentReport = { status: AgentStatus; progress: number; from?: Place; destination?: Place };
@@ -111,7 +115,7 @@ const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_04_Public_Construction', 'works'],
   ['Market', 'market'],
 ];
-const SELECTABLE_RESIDENTS = ['01', '02', '03'] as const;
+const SELECTABLE_ACTORS = ['01', '02', '03', WORKS_MANAGER] as const;
 
 function isRendered(object: THREE.Object3D) {
   for (let node: THREE.Object3D | null = object; node; node = node.parent) {
@@ -492,9 +496,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const viewProjection = new THREE.Matrix4();
   const landmarkModels = new Map<WalkLandmarkId, { root: THREE.Object3D; bounds: THREE.Box3; meshes: THREE.Mesh[] }[]>();
   const markerMaterial = callbacks.onSelect ? createResidentMarkerMaterial() : undefined;
-  const residentMarkers = new Map<FollowId, THREE.Sprite>();
+  const residentMarkers = new Map<ActorId, THREE.Sprite>();
   if (markerMaterial) {
-    for (const id of SELECTABLE_RESIDENTS) {
+    for (const id of SELECTABLE_ACTORS) {
       const marker = new THREE.Sprite(markerMaterial);
       marker.visible = false;
       scene.add(marker);
@@ -557,7 +561,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let marketGuest: { asset: GLTF; patrol: Patrol } | undefined;
   let marketGuestRequested = false;
   let greetingFraming = 0;
-  let followed: FollowId = '01';
+  let followed: ActorId = '01';
   let route: RouteData | undefined;
   let mode: View = initialView;
   let playing = autoPlay;
@@ -602,14 +606,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     renderer.setSize(width, height, false);
   }
 
-  function residentActor(id: FollowId) {
+  function selectableActor(id: ActorId) {
+    if (id === WORKS_MANAGER) return siteHost;
     if (id === '02') return cafeMode ? siteHost : marketGuest;
     if (id === '03' && cafeMode) return pierRegular;
     return agents.get(id);
   }
 
   function followedPatrol() {
-    return residentActor(followed)?.patrol;
+    const patrol = selectableActor(followed)?.patrol;
+    return patrol?.root.visible ? patrol : undefined;
   }
 
   function registerLandmark(id: WalkLandmarkId, root: THREE.Object3D) {
@@ -639,8 +645,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       buildingOutline.position.set(selectionCenter.x, Math.max(0.26, selectionBounds.min.y + 0.12), selectionCenter.z);
       buildingOutline.scale.set(selectionSize.x + 1, 1, selectionSize.z + 1);
       buildingOutline.visible = true;
-    } else if (selection?.kind === 'resident') {
-      const root = residentActor(selection.id)?.patrol.root;
+    } else if (selection) {
+      const root = selectableActor(selection.id)?.patrol.root;
       if (!root || !isRendered(root)) return;
       const radius = THREE.MathUtils.clamp(camera.position.distanceTo(root.position) * 0.012, 0.57, 4.8);
       residentOutline.position.copy(root.position);
@@ -653,10 +659,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function updateResidentMarkers() {
     const markerScale = 2 * 16 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
     for (const [id, marker] of residentMarkers) {
-      const feet = residentActor(id)?.patrol.root.position;
-      marker.visible = Boolean(feet && camera.position.distanceTo(feet) > 62);
-      if (!marker.visible || !feet) continue;
-      marker.position.copy(feet);
+      const root = selectableActor(id)?.patrol.root;
+      marker.visible = Boolean(root && isRendered(root) && camera.position.distanceTo(root.position) > 62);
+      if (!marker.visible || !root) continue;
+      marker.position.copy(root.position);
       marker.position.y += 2.15;
       marker.scale.setScalar(markerScale);
     }
@@ -714,8 +720,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function focusSelection(target: WalkSelection) {
-    if (target.kind === 'resident') {
-      if (residentActor(target.id)) setView('follow', target.id);
+    if (target.kind !== 'building') {
+      const root = selectableActor(target.id)?.patrol.root;
+      if (target.kind === 'person' || (root && isRendered(root))) setView('follow', target.id);
       return;
     }
     if (mode === 'follow' && followedPatrol()) {
@@ -828,6 +835,43 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
   }
 
+  function poseCityWalk(
+    movement: CityMovement, primary: Patrol | undefined, cityTime: number, poseDt: number,
+    talkTarget?: THREE.Vector3, stageSeat?: CityPoint | null,
+  ) {
+    if (cityAssetsFor !== movement.requestId) {
+      cityAssetsFor = movement.requestId;
+      loadRouteRegions(movement.regions);
+    }
+    const { walkingMs, progress, stop } = cityWalkTiming(movement, cityTime);
+    if (!primary) return progress;
+    const target = movement.points.at(-1)!;
+    if (stageSeat) {
+      observedPosition.set(...stageSeat);
+      observedFacing.set(...THEATRE_STAGE);
+      primary.observe(poseDt, observedPosition, observedFacing, false, undefined, true);
+    } else if (talkTarget) {
+      observedPosition.set(...target);
+      primary.observe(poseDt, observedPosition, talkTarget, false, 'nod');
+    } else if (stop || (movement.facing && cityTime >= movement.arrivesAt)) {
+      const position = stop?.position ?? target;
+      const [x, z] = stop?.facing ?? movement.facing!;
+      observedPosition.set(...position);
+      observedFacing.set(x, position[1], z);
+      primary.observe(poseDt, observedPosition, observedFacing);
+    } else if (walkingMs > 0) {
+      if (cityJourney?.id !== movement.requestId || cityJourney.traveller !== primary) {
+        primary.plan(movement.points, [target[0], target[2]]);
+        cityJourney = { traveller: primary, id: movement.requestId };
+      }
+      primary.observeJourney(poseDt, progress, walkingMs / 1000);
+    } else {
+      observedPosition.set(...target);
+      primary.observe(poseDt, observedPosition, counterFacing);
+    }
+    return progress;
+  }
+
   function animate(now: number) {
     if (ended || contextLost || !model) return;
     const dt = document.hidden ? 0 : Math.min((now - lastFrame) / 1000, 0.075);
@@ -842,9 +886,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
     const primaryAgent = agents.get('01');
     const primary = primaryAgent?.patrol;
-    const greeting = marketGreeting(!cafeMode && playing ? dt : 0, !cafeMode && primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
     const shift = cafeSnapshot?.run;
     const cityWalk = cityObservation?.movement;
+    const projectedPosition = !cafeMode ? cityObservation?.position : undefined;
+    const nearMarketOnPatrol = !cafeMode && !cityWalk && !projectedPosition && primaryAgent?.destination === 'market';
+    const greeting = marketGreeting(!cafeMode && playing ? dt : 0, nearMarketOnPatrol ? primary : undefined, marketGuest?.patrol);
     const latestActivity = cityObservation?.recentActivities?.[0];
     const conversation = latestActivity?.status === 'running' && latestActivity.kind === 'talk' ? latestActivity : undefined;
     const surveying = latestActivity?.status === 'running' && latestActivity.kind === 'survey';
@@ -863,9 +909,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const travelling = !cityWalk && (shift?.phase === 'toPier' || shift?.phase === 'toCounter');
     const social = !cityWalk && (shift?.phase === 'inviting' || shift?.phase === 'chatting' || shift?.phase === 'reconnecting'
       || (interviewing && !byPier));
+    const poseDt = playing ? dt : 0;
+    const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
+    let observedProgress: number | undefined;
     if (cafeMode) {
-      const poseDt = playing ? dt : 0;
-      const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
       if (theatre?.booking && districts.west.asset) {
         if (!theatreLights) {
           theatreLights = createTheatreLighting();
@@ -972,37 +1019,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const fishing = !cityWalk && (phase === 'casting' || phase === 'fishing' || phase === 'reeling');
       if (!fishing) fishingGear?.hide();
       if (cityWalk) {
-        if (model && cityAssetsFor !== cityWalk.requestId) {
-          cityAssetsFor = cityWalk.requestId;
-          loadRouteRegions(cityWalk.regions);
-        }
-        if (primary) {
-          const target = cityWalk.points.at(-1)!;
-          const { walkingMs, progress, stop } = cityWalkTiming(cityWalk, cityTime);
-          if (theatre01?.status === 'seated' && theatre01.walk?.requestId === cityWalk.requestId) {
-            observedPosition.set(...theatre01.position!);
-            observedFacing.set(...THEATRE_STAGE);
-            primary.observe(poseDt, observedPosition, observedFacing, false, undefined, true);
-          } else if (conversation?.person) {
-            observedPosition.set(...target);
-            primary.observe(poseDt, observedPosition, siteHost?.position ?? counterFacing, false, 'nod');
-          } else if (stop || (cityWalk.facing && cityTime >= cityWalk.arrivesAt)) {
-            const position = stop?.position ?? target;
-            const facing = stop?.facing ?? cityWalk.facing!;
-            observedPosition.set(...position);
-            observedFacing.set(facing[0], position[1], facing[1]);
-            primary.observe(poseDt, observedPosition, observedFacing);
-          } else if (walkingMs > 0) {
-            if (cityJourney?.id !== cityWalk.requestId || cityJourney.traveller !== primary) {
-              primary.plan(cityWalk.points, [target[0], target[2]]);
-              cityJourney = { traveller: primary, id: cityWalk.requestId };
-            }
-            primary.observeJourney(poseDt, progress, walkingMs / 1000);
-          } else {
-            observedPosition.set(...target);
-            primary.observe(poseDt, observedPosition, counterFacing);
-          }
-        }
+        const seat = theatre01?.status === 'seated' && theatre01.walk?.requestId === cityWalk.requestId
+          ? theatre01.position : undefined;
+        poseCityWalk(cityWalk, primary, cityTime, poseDt, conversation?.person ? siteHost?.position ?? counterFacing : undefined, seat);
       } else if (travelling && pierRoute && primary) {
         if (pierJourney?.traveller !== primary || pierJourney.startedAt !== shift.since) {
           const outbound = shift.phase === 'toPier';
@@ -1027,20 +1046,45 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       } else {
         primary?.observe(poseDt, counter, social ? coworker : counterFacing, false, shift?.phase === 'inviting' ? 'wave' : undefined);
       }
-    } else if (playing) marketGuest?.patrol.advance(dt, greeting.visitor);
+    } else {
+      const host = cityObservation?.nearby?.people.find(({ id }) => id === WORKS_MANAGER);
+      if (host && !siteHostRequested) loadSiteHost(host.position);
+      if (siteHost) {
+        siteHost.patrol.root.visible = Boolean(cityObservation && !worker);
+        const talking = conversation?.person?.id === WORKS_MANAGER && primary;
+        siteHost.patrol.observe(poseDt, siteHost.position, talking ? primary.root.position : siteHost.facing, false, talking ? 'nod' : undefined);
+      }
+      if (cityWalk) {
+        const talkTarget = conversation?.person ? observedFacing.set(...conversation.person.position) : undefined;
+        observedProgress = poseCityWalk(cityWalk, primary, cityTime, poseDt, talkTarget);
+      } else if (projectedPosition && primary) {
+        observedPosition.set(...projectedPosition);
+        primary.observe(poseDt, observedPosition, counterFacing);
+      }
+      if (playing) marketGuest?.patrol.advance(dt, greeting.visitor);
+    }
     for (const [id, agent] of agents) {
       const { patrol } = agent;
       const greetingHere = id === '01' && greeting.active;
-      if (playing && !cafeMode) {
+      const hasCityPosition = id === '01' && !cafeMode && (cityWalk || projectedPosition);
+      if (playing && !cafeMode && !hasCityPosition) {
         const cue = greetingHere ? greeting.resident : { hold: 'end' as const, face: patrol.phase === 'arrived' ? agent.lookAt : undefined };
         patrol.advance(dt, cue);
         if (patrol.phase === 'arrived' && patrol.dwelledSeconds >= 4 && !greetingHere) chooseNext(id, agent);
       }
       const status: Activity = greetingHere ? 'greeting' : patrol.phase === 'arrived' ? 'arrived' : 'outbound';
       const { progress } = patrol;
-      if (agent.reported?.status !== status || agent.reported.progress !== progress || agent.reported.destination !== agent.destination) {
-        agent.reported = { status, progress, from: agent.from, destination: agent.destination };
-        callbacks.agent(id, agent.reported);
+      let report: AgentReport = { status, progress, from: agent.from, destination: agent.destination };
+      if (hasCityPosition) {
+        report = { status: observedProgress !== undefined && observedProgress < 1 ? 'outbound' : 'arrived',
+          progress: Math.round(100 * (observedProgress ?? 1)) };
+        const destination = cityWalk && 'place' in cityWalk.destination ? cityWalk.destination.place : undefined;
+        if (destination && Object.hasOwn(DESTINATION_FACING, destination)) report.destination = destination as Place;
+      }
+      if (agent.reported?.status !== report.status || agent.reported.progress !== report.progress
+        || agent.reported.destination !== report.destination || agent.reported.from !== report.from) {
+        agent.reported = report;
+        callbacks.agent(id, report);
       }
     }
 
@@ -1280,8 +1324,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         }
       }
     }
-    for (const id of SELECTABLE_RESIDENTS) {
-      const actor = residentActor(id);
+    for (const id of SELECTABLE_ACTORS) {
+      const actor = selectableActor(id);
       if (!actor || !isRendered(actor.patrol.root)) continue;
       const marker = residentMarkers.get(id);
       const hits = marker?.visible ? raycaster.intersectObject(marker, false) : [];
@@ -1291,7 +1335,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       for (const hit of hits) {
         if (hit.distance < nearest) {
           nearest = hit.distance;
-          target = { kind: 'resident', id };
+          target = id === WORKS_MANAGER ? { kind: 'person', id } : { kind: 'resident', id };
         }
       }
     }
@@ -1576,7 +1620,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       try {
         const patrol = createAgentPatrol(asset, [point, facing.toArray()], [facing.x, facing.z]);
         siteHost = { asset, patrol, position, facing };
-        street.add(patrol.root);
+        actorLayer.add(patrol.root);
       } catch {
         disposeModel(asset.scene);
       }

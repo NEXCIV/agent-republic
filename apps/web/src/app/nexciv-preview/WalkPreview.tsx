@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CafeShift, shiftLabel } from './CafeShift';
 import { CityExplorer } from './CityExplorer';
+import { WORKS_MANAGER, WorksVisitPanel } from './WorksVisitPanel';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
 import { COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
@@ -11,6 +12,7 @@ import { THEATRE_CLOCK } from '../../lib/theatre-layout';
 import type { TheatreView } from '../../lib/theatre-trial';
 import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController, type WalkSelection } from './walk';
 import type { Place } from './navigation';
+import { useWorksVisit, type WorksCommand } from './useWorksVisit';
 import styles from './preview.module.css';
 
 const PLACES: Record<Place, string> = CITY_PLACES;
@@ -52,11 +54,11 @@ function TheatreProgramme({ theatre }: { theatre: TheatreView }) {
 }
 
 function activity(id: AgentId, report: AgentReport) {
-  const place = PLACES[report.destination ?? 'plaza'];
+  const place = report.destination ? PLACES[report.destination] : undefined;
   return {
     loading: id === '03' ? '正在载入议会大厅街区' : '中央广场',
-    outbound: `前往 ${place}`,
-    arrived: `已到达 ${place}`,
+    outbound: place ? `前往 ${place}` : '正在街区内移动',
+    arrived: place ? `已到达 ${place}` : '在街区内等候',
     greeting: '和 02 号打招呼',
     unavailable: 'Agent 暂未载入',
   }[report.status];
@@ -83,6 +85,11 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
   }, [inspect]);
   const latest = useRef<CafeSnapshot | null>(null);
   const latestCity = useRef<CityObservation | null>(null);
+  const syncCity = useCallback((observation: CityObservation) => {
+    latestCity.current = observation;
+    world.current?.syncCity(observation);
+  }, []);
+  const worksSession = useWorksVisit(!cafeMode, syncCity);
   const seenCityJob = useRef<string | undefined>(undefined);
   const seenTheatre = useRef<number | undefined>(undefined);
   const followedCafeId = useRef<FollowId>('01');
@@ -158,9 +165,9 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         onSelect: cafeMode ? undefined : inspect,
       }, cafeMode);
       world.current = controller;
+      controller.syncCity(latestCity.current);
       if (cafeMode) {
         controller.syncCafe(latest.current);
-        controller.syncCity(latestCity.current);
         controller.view('follow', followedCafeId.current);
       }
       return () => { controller.dispose(); world.current = null; };
@@ -195,8 +202,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         if (!response.ok) return;
         const observation: CityObservation = await response.json();
         if (controller.signal.aborted) return;
-        latestCity.current = observation;
-        world.current?.syncCity(observation);
+        syncCity(observation);
         setCity(observation);
         const construction = observation.lightingPilot?.worker?.activity;
         const outing = observation.eveningWalk?.recent[0]?.activity;
@@ -219,7 +225,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [cafeMode, cityBusy, followCityAgent, requestedActivity, showTheatre]);
+  }, [cafeMode, cityBusy, followCityAgent, requestedActivity, showTheatre, syncCity]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
@@ -232,6 +238,16 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     explorerFocus.current = 'heading';
     inspect(null);
     setExplorerOpen(true);
+  }
+
+  function openDetails(item: WalkSelection) {
+    explorerFocus.current = 'heading';
+    inspect(item);
+  }
+
+  async function visitWorks(command: WorksCommand) {
+    const accepted = await worksSession.send(command);
+    if (accepted && command === 'move') select('follow', '01');
   }
 
   function focusSelection(item: WalkSelection) {
@@ -250,6 +266,14 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     ? inspectionCamera.kind === selection.kind && inspectionCamera.id === selection.id
     : selection.kind === 'resident' && view === 'follow' && selection.id === selected));
   const cameraLandmark = inspectionCamera?.kind === 'building' ? PLACES[inspectionCamera.id] : undefined;
+  const worksObservation = worksSession.observation;
+  const worksMovement = worksObservation?.movement;
+  const worksTrip = worksMovement && 'place' in worksMovement.destination && worksMovement.destination.place === 'works'
+    ? worksMovement : null;
+  const managerPresent = worksMovement?.status !== 'walking' && worksObservation?.nearby?.place === 'works'
+    && worksObservation.nearby.people.some(({ id }) => id === WORKS_MANAGER.id);
+  const followingWorks = !cafeMode && !inspectionCamera && view === 'follow' && selected === '01' && worksTrip;
+  const showingCityResident = !cafeMode && selected === '01' && Boolean(worksObservation?.position);
   const watchingTheatre = cafeMode && view === 'west' && Boolean(theatre?.booking);
   const theatreResident = cafeFollow !== '02' ? theatre?.residents[cafeFollow] : undefined;
   const followingAttendee = Boolean(theatreResident?.walk?.requestId && theatreResident.walk.requestId === cityWalk?.requestId);
@@ -300,7 +324,8 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
           <small>{watchingTheatre ? '社区剧场 · DEMO' : cafeMode ? `AGENT ${cafeFollow} · AI SIMULATED · DEMO`
             : inspectionCamera ? (cameraLandmark ? '地标镜头' : '居民镜头') : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
           <strong role="status">{cafeMode ? cafeTitle
-            : inspectionCamera ? cameraLandmark ?? '跟随 02 号居民'
+            : inspectionCamera ? cameraLandmark ?? (inspectionCamera.kind === 'person' ? '现场管理员' : '跟随 02 号居民')
+              : followingWorks ? `${worksTrip.status === 'walking' ? '前往' : '已到达'} 公共建设中心`
               : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
           {sceneCaption && <p className={styles.greeting}>
             {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
@@ -314,8 +339,14 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         </div>
         {!cafeMode && <CityExplorer selection={selection} open={explorerOpen} sceneState={state}
           focusActive={focusActive} residentReport={selectedResident} residentIds={availableResidents}
+          managerPresent={managerPresent}
           trigger={explorerTrigger} heading={explorerHeading} onOpen={openDirectory} onClose={closeExplorer}
-          onSelect={(item) => { explorerFocus.current = 'heading'; inspect(item); }} onFocus={focusSelection} />}
+          onSelect={openDetails} onFocus={focusSelection}>
+          {(selection?.kind === 'person' || (selection?.kind === 'building' && selection.id === 'works')) && (
+            <WorksVisitPanel session={worksSession} talkingToManager={selection.kind === 'person'}
+              onMeet={() => openDetails(WORKS_MANAGER)} onCommand={visitWorks} />
+          )}
+        </CityExplorer>}
         {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。可打开「地点与居民」查看详情。'}</p>}
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
@@ -387,9 +418,11 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
           </span>
         </div>
         <div className={styles.route}>
-          <span>{origin}</span>
-          <progress aria-label={destination ? `Agent ${selected} 从 ${origin} 前往 ${destination} 的行程` : `Agent ${selected} 的行程`} max={100} value={agent.progress} />
-          <span>{destination}</span>
+          {showingCityResident && !worksMovement ? <span>01 号 · 等待行动</span> : <>
+            {!showingCityResident && <span>{origin}</span>}
+            <progress aria-label={destination ? `Agent ${selected} 前往 ${destination} 的行程` : `Agent ${selected} 的行程`} max={100} value={agent.progress} />
+            <span>{destination}</span>
+          </>}
           <span className={styles.performance} aria-label="本机实时渲染指标">{fps > 0 ? `${fps} FPS · ${(readyTime / 1000).toFixed(1)} s` : ''}</span>
         </div>
         {state === 'fallback' && (

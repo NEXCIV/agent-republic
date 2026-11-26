@@ -122,6 +122,30 @@
 .explorerActions button[aria-pressed="true"]:hover:not(:disabled) { background: #483d21; }
 .explorerActions button:disabled { background: #242426; border-color: #5c5750; color: #c8c2b4; cursor: default; }
 .explorerActions a { color: #f4d78a; font-size: 14px; text-underline-offset: 0.22em; }
+.explorer:has(.worksVisit) .explorerActions button:not(:disabled) { background: #282729; border-color: #565044; color: #f4d78a; }
+.explorer:has(.worksVisit) .explorerActions button:not(:disabled):hover { background: #383329; }
+.worksVisit { margin-top: 16px; padding-top: 12px; border-top: 1px solid #41403d; }
+.worksVisit h3 { margin: 0 0 6px; color: #f6eed8; font-size: 14px; font-weight: 650; }
+.worksVisit p { margin: 0 0 10px; color: #dfd6c6; font-size: 13px; line-height: 1.6; }
+.worksProgress { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: #e9ca78; font-size: 12px; }
+.worksProgress progress { flex: 1; min-width: 0; height: 8px; accent-color: var(--gold); }
+.worksControls button {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  background: var(--gold);
+  color: #161715;
+  font-weight: 660;
+}
+.worksControls button:hover:not(:disabled) { background: #ffd054; }
+.worksControls button:disabled { background: #242426; border-color: #5c5750; color: #c8c2b4; cursor: default; }
+.worksVisit .worksError { margin-top: 8px; color: #ffd0ae; }
+.worksHistory { margin-top: 14px; padding-top: 12px; border-top: 1px solid #41403d; }
+.worksRecord + .worksRecord { margin-top: 10px; padding-top: 10px; border-top: 1px solid #41403d; }
+.worksRecord small { color: #cfbe98; font-size: 12px; }
+.worksRecord ol { display: grid; gap: 6px; margin: 6px 0 0; padding-left: 18px; color: #dfd6c6; font-size: 13px; line-height: 1.55; }
 .footer { width: 100%; max-width: none; margin: 0; padding: 8px var(--edge) 13px; border-top: 1px solid #383735; display: grid; gap: 9px; background: #141619; }
 .controls, .switcher, .route, .fallbackLinks { display: flex; align-items: center; gap: 8px;}
 .controls { flex-wrap: wrap; }

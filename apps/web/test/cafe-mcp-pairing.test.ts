@@ -210,6 +210,45 @@ describe.skipIf(!supported)('café browser pairing', () => {
     }
   });
 
+  it('lets an unpaired browser visit the construction centre and recover its conversation', async () => {
+    expect(get('?control=city').status).toBe(409);
+    const bootstrap = get();
+    expect(bootstrap.status).toBe(200);
+    expect(await bootstrap.json()).toBeNull();
+    const resident = { cookie: bootstrap.headers.get('set-cookie')!.split(';')[0]! };
+    const ask = { action: 'interactCity', actionId: 'works.chat', requestId: randomUUID() };
+    expect((await post(ask, resident)).status).toBe(422);
+
+    const trip = await post({ action: 'moveTo', destination: { place: 'works' } }, resident);
+    expect(trip.status).toBe(200);
+    const walk = await trip.json();
+    expect(walk).toMatchObject({ status: 'walking', destination: { place: 'works' } });
+    expect((await post(ask, resident)).status).toBe(409);
+
+    vi.setSystemTime(walk.arrivesAt);
+    const arrival = await get('?control=city', resident).json();
+    expect(arrival).toMatchObject({ movement: { requestId: walk.requestId, status: 'arrived' }, nearby: { place: 'works' } });
+    expect(arrival.availableActions).toContainEqual(expect.objectContaining({ id: 'works.chat', target: 'works.manager' }));
+    const conversation = await post(ask, resident);
+    expect(conversation.status).toBe(200);
+    const activity = await conversation.json();
+    expect(activity).toMatchObject({ requestId: ask.requestId, status: 'running', kind: 'talk' });
+    expect(activity.events).toEqual([expect.objectContaining({ speaker: '01 号', type: 'started' })]);
+
+    vi.setSystemTime(activity.endsAt);
+    local.nexcivCafeStore?.close();
+    local.nexcivCafeStore = undefined;
+    const refreshed = await get('?control=city', resident).json();
+    expect(refreshed.recentActivities).toEqual([expect.objectContaining({
+      requestId: ask.requestId, status: 'completed', events: [
+        expect.objectContaining({ speaker: '01 号', type: 'started' }),
+        expect.objectContaining({ speaker: '现场管理员', type: 'reply', text: expect.stringContaining('巡查两个点位') }),
+      ],
+    })]);
+    expect(await (await post(ask, resident)).json()).toEqual(refreshed.recentActivities[0]);
+    expect((await get('?control=city', browser()).json()).recentActivities).toEqual([]);
+  });
+
   it('offers only local actions and records a persistent construction walk with real waypoint arrivals', async () => {
     const owner = browser();
     const visitor = browser();
