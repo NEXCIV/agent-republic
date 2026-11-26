@@ -3,7 +3,7 @@ import { agentObservationV1Schema, worldFrameV1Schema, type AgentObservationV1 }
 import { buildAgentObservation } from '@agent-republic/agent-engine';
 import demoFrame from '../../../../examples/world-frame.demo.json';
 import type { CafePostcard } from './cafe-postcard';
-import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC, type ObserverAngle, type ObserverAssignment, type ObserverSpeaker, type ObserverSuggestion } from './cafe-observer';
+import { OBSERVER_ACTIONS, OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC, type ObserverAction, type ObserverAngle, type ObserverAssignment, type ObserverDriver, type ObserverSpeaker, type ObserverSuggestion } from './cafe-observer';
 
 type Perception = NonNullable<AgentObservationV1['cafeDemo']>;
 export type Preference = Perception['preference'];
@@ -133,10 +133,15 @@ function nextInterview(run: CafeRun, at: number) {
   }
   let speaker = observer.remainingSources[0]!;
   if (observer.remainingSources.length === 2) {
-    const willingToWait = observer.preferredSource === 'ahe'
-      ? seen.previousMeeting !== 'declined'
-      : seen.previousMeeting === 'chatted';
-    if (observer.preferredSource === 'regular' || (!observer.aheAvailable && !willingToWait)) speaker = 'regular';
+    const choice = run.observer?.externalChoice;
+    if (choice) {
+      speaker = choice === 'visitPier' ? 'regular' : 'ahe';
+    } else {
+      const willingToWait = observer.preferredSource === 'ahe'
+        ? seen.previousMeeting !== 'declined'
+        : seen.previousMeeting === 'chatted';
+      if (observer.preferredSource === 'regular' || (!observer.aheAvailable && !willingToWait)) speaker = 'regular';
+    }
   }
   const target = OBSERVER_SPEAKERS[speaker];
   if (run.place !== target.place) {
@@ -154,15 +159,15 @@ function nextInterview(run: CafeRun, at: number) {
   return enter(run, 'interviewing', at, 8000, `01 号问${target.name}：“${question}”`);
 }
 
-export function beginCafe(at: number, preference: Preference, friendBusy: boolean, previousEncounter?: CafeEncounter, kind: CafeShiftKind = 'cafe'): CafeRun {
+export function beginCafe(at: number, preference: Preference, friendBusy: boolean, previousEncounter?: CafeEncounter, kind: CafeShiftKind = 'cafe', driver: ObserverDriver = 'rules'): CafeRun {
   const run: CafeRun = {
     phase: 'working', since: at, until: null, place: 'counter', energy: 68, preference,
     friendBusyUntil: friendBusy ? at + 30000 : at, finishedWork: false, meeting: 'none', events: [],
   };
   if (previousEncounter) run.previousEncounter = previousEncounter;
   if (kind === 'observer') {
-    run.observer = { angle: 'safety', sources: [] };
-    enter(run, 'briefing', at, 18000, `01 号接到采访议题「${OBSERVER_TOPIC}」`);
+    run.observer = { angle: 'safety', sources: [], driver };
+    enter(run, 'briefing', at, driver === 'external' ? 120000 : 18000, `01 号接到采访议题「${OBSERVER_TOPIC}」`);
   } else nextDecision(run, at);
   return run;
 }
@@ -172,6 +177,11 @@ export function advanceCafe(run: CafeRun, now: number): void {
     const at = run.until;
     switch (run.phase) {
       case 'briefing':
+        if (run.observer?.driver === 'external' && !run.observer.externalChoice) {
+          run.events.push({ at, text: '外部 Agent 的决定超时，01 号按城市规则继续采访。' });
+        }
+        nextInterview(run, at);
+        break;
       case 'waitingForAhe':
         nextInterview(run, at);
         break;
@@ -250,7 +260,40 @@ export function advanceCafe(run: CafeRun, now: number): void {
   }
 }
 
-export function suggestCafe(run: CafeRun, suggestion: string) {
+export function observeExternalChoice(run: CafeRun, at: number) {
+  if (run.observer?.driver !== 'external') return null;
+  const seen = localObservation(run, at).cafeDemo!;
+  const assignment = seen.observer!;
+  const actions: ObserverAction[] = run.phase === 'briefing' && !run.observer.externalChoice
+    ? [assignment.aheAvailable ? 'interviewAhe' : 'waitForAhe', 'visitPier'] : [];
+  return {
+    shiftStartedAt: run.events[0]!.at,
+    phase: run.phase,
+    place: seen.place,
+    topic: OBSERVER_TOPIC,
+    aheAvailable: assignment.aheAvailable,
+    previousMeeting: seen.previousMeeting,
+    remainingSources: assignment.remainingSources,
+    preferredSource: assignment.preferredSource,
+    question: OBSERVER_QUESTIONS[run.observer.angle],
+    actions,
+  };
+}
+
+export function suggestCafe(run: CafeRun, suggestion: string, at = run.since) {
+  const control = (Object.entries(OBSERVER_ACTIONS) as [ObserverAction, string][]).find(([, value]) => value === suggestion)?.[0];
+  if (control) {
+    const observation = observeExternalChoice(run, at);
+    if (!observation?.actions.includes(control) || !run.observer) {
+      return { accepted: false, reason: '当前班次不能执行这个采访选择，请重新读取状态。' };
+    }
+    const decision = { interviewAhe: '先采访阿禾', waitForAhe: '等阿禾收完摊', visitPier: '先去北岸码头采访常客' };
+    run.observer.externalChoice = control;
+    run.events.push({ at, text: `外部 Agent 选择${decision[control]}。` });
+    run.until = at;
+    advanceCafe(run, at);
+    return { accepted: true, reason: `城市已执行采访选择：${decision[control]}。` };
+  }
   if (run.observer) {
     if (run.phase !== 'briefing') return { accepted: false, reason: '01 号已经开始采访行程，这张纸条错过了本次决定。' };
     switch (suggestion) {

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { CAFE_RETENTION_DAYS, CafeDemoStore } from '../../../../lib/cafe-demo-store';
+import { OBSERVER_ACTIONS, type ObserverAction } from '../../../../lib/cafe-observer';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,6 +52,11 @@ export function GET(request: NextRequest) {
   const unavailable = checkRuntime();
   if (unavailable) return unavailable;
   const resident = request.cookies.get(residentCookie)?.value;
+  if (request.nextUrl.searchParams.get('control') === 'observer') {
+    return resident && uuid.test(resident)
+      ? json(store().observeExternal(resident))
+      : json({ error: '此班次需要本地试玩凭据。' }, 401);
+  }
   const newspaper = request.nextUrl.searchParams.get('newspaper');
   if (newspaper !== null) {
     const requested = newspaper === 'latest' ? undefined : newspaper;
@@ -86,16 +92,20 @@ export async function POST(request: NextRequest) {
   if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
   if (input.action === 'start' && typeof input.busy === 'boolean') {
     if (input.kind !== undefined && input.kind !== 'cafe' && input.kind !== 'observer') return json({ error: '这个班次尚未开放。' }, 400);
-    const result = store().start(input.requestId, input.busy, resident, input.kind);
+    if (input.driver !== undefined && (input.kind !== 'observer' || input.driver !== 'external')) return json({ error: '无效的采访控制方式。' }, 400);
+    const result = store().start(input.requestId, input.busy, resident, input.kind, input.driver);
     if ('error' in result) return json({ error: result.error }, 409);
     const response = json(snapshot(result));
     setResident(response, request, resident);
     return response;
   }
-  if (input.action !== 'note' || !['chat', 'rest', 'fish', 'aheFirst', 'regularFirst', 'askSafety', 'askImpact'].includes(input.suggestion)) {
+  const note = input.action === 'note' && ['chat', 'rest', 'fish', 'aheFirst', 'regularFirst', 'askSafety', 'askImpact'].includes(input.suggestion);
+  const choice = input.action === 'choose' && typeof input.choice === 'string' && Object.hasOwn(OBSERVER_ACTIONS, input.choice);
+  if (!note && !choice) {
     return json({ error: '街区尚未开放这项动作。' }, 400);
   }
   if (!Number.isSafeInteger(input.shiftStartedAt)) return json({ error: '纸条缺少班次信息，请刷新后重试。' }, 400);
-  const result = store().note(resident, input.shiftStartedAt, input.requestId, input.suggestion);
+  const suggestion = choice ? OBSERVER_ACTIONS[input.choice as ObserverAction] : input.suggestion;
+  const result = store().note(resident, input.shiftStartedAt, input.requestId, suggestion);
   return result ? json(snapshot(result)) : json({ error: '班次已过期，请重新开始。' }, 410);
 }

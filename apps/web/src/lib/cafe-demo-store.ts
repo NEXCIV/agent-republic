@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { advanceCafe, beginCafe, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
+import { advanceCafe, beginCafe, observeExternalChoice, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
+import type { ObserverDriver } from './cafe-observer';
 import { writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
 import { buildCafePostcard } from './cafe-postcard';
 import type { CafeSnapshot } from './cafe-life';
@@ -106,7 +107,7 @@ export class CafeDemoStore {
     return typeof row?.id === 'string' ? row.id : undefined;
   }
 
-  start(id: string, busy: boolean, resident: string, kind: CafeShiftKind = 'cafe'): Response | { error: string } {
+  start(id: string, busy: boolean, resident: string, kind: CafeShiftKind = 'cafe', driver: ObserverDriver = 'rules'): Response | { error: string } {
     const at = this.clock();
     const result = this.transaction(() => {
       this.db.prepare('DELETE FROM shifts WHERE started < ?').run(at - CAFE_RETENTION_DAYS * 86400000);
@@ -116,7 +117,7 @@ export class CafeDemoStore {
         if (this.latestId(resident) !== id) return { error: '该请求属于上一个班次。' };
         const existing = this.current(id, at)!;
         const originallyBusy = existing.friendBusyUntil > existing.events[0]!.at;
-        if (originallyBusy !== busy || Boolean(existing.observer) !== (kind === 'observer')) return { error: '开班编号已用于另一种班次。' };
+        if (originallyBusy !== busy || Boolean(existing.observer) !== (kind === 'observer') || (existing.observer?.driver ?? 'rules') !== driver) return { error: '开班编号已用于另一种班次。' };
         return { run: existing, serverTime: at };
       }
       const latestId = this.latestId(resident);
@@ -126,12 +127,17 @@ export class CafeDemoStore {
         FROM shifts WHERE resident=? AND json_extract(state, '$.meeting') IN ('declined', 'chatted')
         ORDER BY started DESC LIMIT 1
       `).get(resident) as CafeEncounter | undefined;
-      const initial = beginCafe(at, 'social', busy, memory, kind);
+      const initial = beginCafe(at, 'social', busy, memory, kind, driver);
       this.db.prepare('INSERT INTO shifts(id,state,next_at,started,resident) VALUES (?,?,?,?,?)').run(id, JSON.stringify(initial), initial.until, at, resident);
       return { run: initial, serverTime: at };
     });
     this.arm();
     return result;
+  }
+
+  observeExternal(resident: string) {
+    const snapshot = this.read(resident);
+    return snapshot ? observeExternalChoice(snapshot.run, snapshot.serverTime) : null;
   }
 
   read(resident: string, migrateLegacy = false, seenAt?: number): Response | null {
@@ -186,7 +192,7 @@ export class CafeDemoStore {
 
   note(resident: string, shiftStartedAt: number, request: string, suggestion: string): Response | null {
     const serverTime = this.clock();
-    return this.transaction(() => {
+    const result = this.transaction(() => {
       const id = this.latestId(resident);
       if (!id) return null;
       const run = this.current(id, serverTime)!;
@@ -195,13 +201,15 @@ export class CafeDemoStore {
       }
       const saved = this.db.prepare('SELECT suggestion,reply FROM notes WHERE shift=? AND id=?').get(id, request);
       if (saved && saved.suggestion !== suggestion) return { run, serverTime, accepted: false, feedback: '纸条编号已用于另一项建议。' };
-      const reply: ReturnType<typeof suggestCafe> = saved ? JSON.parse(String(saved.reply)) : suggestCafe(run, suggestion);
+      const reply: ReturnType<typeof suggestCafe> = saved ? JSON.parse(String(saved.reply)) : suggestCafe(run, suggestion, serverTime);
       if (!saved) {
         this.db.prepare('INSERT INTO notes VALUES (?,?,?,?)').run(id, request, suggestion, JSON.stringify(reply));
         if (reply.accepted) this.save(id, run);
       }
       return { run, serverTime, accepted: reply.accepted, feedback: reply.reason };
     });
+    if (result?.accepted) this.arm();
+    return result;
   }
 
   close() { clearTimeout(this.timer); this.db.close(); }

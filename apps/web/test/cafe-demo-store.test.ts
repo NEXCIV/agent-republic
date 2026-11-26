@@ -209,4 +209,29 @@ describe.skipIf(!supported)('café shift persistence', () => {
     expect(restored.read('reader', false, resumed.serverTime)?.postcard).toBeUndefined();
     expect(restored.read('reader', false, resumed.serverTime + 60000)?.postcard).toBeUndefined();
   });
+
+  it('accepts a scoped external choice once and keeps the chosen route after disconnecting', () => {
+    vi.useFakeTimers();
+    const file = fixture();
+    const store = open(file);
+    const started = store.start('external-shift', true, 'reader', 'observer', 'external');
+    if ('error' in started) throw new Error(started.error);
+    const at = started.serverTime;
+    expect(store.observeExternal('stranger')).toBeNull();
+    expect(store.observeExternal('reader')).toMatchObject({
+      shiftStartedAt: at, aheAvailable: false, actions: ['waitForAhe', 'visitPier'],
+    });
+    expect(store.note('reader', at, 'wrong', 'chooseAhe')?.accepted).toBe(false);
+    expect(store.note('reader', at - 1, 'old', 'choosePier')?.accepted).toBe(false);
+    expect(store.note('reader', at, 'action', 'choosePier')?.run.phase).toBe('toPier');
+    expect(store.note('reader', at, 'action', 'chooseAhe')?.accepted).toBe(false);
+    stores.pop()!.close();
+    vi.advanceTimersByTime(180000);
+    const restored = open(file);
+    expect(restored.note('reader', at, 'action', 'choosePier')?.accepted).toBe(true);
+    const finished = restored.read('reader')!.run;
+    expect(finished.observer?.sources[0]?.speaker).toBe('regular');
+    expect(finished.events.filter(({ text }) => text.includes('外部 Agent 选择'))).toHaveLength(1);
+    expect(restored.newspaper('reader')?.current?.sources).toHaveLength(2);
+  });
 });

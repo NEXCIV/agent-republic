@@ -10,6 +10,13 @@ export const OBSERVER_SPEAKERS = {
 export type ObserverSpeaker = keyof typeof OBSERVER_SPEAKERS;
 export type ObserverAngle = keyof typeof OBSERVER_QUESTIONS;
 export type ObserverSuggestion = 'aheFirst' | 'regularFirst' | 'askSafety' | 'askImpact';
+export const OBSERVER_ACTIONS = {
+  interviewAhe: 'chooseAhe',
+  waitForAhe: 'chooseWait',
+  visitPier: 'choosePier',
+} as const;
+export type ObserverAction = keyof typeof OBSERVER_ACTIONS;
+export type ObserverDriver = 'rules' | 'external';
 export type ObserverSource = {
   id: string;
   at: number;
@@ -19,6 +26,8 @@ export type ObserverSource = {
   quote: string;
 };
 export type ObserverAssignment = {
+  driver?: ObserverDriver;
+  externalChoice?: ObserverAction;
   preferredSource?: ObserverSpeaker;
   angle: ObserverAngle;
   sources: ObserverSource[];

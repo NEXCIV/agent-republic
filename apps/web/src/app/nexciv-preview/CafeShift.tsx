@@ -15,6 +15,7 @@ export const phaseLabel = {
   briefing: '准备采访', waitingForAhe: '等阿禾收摊', interviewing: '正在采访', toCounter: '返回咖啡摊 · 行程快进',
 };
 export function shiftLabel(run: CafeView) {
+  if (run.phase === 'briefing' && run.observer?.driver === 'external') return '等待外部 Agent 决定';
   if (run.observer && run.phase === 'done') return '采访已完成';
   if (run.phase === 'interviewing') return run.place === 'pier' ? '采访码头常客' : '采访阿禾';
   if (run.phase === 'done' && run.fishResult) return run.fishResult === 'released' ? '钓到小鱼，已放回湖里' : '这一竿没钓到鱼';
