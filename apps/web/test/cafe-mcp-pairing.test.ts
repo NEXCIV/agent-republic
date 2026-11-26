@@ -278,15 +278,15 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(walking.movement).toMatchObject({
       requestId: read.requestId, status: 'walking', name: '议事公告栏', regions: ['north'],
     });
-    expect(walking.movement.metres).toBeGreaterThan(8);
-    expect((await post({ action: 'moveTo', requestId: read.requestId, destination: { x: 7.35, z: -76.3 } }, agent)).status).toBe(409);
+    expect(walking.movement.metres).toBeGreaterThan(5);
+    expect((await post({ action: 'moveTo', requestId: read.requestId, destination: { x: 5.5, z: -77.75 } }, agent)).status).toBe(409);
     expect((await get('?control=city', other).json()).recentActivities).toEqual([]);
 
     local.nexcivCafeStore?.close();
     local.nexcivCafeStore = undefined;
     vi.setSystemTime(walking.movement.arrivesAt);
     const reading = await get('?control=city', owner).json();
-    expect(reading.position).toEqual([7.35, 0.182, -76.3]);
+    expect(reading.position).toEqual([5.5, 0.182, -77.75]);
     expect(reading.movement.status).toBe('arrived');
     expect(reading.recentActivities[0]).toMatchObject({
       status: 'running', events: [expect.any(Object), { type: 'checkpoint', position: reading.position, at: expect.any(Number), text: '已到达议事公告栏。' }],
@@ -303,6 +303,7 @@ describe.skipIf(!supported)('café browser pairing', () => {
     });
     const next = await (await post({ action: 'moveTo', destination: { place: 'plaza' } }, agent)).json();
     expect(next.points[0]).toEqual(reading.position);
+    expect(planCityWalk([7.35, 0.182, -76.3], { x: 5.5, z: -77.75 })?.points.at(-1)).toEqual(reading.position);
   });
 
   it('persists a local conversation and restores a resident’s energy after resting', async () => {

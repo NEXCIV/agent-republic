@@ -5,7 +5,7 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
 import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
-import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD } from '../../lib/council-notice';
+import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING } from '../../lib/council-notice';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import type { CityObservation } from '../../lib/city-movement';
 import type { CityPerson } from '../../lib/city-activities';
@@ -291,7 +291,7 @@ function addCouncilNotice(asset: THREE.Object3D) {
   );
   notice.name = 'NEXCIV_Council_Demo_Notice';
   notice.position.set(...COUNCIL_NOTICE_BOARD);
-  notice.rotation.y = -Math.PI / 12;
+  notice.rotation.y = COUNCIL_NOTICE_HEADING;
   asset.add(notice);
 }
 
@@ -1118,7 +1118,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     northLoading = Promise.all([
       request('governance-route.json', priority).then((response) => response.json() as Promise<RouteData>),
       request('nexus-connector.json', priority).then((response) => response.json() as Promise<Connection>),
-      request('governance-north.glb?v=2', priority).then((response) => response.arrayBuffer()),
+      request('governance-north-council-notice.glb', priority).then((response) => response.arrayBuffer()),
       cafeMode ? undefined : request('agent-03.glb', priority).then((response) => response.arrayBuffer()).catch(() => undefined),
     ]).then(async ([layout, connector, cityBytes, agentBytes]) => {
       if (ended || contextLost) return;

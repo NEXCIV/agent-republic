@@ -41,6 +41,8 @@ DEST = ROOT / "apps/web/public/nexciv-walk"
 WORKS_DEMONSTRATOR = "WORKS_Robotics_Demonstrator"
 WORKS_DEMONSTRATOR_LIBRARY = ROOT / "art-direction/world-upgrade-v1/lakeside-study/assets/Works_Robotics_Demonstrator.blend"
 WORKS_REBUILT_LIBRARY = ROOT / "art-direction/world-upgrade-v1/landmark-masters/buildings/Public_Construction_Rebuilt.blend"
+COUNCIL_NOTICE_KIOSK = "CIVRUM_PROP_INFO_KIOSK_01.002"
+COUNCIL_NOTICE_PLACEMENT = ROOT / "apps/web/src/lib/council-notice-placement.json"
 WEST, EAST, SOUTH, NORTH = -52, 53, -81, 46
 GOVERNANCE_NORTH = 116
 GOVERNANCE_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.002"
@@ -192,7 +194,7 @@ CHUNKS = {
     "base": "nexus-market.glb",
     "street": "nexus-street-detail.glb",
     "market": "corner-market-detail.glb",
-    "governance": "governance-north.glb",
+    "governance": "governance-north-council-notice.glb",
     "hall": "governance-hall-detail.glb",
     "retail": "garden-roof-retail-detail.glb",
     "east": "east-civic-district.glb",
@@ -702,6 +704,11 @@ def stage_assets(scene, graph, chunk, library=DEST):
         asset = bpy.data.objects.new(source.name, mesh)
         root.objects.link(asset)
         asset.matrix_world = Matrix.Identity(4) if chunk == "retail" else transform
+        if chunk == "governance" and name == COUNCIL_NOTICE_KIOSK:
+            placement = json.loads(COUNCIL_NOTICE_PLACEMENT.read_text(encoding="utf-8"))
+            x, y, z = placement["kiosk"]
+            asset.location = (x, -z, y)
+            asset.rotation_euler.z = math.radians(placement["headingDegrees"])
         if chunk == "shore" and name == PARKLAND:
             trim_parkland(mesh, transform)
         if name.startswith("CIVRUM_LOT_PAINT_"):
