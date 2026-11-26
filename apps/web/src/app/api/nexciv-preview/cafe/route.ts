@@ -212,9 +212,10 @@ function chooseEveningWalk(actor: CafeActor, requestId: string, input: unknown) 
   return 'error' in result ? json({ error: result.error }, result.code) : json(result);
 }
 
-function theatreDecision(actor: CafeActor, input: { requestId: string; revision?: unknown; agentId?: unknown; decision?: unknown; slot?: unknown }) {
-  const { requestId, revision, agentId, decision, slot } = input;
-  const choice = theatreDecisionSchema.safeParse({ revision, agentId, decision, slot });
+function theatreDecision(actor: CafeActor, input: { requestId: string; revision?: unknown; agentId?: unknown;
+  decision?: unknown; slot?: unknown; cue?: unknown; response?: unknown }) {
+  const { requestId, revision, agentId, decision, slot, cue, response } = input;
+  const choice = theatreDecisionSchema.safeParse({ revision, agentId, decision, slot, cue, response });
   if (!choice.success) return json({ error: '请选择剧场观察中的居民和可用动作。' }, 400);
   const result = store().theatreDecision(actor, requestId, choice.data);
   return 'error' in result ? json({ error: result.error }, result.code) : json(result);

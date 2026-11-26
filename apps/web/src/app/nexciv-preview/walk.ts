@@ -13,6 +13,7 @@ import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
 import { THEATRE_CLOCK, THEATRE_STAGE } from '../../lib/theatre-layout';
 import { createTheatreLighting } from './theatre-lighting';
+import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
 export type District = 'east' | 'west' | 'shore' | 'research' | 'residential';
@@ -412,6 +413,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let lightingLamp: THREE.Group | undefined;
   let installationKit: THREE.Group | undefined;
   let theatreLights: ReturnType<typeof createTheatreLighting> | undefined;
+  let stageInstallation: ReturnType<typeof createStageInstallation> | undefined;
   let theatreOpen = false;
   const theatreFocus = new THREE.Vector3(THEATRE_STAGE[0], 0.82, 83.25);
   let siteHost: { patrol: Patrol; asset: GLTF; position: THREE.Vector3; facing: THREE.Vector3 } | undefined;
@@ -708,6 +710,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           theatreOpen = open;
           theatreLights.setOpen(open);
         }
+        if (theatre.programme && !stageInstallation) {
+          stageInstallation = createStageInstallation();
+          cafeProps.add(stageInstallation.group);
+        }
+        stageInstallation?.update(cityTime - theatre.booking.opensAt, playing && tween);
       }
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
       const host = cityObservation?.nearby?.people[0];

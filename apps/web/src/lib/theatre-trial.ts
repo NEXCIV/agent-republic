@@ -3,6 +3,7 @@ import type { CityPoint } from './cafe-geometry';
 import { type CityWalk, positionOnWalk, routeDistance } from './city-movement';
 import { planCityWalk } from './city-navigation';
 import { THEATRE_AISLE, THEATRE_STAGE } from './theatre-layout';
+import { THEATRE_CUES, THEATRE_PROGRAMME_ID, THEATRE_PROGRAMME_NAME, theatreCues, type TheatreCue } from './theatre-programme';
 
 const RESIDENTS = ['01', '03'] as const;
 export type TheatreResidentId = typeof RESIDENTS[number];
@@ -20,31 +21,41 @@ const facing: [number, number] = [THEATRE_STAGE[0], THEATRE_STAGE[2]];
 
 const residentId = z.enum(RESIDENTS);
 const slotId = z.enum(['early', 'late']);
+const responses = ['keep', 'adjust'] as const;
+const cueIds = THEATRE_CUES.map(({ id }) => id) as [TheatreCue['id'], ...TheatreCue['id'][]];
 export const theatreDecisionSchema = z.object({
   revision: z.number().int().min(0).max(10), agentId: residentId,
-  decision: z.enum(['propose', 'counter', 'accept', 'decline', 'attend', 'skip']), slot: slotId.optional(),
-}).strict().refine(({ decision, slot }) => (decision === 'propose' || decision === 'counter') === (slot !== undefined));
+  decision: z.enum(['propose', 'counter', 'accept', 'decline', 'attend', 'skip', 'feedback']), slot: slotId.optional(),
+  cue: z.enum(cueIds).optional(), response: z.enum(responses).optional(),
+}).strict().refine(({ decision, slot, cue, response }) => {
+  if (decision === 'feedback') return slot === undefined && cue !== undefined && response !== undefined;
+  return cue === undefined && response === undefined && ((decision === 'propose' || decision === 'counter') === (slot !== undefined));
+});
 export type TheatreDecision = z.infer<typeof theatreDecisionSchema>;
 type Decision = TheatreDecision['decision'];
 type Option = Omit<TheatreDecision, 'revision'>;
-type Booking = { slot: Slot; name: string; opensAt: number; closesAt: number };
+type Booking = { slot: Slot; name: string; opensAt: number; closesAt: number; programme?: typeof THEATRE_PROGRAMME_ID };
 type Offer = { by: TheatreResidentId; slot: Slot };
 type Journey = { walk: CityWalk; gateAt: number; entersAt: number; seatedAt: number };
 type Attendance = { kind: 'absent' } | { kind: 'attend'; journey: Journey };
 type Phase = 'available' | 'negotiating' | 'cancelled' | 'scheduled' | 'open' | 'finished';
 type Status = 'undecided' | 'absent' | 'en-route' | 'waiting' | 'entering' | 'seated' | 'leaving' | 'departed';
 type TheatreEvent = {
-  id: string; at: number; type: Decision | 'open' | 'wait' | 'enter' | 'seat' | 'close' | 'missed'; text: string;
+  id: string; at: number; type: Decision | 'open' | 'wait' | 'enter' | 'seat' | 'close' | 'missed' | 'cue'; text: string;
   agentId?: TheatreResidentId;
+  cue?: TheatreCue['id'];
+  response?: typeof responses[number];
 };
 type ResidentView = {
   status: Status; energy: number; busy: boolean; position: CityPoint | null; travelSeconds?: number;
   walk?: CityWalk; seatedAt?: number;
+  watched: Array<TheatreCue & { seconds: number }>;
 };
 export type TheatreView = {
   revision: number; title: string; phase: Phase; slots: typeof SLOTS; offer?: Offer; booking?: Booking;
   residents: Record<TheatreResidentId, ResidentView>;
   availableActions: Option[]; attendees: TheatreResidentId[]; events: TheatreEvent[];
+  programme?: { title: string; cues: TheatreCue[]; activeCue?: TheatreCue };
 };
 type ResidentContext = { position: CityPoint | null; energy: number; busy: boolean };
 export type TheatreContext = Record<TheatreResidentId, ResidentContext>;
@@ -98,6 +109,8 @@ function planJourney(path: NonNullable<ReturnType<typeof theatrePath>>, id: Thea
 
 export function observeTheatre(trial: TheatreTrial | undefined, context: TheatreContext, at: number): TheatreView {
   const { booking, offer } = trial ?? {};
+  const cues = booking?.programme === THEATRE_PROGRAMME_ID ? theatreCues(booking.opensAt) : [];
+  const activeCue = cues.find(({ startsAt, endsAt }) => at >= startsAt && at < endsAt);
   const phase: Phase = booking ? at < booking.opensAt ? 'scheduled' : at < booking.closesAt ? 'open' : 'finished'
     : trial?.cancelled ? 'cancelled' : offer ? 'negotiating' : 'available';
   const availableActions: Option[] = [];
@@ -115,6 +128,9 @@ export function observeTheatre(trial: TheatreTrial | undefined, context: Theatre
   const events = [...(trial?.events ?? [])];
   if (booking && at >= booking.opensAt) {
     events.push({ id: 'theatre.open', at: booking.opensAt, type: 'open', text: '剧场入口亮灯，开始入场。' });
+  }
+  for (const cue of cues) {
+    if (at >= cue.startsAt) events.push({ id: `cue.${cue.id}`, at: cue.startsAt, type: 'cue', cue: cue.id, text: `舞台进入「${cue.name}」。` });
   }
   if (booking && at >= booking.closesAt) {
     events.push({ id: 'theatre.close', at: booking.closesAt, type: 'close', text: '试演结束，入口关闭。' });
@@ -153,8 +169,17 @@ export function observeTheatre(trial: TheatreTrial | undefined, context: Theatre
     }
     const moving = journey && at < journey.walk.arrivesAt;
     const position = status === 'seated' ? THEATRE_AISLE[id].seat : moving ? positionOnWalk(journey.walk, at) : current.position;
+    const watched = journey ? cues.flatMap((cue) => {
+      const duration = Math.min(cue.endsAt, at) - Math.max(cue.startsAt, journey.seatedAt);
+      return duration >= 3500 ? [{ ...cue, seconds: Math.floor(duration / 1000) }] : [];
+    }) : [];
+    if (status === 'departed' && !trial?.commands.some(({ choice }) => choice.agentId === id && choice.decision === 'feedback')) {
+      for (const { id: cue } of watched) {
+        for (const response of responses) availableActions.push({ agentId: id, decision: 'feedback', cue, response });
+      }
+    }
     residents[id] = {
-      ...current, status, position, busy: current.busy || Boolean(moving),
+      ...current, status, position, busy: current.busy || Boolean(moving), watched,
       ...(travelSeconds === undefined ? {} : { travelSeconds }),
       ...(journey ? { walk: journey.walk, seatedAt: journey.seatedAt } : {}),
     };
@@ -162,6 +187,7 @@ export function observeTheatre(trial: TheatreTrial | undefined, context: Theatre
   return {
     title: TITLE, revision: trial?.commands.length ?? 0, phase, slots: SLOTS, offer, booking, residents,
     availableActions, attendees, events: events.sort((a, b) => a.at - b.at),
+    ...(cues.length ? { programme: { title: THEATRE_PROGRAMME_NAME, cues, activeCue } } : {}),
   };
 }
 
@@ -172,11 +198,13 @@ export function applyTheatreDecision(trial: TheatreTrial | undefined, context: T
   if (recorded) {
     const saved = recorded.choice;
     return saved.agentId === choice.agentId && saved.decision === choice.decision && saved.slot === choice.slot && saved.revision === choice.revision
+      && saved.cue === choice.cue && saved.response === choice.response
       ? { state, view, repeated: true } : { error: '请求编号已用于另一项剧场决定。', code: 409 };
   }
   if (view.revision !== choice.revision) return { error: '剧场日程或回应已更新，请重新观察。', code: 409 };
-  const { agentId, decision, slot } = choice;
-  if (!view.availableActions.some((option) => option.agentId === agentId && option.decision === decision && option.slot === slot)) {
+  const { agentId, decision, slot, cue, response } = choice;
+  if (!view.availableActions.some((option) => option.agentId === agentId && option.decision === decision && option.slot === slot
+    && option.cue === cue && option.response === response)) {
     return { error: '这位居民当前无法执行这项剧场动作。', code: 422 };
   }
   let text: string;
@@ -186,7 +214,7 @@ export function applyTheatreDecision(trial: TheatreTrial | undefined, context: T
   } else if (decision === 'accept') {
     const selected = slotFor(state.offer!.slot);
     const opensAt = at + selected.waitSeconds * 1000;
-    state.booking = { slot: selected.id, name: selected.name, opensAt, closesAt: opensAt + OPEN_MS };
+    state.booking = { slot: selected.id, name: selected.name, opensAt, closesAt: opensAt + OPEN_MS, programme: THEATRE_PROGRAMME_ID };
     text = `接受${selected.name}，场次已公布。`;
   } else if (decision === 'decline') {
     state.cancelled = true;
@@ -194,6 +222,10 @@ export function applyTheatreDecision(trial: TheatreTrial | undefined, context: T
   } else if (decision === 'skip') {
     state.attendance[agentId] = { kind: 'absent' };
     text = '决定本场缺席。';
+  } else if (decision === 'feedback') {
+    const segment = THEATRE_CUES.find(({ id }) => id === cue)!;
+    const watched = view.residents[agentId].watched.find(({ id }) => id === cue)!;
+    text = `看了「${segment.name}」${watched.seconds} 秒。${response === 'keep' ? '希望保留这一段。' : segment.suggestion}`;
   } else {
     const path = theatrePath(context[agentId].position!, agentId);
     const journey = path && planJourney(path, agentId, state.booking!, requestId, at);
@@ -202,6 +234,6 @@ export function applyTheatreDecision(trial: TheatreTrial | undefined, context: T
     text = '确认参加，沿步道前往社区剧场。';
   }
   state.commands.push({ requestId, choice });
-  state.events.push({ id: requestId, at, agentId, type: decision, text });
+  state.events.push({ id: requestId, at, agentId, type: decision, text, ...(cue && response ? { cue, response } : {}) });
   return { state, view: observeTheatre(state, context, at), repeated: false };
 }

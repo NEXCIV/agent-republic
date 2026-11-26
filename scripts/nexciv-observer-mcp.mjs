@@ -125,11 +125,13 @@ serveStdio(() => {
     requestId: z.uuidv4().optional(),
   }), false, async ({ requestId = randomUUID(), ...choice }) => eveningSummary(await request('', { action: 'chooseEveningWalk', choice, requestId })));
 
-  tool('respond_theatre', '从最近一次 observe_city.theatre 的 availableActions 中选择动作，附上该观察的 revision。01 号与 03 号可报价时段、接受、改约或谢绝。排期后可选择前往剧场或缺席。', z.strictObject({
+  tool('respond_theatre', '执行最近一次 observe_city.theatre 返回的可用动作和 revision。可协商时段、入场或缺席。离场后可对实际看过的节目段落提交 feedback（照观测填写 cue 和 response）。', z.strictObject({
     revision: z.number().int().min(0).max(10),
     agentId: z.enum(['01', '03']),
-    decision: z.enum(['propose', 'counter', 'accept', 'decline', 'attend', 'skip']),
+    decision: z.enum(['propose', 'counter', 'accept', 'decline', 'attend', 'skip', 'feedback']),
     slot: z.enum(['early', 'late']).optional(),
+    cue: z.enum(['shoreline', 'water', 'finale']).optional(),
+    response: z.enum(['keep', 'adjust']).optional(),
     requestId: z.uuidv4().optional(),
   }), false, async ({ requestId = randomUUID(), ...choice }) => theatreSummary(await request('', { action: 'theatreDecision', requestId, ...choice })));
 

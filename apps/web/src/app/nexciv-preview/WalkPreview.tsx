@@ -31,14 +31,18 @@ const THEATRE_RESIDENT_STATUS: Record<TheatreView['residents']['01']['status'], 
 };
 
 function TheatreProgramme({ theatre }: { theatre: TheatreView }) {
-  const { booking, phase, offer, slots, attendees, residents, events } = theatre;
+  const { booking, phase, offer, slots, attendees, residents, events, programme } = theatre;
   return <details className={styles.cityActivity}>
     <summary>社区剧场 · {THEATRE_STATUS[phase]}{booking && ` · 已到场 ${attendees.length} 人`}</summary>
     {booking ? <p>
       {booking.name} · <time dateTime={new Date(booking.opensAt).toISOString()}>{THEATRE_CLOCK.format(booking.opensAt)}</time> 开放
     </p> : <p>{offer ? `${offer.by} 号提议${slots.find(({ id }) => id === offer.slot)?.name}`
       : slots.map(({ name, waitSeconds }) => `${name}（确认后 ${waitSeconds} 秒开放）`).join('、')}</p>}
+    {programme && <p>《{programme.title}》 · {programme.cues.map(({ name }) => name).join('、')}</p>}
     <p>{(['01', '03'] as const).map((id) => `${id} 号 ${THEATRE_RESIDENT_STATUS[residents[id].status]}`).join(' · ')}</p>
+    {phase === 'finished' && attendees.map((id) => residents[id].watched.length > 0 && <p key={id}>
+      {id} 号观看 · {residents[id].watched.map(({ name, seconds }) => `${name} ${seconds} 秒`).join('、')}
+    </p>)}
     {events.length > 0 && <ol>{events.map((entry) => <li key={entry.id}>
       <time dateTime={new Date(entry.at).toISOString()}>{THEATRE_CLOCK.format(entry.at)}</time> · {entry.agentId && `${entry.agentId} 号 · `}{entry.text}
     </li>)}</ol>}
@@ -243,7 +247,9 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
             {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
           </p>}
           {watchingTheatre && theatre?.booking && <p className={styles.greeting}>
-            {theatre.booking.name} · 已到场 {theatre.attendees.length} 人
+            {theatre.programme?.activeCue
+              ? `《${theatre.programme.title}》 · ${theatre.programme.activeCue.name}`
+              : `${theatre.booking.name} · 已到场 ${theatre.attendees.length} 人`}
           </p>}
           {!cityWalk && !sceneCaption && greeting && <p className={styles.greeting}>{greeting}</p>}
         </div>

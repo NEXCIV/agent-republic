@@ -533,6 +533,8 @@ describe.skipIf(!supported)('café browser pairing', () => {
     const booked = await (await post({ action: 'theatreDecision', revision: 2, agentId: '01', decision: 'accept' }, agent)).json();
     expect(booked).toMatchObject({ phase: 'scheduled', booking: { slot: 'late' } });
     expect(booked.attendees).toEqual([]);
+    expect(booked.programme.cues.map(({ id }: { id: string }) => id)).toEqual(['shoreline', 'water', 'finale']);
+    expect(booked.programme.activeCue).toBeUndefined();
 
     const first = await (await post({ action: 'theatreDecision', revision: booked.revision, agentId: '01', decision: 'attend' }, agent)).json();
     expect(first.residents['01'].status).toBe('en-route');
@@ -558,10 +560,28 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(seated.residents['01'].position).not.toEqual(seated.residents['03'].position);
     expect(seated.events.map(({ type }: { type: string }) => type)).toEqual(expect.arrayContaining(['counter', 'open', 'seat']));
     expect((await get('?control=city', other).json()).theatre).toBeUndefined();
+    const feedback = {
+      action: 'theatreDecision', revision: seated.revision, requestId: randomUUID(), agentId: '01',
+      decision: 'feedback', cue: 'water', response: 'keep',
+    };
+    expect((await post(feedback, agent)).status).toBe(422);
+    vi.setSystemTime(booked.booking.opensAt + 27000);
+    const performance = (await get('?control=city', owner).json()).theatre;
+    expect(performance.programme.activeCue).toMatchObject({ id: 'water' });
     vi.setSystemTime(booked.booking.closesAt + 10000);
     const final = (await get('?control=city', owner).json()).theatre;
     expect(final.phase).toBe('finished');
     expect(final.attendees).toEqual(['01', '03']);
+    expect(final.residents['01'].watched.map(({ id }: { id: string }) => id)).toEqual(['shoreline', 'water', 'finale']);
+    const saved = await post(feedback, agent);
+    expect(saved.status).toBe(200);
+    const reviewed = await saved.json();
+    expect(reviewed.events.at(-1)).toMatchObject({ type: 'feedback', agentId: '01', cue: 'water', response: 'keep' });
+    expect((await (await post(feedback, agent)).json()).revision).toBe(reviewed.revision);
+    expect((await post({ ...feedback, revision: reviewed.revision, requestId: randomUUID() }, agent)).status).toBe(422);
+    local.nexcivCafeStore?.close();
+    local.nexcivCafeStore = undefined;
+    expect((await get('?control=city', owner).json()).theatre.events.at(-1)).toEqual(reviewed.events.at(-1));
     expect((await post({ action: 'moveTo', destination: { place: 'plaza' } }, agent)).status).toBe(200);
   });
 
@@ -569,8 +589,8 @@ describe.skipIf(!supported)('café browser pairing', () => {
     const position = CITY_MAP.places.find(({ id }) => id === 'forum')!.position;
     const context: TheatreContext = { '01': { position, energy: 68, busy: false }, '03': { position, energy: 64, busy: false } };
     const now = Date.now();
-    function pick(state: TheatreTrial | undefined, choice: Omit<TheatreDecision, 'revision'>) {
-      const result = applyTheatreDecision(state, context, { ...choice, revision: state?.commands.length ?? 0 }, randomUUID(), now);
+    function pick(state: TheatreTrial | undefined, choice: Omit<TheatreDecision, 'revision'>, at = now) {
+      const result = applyTheatreDecision(state, context, { ...choice, revision: state?.commands.length ?? 0 }, randomUUID(), at);
       if ('error' in result) throw new Error(result.error);
       return result.state;
     }
@@ -585,5 +605,14 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(closed.residents['03'].walk).toBeUndefined();
     expect(closed.attendees).toEqual(['01']);
     expect(closed.events.filter(({ type }) => type === 'skip')).toHaveLength(1);
+    expect(closed.availableActions.some(({ decision, agentId }) => decision === 'feedback' && agentId === '03')).toBe(false);
+    const earlierBooking = { ...standing, booking: { ...standing.booking!, programme: undefined } };
+    expect(observeTheatre(earlierBooking, context, booked.booking!.closesAt + 10000).programme).toBeUndefined();
+
+    const laterBooking = pick(proposed(), { agentId: '03', decision: 'accept' });
+    const late = pick(laterBooking, { agentId: '03', decision: 'attend' }, laterBooking.booking!.opensAt + 38000);
+    const afterLate = observeTheatre(late, context, laterBooking.booking!.closesAt + 10000);
+    expect(afterLate.residents['03'].watched.map(({ id }) => id)).toEqual(['finale']);
+    expect(afterLate.availableActions.filter(({ agentId }) => agentId === '03').map(({ cue }) => cue)).toEqual(['finale', 'finale']);
   });
 });
