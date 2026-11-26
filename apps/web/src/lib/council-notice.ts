@@ -1,4 +1,5 @@
 import type { CityPoint } from './cafe-geometry';
+import type { LightingPilot } from './city-activities';
 import placement from './council-notice-placement.json';
 
 // Mount the screen just in front of the authored kiosk face.
@@ -18,3 +19,10 @@ export const COUNCIL_NOTICE_APPROACH: CityPoint[] = [
 export const COUNCIL_NOTICE_READING_SPOT = { x: readingPoint[0], z: readingPoint[2] };
 export const COUNCIL_DEMO_AGENDA = ['湖畔步道增设路灯', '社区剧场开放时段'] as const;
 export const COUNCIL_SURVEY_RECEIPT = '已收到调研报告';
+export const LIGHTING_PILOT_STATUS: Record<LightingPilot['stage'], string> = {
+  review: COUNCIL_SURVEY_RECEIPT,
+  approved: '路灯试点获批',
+  dispatch: '02 号前往湖畔施工',
+  installing: '02 号正在安装低位灯',
+  lit: '湖畔试点灯已亮',
+};

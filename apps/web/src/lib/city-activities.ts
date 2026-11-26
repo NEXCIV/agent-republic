@@ -1,12 +1,12 @@
 import type { CityPoint } from './cafe-geometry';
 import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_READING_SPOT, COUNCIL_SURVEY_RECEIPT } from './council-notice';
 import { CITY_MAP, planCityWalk } from './city-navigation';
-import { routeDistance, type CityRegion, type CityWalk } from './city-movement';
+import { positionOnWalk, routeDistance, type CityMovement, type CityRegion, type CityWalk } from './city-movement';
 
 export type CityPerson = { id: string; name: string; position: CityPoint };
 export type CitySite = { place: string; name: string; people: CityPerson[]; facilities: Array<{ id: string; name: string }> };
-type CityActionKind = 'talk' | 'rest' | 'work' | 'read' | 'survey' | 'report';
-export type CityActionOption = { id: string; label: string; kind: CityActionKind; target: string };
+type CityActionKind = 'talk' | 'rest' | 'work' | 'read' | 'survey' | 'report' | 'install';
+export type CityActionOption = { id: string; label: string; kind: CityActionKind; target: string; agentId?: '02' };
 type Checkpoint = { name: string; x: number; z: number };
 type Action = CityActionOption & (
   | { kind: 'talk'; person: CityPerson; question: string; reply: string }
@@ -26,13 +26,14 @@ type CityActivityEvent = {
 export type CityActivity = {
   requestId: string;
   actionId: string;
+  agentId?: '02';
   kind: CityActionKind;
   label: string;
   place: string;
   person?: CityPerson;
   startedAt: number;
   endsAt: number;
-  energyAfter: number;
+  energyAfter?: number;
   events: CityActivityEvent[];
   walk?: CityWalk;
 };
@@ -44,6 +45,19 @@ export type CityActivityView = Omit<CityActivity, 'walk' | 'energyAfter'> & {
 export type LightingSurveyStage = 'available' | 'surveying' | 'ready' | 'submitted';
 export const COUNCIL_LIGHTING_ACTIONS = ['governance.read', 'governance.survey', 'governance.submit'] as const;
 const [READ_AGENDA, SURVEY_LIGHTS, SUBMIT_REPORT] = COUNCIL_LIGHTING_ACTIONS;
+export const INSTALL_LIGHT = {
+  id: 'works.install-light', kind: 'install', label: '02 号领取路灯施工', target: 'shore.pilot-lamp', agentId: '02',
+} as const satisfies CityActionOption;
+const PILOT_LAMP_POSITION: CityPoint = [13, 0.19, -169.24];
+const INSTALLATION_POSITION: CityPoint = [13, 0.19, -168.43];
+const PILOT_REVIEW_MS = 7000;
+const INSTALLATION_MS = 9000;
+type PilotWorker = { activity: CityActivityView; movement: CityMovement; position: CityPoint };
+export type LightingPilot = { approvedAt: number } & (
+  | { stage: 'review' | 'approved'; worker?: never; lamp?: never }
+  | { stage: 'dispatch' | 'installing'; worker: PilotWorker; lamp?: never }
+  | { stage: 'lit'; worker: PilotWorker; lamp: { position: CityPoint; litAt: number } }
+);
 const councilFacing: [number, number] = [COUNCIL_NOTICE_BOARD[0], COUNCIL_NOTICE_BOARD[2]];
 const surveyStops: Array<Checkpoint & { facing: [number, number]; finding: string }> = [
   {
@@ -57,9 +71,10 @@ const surveyStops: Array<Checkpoint & { facing: [number, number]; finding: strin
 ];
 const SURVEY_STOP_MS = 4500;
 
-export function councilLightingSurvey(activities: CityActivity[], at: number): { stage: LightingSurveyStage; report?: string } | undefined {
-  if (activities.some((activity) => activity.actionId === SUBMIT_REPORT && activity.endsAt <= at)) {
-    return { stage: 'submitted' };
+export function councilLightingSurvey(activities: CityActivity[], at: number): { stage: LightingSurveyStage; report?: string; submittedAt?: number } | undefined {
+  const submission = activities.find((activity) => activity.actionId === SUBMIT_REPORT && activity.endsAt <= at);
+  if (submission) {
+    return { stage: 'submitted', submittedAt: submission.endsAt };
   }
   const survey = activities.find((activity) => activity.actionId === SURVEY_LIGHTS);
   if (survey) {
@@ -113,15 +128,16 @@ const venues: Venue[] = [{
   }],
 }];
 
-export function nearbyCitySite(position: CityPoint | null, lightingSurvey?: LightingSurveyStage) {
+export function nearbyCitySite(position: CityPoint | null, lightingSurvey?: LightingSurveyStage, managerAway = false) {
   if (!position) return null;
   const venue = venues.find((entry) => routeDistance(position, entry.entrance) <= entry.reach);
   if (!venue) return null;
   const { place, name, people, facilities, actions } = venue;
   const atNotice = Math.hypot(position[0] - COUNCIL_NOTICE_READING_SPOT.x, position[2] - COUNCIL_NOTICE_READING_SPOT.z) <= 1.8;
   return {
-    site: { place, name, people, facilities },
+    site: { place, name, people: managerAway ? people.filter(({ id }) => id !== manager.id) : people, facilities },
     actions: actions.filter(({ kind }) => {
+      if (kind === 'talk' && place === 'works') return !managerAway;
       if (kind === 'survey') return atNotice && lightingSurvey === 'available';
       if (kind === 'report') return atNotice && lightingSurvey === 'ready';
       return true;
@@ -135,13 +151,53 @@ export function availableCityActions(actions: Action[], energy: number): CityAct
 }
 
 export function cityActivityView(activity: CityActivity, at: number): CityActivityView {
-  const { requestId, actionId, kind, label, place, person, startedAt, endsAt, events, energyAfter } = activity;
+  const { requestId, actionId, agentId, kind, label, place, person, startedAt, endsAt, events, energyAfter } = activity;
   const completed = at >= endsAt;
   return {
     requestId, actionId, kind, label, place, person, startedAt, endsAt,
+    ...(agentId ? { agentId } : {}),
     status: completed ? 'completed' : 'running',
     events: events.filter((event) => event.at <= at),
-    ...(completed ? { energyAfter } : {}),
+    ...(completed && energyAfter !== undefined ? { energyAfter } : {}),
+  };
+}
+
+export function lightingPilotView(submittedAt: number | undefined, installation: CityActivity | undefined, at: number): LightingPilot | undefined {
+  if (submittedAt === undefined) return;
+  const approvedAt = submittedAt + PILOT_REVIEW_MS;
+  const walk = installation?.walk;
+  if (!installation || !walk) return { stage: at < approvedAt ? 'review' : 'approved', approvedAt };
+  const travelling = at < walk.arrivesAt;
+  const worker: PilotWorker = {
+    activity: cityActivityView(installation, at),
+    movement: { ...walk, status: travelling ? 'walking' : 'arrived' },
+    position: positionOnWalk(walk, at),
+  };
+  if (at < installation.endsAt) return { stage: travelling ? 'dispatch' : 'installing', worker, approvedAt };
+  return { stage: 'lit', worker, approvedAt, lamp: { position: PILOT_LAMP_POSITION, litAt: installation.endsAt } };
+}
+
+export function beginLightingInstallation(requestId: string, at: number): CityActivity | null {
+  const { x, z } = surveyStops[1]!;
+  const route = planCityWalk(works.position, { x, z });
+  if (!route) return null;
+  // The surveyed main path stays open. The worker alone takes this short paved approach to the lamp.
+  const metres = route.metres + routeDistance(route.points.at(-1)!, INSTALLATION_POSITION);
+  const arrivesAt = at + Math.ceil(metres * 1000 / 4);
+  const endsAt = arrivesAt + INSTALLATION_MS;
+  return {
+    requestId, agentId: '02', actionId: INSTALL_LIGHT.id, kind: 'install', label: '安装湖畔试点路灯',
+    place: 'pier', startedAt: at, endsAt,
+    walk: {
+      ...route, name: '湖畔试点灯位', destination: { x: INSTALLATION_POSITION[0], z: INSTALLATION_POSITION[2] },
+      points: [...route.points, INSTALLATION_POSITION], metres, requestId, startedAt: at, arrivesAt,
+      facing: [PILOT_LAMP_POSITION[0], PILOT_LAMP_POSITION[2]],
+    },
+    events: [
+      { type: 'started', at, speaker: '02 号', text: '试点获批，从公共建设中心出发。' },
+      { type: 'checkpoint', at: arrivesAt, position: INSTALLATION_POSITION, text: '已到达东侧步道灯位，开始安装。' },
+      { type: 'completed', at: endsAt, position: PILOT_LAMP_POSITION, text: 'DEMO · 安装完成，湖畔低位灯已亮。' },
+    ],
   };
 }
 

@@ -99,19 +99,22 @@ serveStdio(() => {
     await request('', { action: 'moveTo', destination, requestId }),
   ));
 
-  tool('observe_city', '读取 01 号的位置、附近的人和设施、可选现场动作以及最近的活动记录。可等待当前行程或现场动作最多 20 秒。', z.strictObject({
+  tool('observe_city', '读取 01 号位置、附近设施和可选动作。湖畔路灯试点会返回审批、02 号行程、施工记录和亮灯状态。可等待活动进度最多 20 秒。', z.strictObject({
     waitSeconds: z.number().int().min(0).max(20).default(0),
   }), true, async ({ waitSeconds }) => {
     const until = Date.now() + waitSeconds * 1000;
     let state = await request('?control=city');
-    while ((state?.movement?.status === 'walking' || state?.recentActivities?.[0]?.status === 'running') && Date.now() < until) {
+    while ((state?.movement?.status === 'walking' || state?.recentActivities?.[0]?.status === 'running'
+      || state?.lightingPilot?.stage === 'review' || state?.lightingPilot?.worker?.activity?.status === 'running') && Date.now() < until) {
       await delay(Math.min(2500, Math.max(0, until - Date.now())));
       state = await request('?control=city');
     }
+    const worker = state?.lightingPilot?.worker;
+    if (worker) worker.movement = movementSummary(worker.movement);
     return state?.movement ? { ...state, movement: movementSummary(state.movement) } : state;
   });
 
-  tool('interact_city', '执行最近一次 observe_city 的 availableActions 中的一项现场动作。议会试玩可读公告、调研湖畔路灯并回公告栏交报告。其他地点可聊天、休息或接任务。用 observe_city 查看现场结果。', z.strictObject({
+  tool('interact_city', '执行最近一次 observe_city 返回的可用动作。议会试玩中，01 号调研后可交报告，试点获批后可让 02 号领取路灯施工。用 observe_city 查看现场结果。', z.strictObject({
     actionId: z.string().regex(/^[a-z][a-z0-9_-]{0,23}\.[a-z][a-z0-9_-]{0,23}$/),
     requestId: z.uuidv4().optional().describe('重试同一项现场动作时复用原 UUID'),
   }), false, ({ actionId, requestId = randomUUID() }) => request('', { action: 'interactCity', actionId, requestId }));

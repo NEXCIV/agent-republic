@@ -6,7 +6,7 @@ export type AgentPhase = 'outbound' | 'arrived' | 'inbound' | 'atNexus';
 export type PatrolCue = {
   hold?: 'start' | 'end';
   face?: THREE.Vector3;
-  gesture?: 'wave' | 'nod';
+  gesture?: 'wave' | 'nod' | 'install';
 };
 
 const SPEED = 1.25;
@@ -25,6 +25,29 @@ function createNod(asset: GLTF, mixer: THREE.AnimationMixer) {
   );
   const clip = new THREE.AnimationClip('Acknowledge', times.at(-1)!, [track], THREE.AdditiveAnimationBlendMode);
   return mixer.clipAction(clip).setLoop(THREE.LoopOnce, 1);
+}
+
+function createInstallationPose(asset: GLTF, mixer: THREE.AnimationMixer) {
+  const times = [0, 0.54, 0.96, 1.48, 2.06, 2.6, 3.2];
+  const axes = new THREE.Quaternion();
+  const worldPitch = PITCH_AXIS.clone().applyQuaternion(asset.scene.getWorldQuaternion(axes));
+  const tracks: THREE.QuaternionKeyframeTrack[] = [];
+  const keyframes: Array<[string, number[]]> = [
+    ['Head', [0.19, 0.27, 0.31, 0.24, 0.28, 0.23, 0.19]],
+    ['UpperArm.L', [-0.20, -0.27, -0.28, -0.25, -0.28, -0.23, -0.20]],
+    ['UpperArm.R', [-0.30, -0.41, -0.37, -0.41, -0.33, -0.31, -0.30]],
+    ['Forearm.L', [-0.67, -0.83, -0.83, -0.76, -0.83, -0.72, -0.67]],
+    ['Forearm.R', [-0.72, -0.92, -1.12, -0.77, -1.12, -0.82, -0.72]],
+  ];
+  for (const [name, angles] of keyframes) {
+    const bone = asset.scene.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(name));
+    if (!bone) continue;
+    const pitch = worldPitch.clone().applyQuaternion(bone.getWorldQuaternion(axes).invert());
+    tracks.push(new THREE.QuaternionKeyframeTrack(
+      `${bone.name}.quaternion`, times, angles.flatMap((angle) => axes.setFromAxisAngle(pitch, angle).toArray()),
+    ));
+  }
+  return mixer.clipAction(new THREE.AnimationClip('Install lighting', 3.2, tracks, THREE.AdditiveAnimationBlendMode));
 }
 
 function benchIdle(idle: THREE.AnimationClip) {
@@ -86,6 +109,8 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   if (wave) wave.clampWhenFinished = true;
   let nod: THREE.AnimationAction | undefined;
   let nodding = false;
+  let installing: THREE.AnimationAction | undefined;
+  let working = false;
   let action = idle;
   let distance = 0;
   let direction = 1;
@@ -134,6 +159,16 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
       nod?.reset().play();
     }
     nodding = shouldNod;
+    const shouldWork = dt > 0 && cue?.gesture === 'install';
+    if (shouldWork && !working) {
+      installing ??= createInstallationPose(asset, mixer);
+      installing.reset().setEffectiveWeight(1).fadeIn(0.18).play();
+    }
+    if (!shouldWork && working) {
+      if (dt > 0) installing?.fadeOut(0.18);
+      else installing?.stop();
+    }
+    working = shouldWork;
     asset.scene.position.y = standingY - (seated ? 0.24 : 0);
     mixer.update(dt);
   }

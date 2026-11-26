@@ -312,6 +312,8 @@ describe.skipIf(!supported)('café browser pairing', () => {
     const agent = await redeem(await codeFor(owner));
     const survey = { action: 'interactCity', actionId: 'governance.survey', requestId: randomUUID() };
     const submit = { action: 'interactCity', actionId: 'governance.submit', requestId: randomUUID() };
+    const install = { action: 'interactCity', actionId: 'works.install-light', requestId: randomUUID() };
+    expect((await post(install, agent)).status).toBe(422);
     const trip = await (await post({ action: 'moveTo', destination: { place: 'governance' } }, agent)).json();
     vi.setSystemTime(trip.arrivesAt);
     expect((await post(survey, agent)).status).toBe(422);
@@ -357,6 +359,44 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(displayed.lightingSurvey).toBe('submitted');
     expect(displayed.recentActivities[0]).toMatchObject({ status: 'completed', requestId: submit.requestId });
     expect((await get('?control=city', other).json()).recentActivities).toEqual([]);
+
+    expect(displayed.lightingPilot).toMatchObject({ stage: 'review', approvedAt: expect.any(Number) });
+    expect((await post(install, agent)).status).toBe(422);
+    vi.setSystemTime(displayed.lightingPilot.approvedAt);
+    const approved = await get('?control=city', agent).json();
+    expect(approved.lightingPilot.stage).toBe('approved');
+    expect(approved.availableActions).toContainEqual(expect.objectContaining({ id: install.actionId, agentId: '02' }));
+    expect((await post(install, other)).status).toBe(422);
+    const dispatch = await post(install, agent);
+    expect(dispatch.status).toBe(200);
+    const job = await dispatch.json();
+    expect(job).toMatchObject({ agentId: '02', status: 'running', requestId: install.requestId });
+    expect(await (await post(install, agent)).json()).toEqual(job);
+    expect((await post({ ...install, requestId: randomUUID() }, agent)).status).toBe(422);
+    const enRoute = await get('?control=city', owner).json();
+    expect(enRoute.position).toEqual(returned.position);
+    expect(enRoute.lightingPilot.stage).toBe('dispatch');
+    expect(enRoute.lightingPilot.worker.position).toEqual(CITY_MAP.places.find(({ id }) => id === 'works')?.position);
+    expect(enRoute.lightingPilot.worker.movement.regions).toEqual(expect.arrayContaining(['east', 'north', 'shore']));
+    expect((await post({ action: 'moveTo', destination: { place: 'plaza' } }, agent)).status).toBe(200);
+
+    vi.setSystemTime(enRoute.lightingPilot.worker.movement.arrivesAt);
+    const working = await get('?control=city', owner).json();
+    expect(working.lightingPilot.stage).toBe('installing');
+    expect(working.lightingPilot.worker.activity.events.map(({ type }: { type: string }) => type)).toEqual(['started', 'checkpoint']);
+    expect(working.lightingPilot.worker.position).toEqual([13, 0.19, -168.43]);
+    expect(working.lightingPilot.lamp).toBeUndefined();
+    vi.setSystemTime(job.endsAt - 1);
+    expect((await get('?control=city', owner).json()).lightingPilot.stage).toBe('installing');
+    local.nexcivCafeStore?.close();
+    local.nexcivCafeStore = undefined;
+    vi.setSystemTime(job.endsAt);
+    const lit = await get('?control=city', owner).json();
+    expect(lit.lightingPilot).toMatchObject({ stage: 'lit', lamp: { position: [13, 0.19, -169.24], litAt: job.endsAt } });
+    expect(lit.lightingPilot.worker.activity.events.at(-1).text).toContain('低位灯已亮');
+    expect((await get('?control=city', other).json()).lightingPilot).toBeUndefined();
+    expect((await (await post(install, agent)).json()).status).toBe('completed');
+    expect((await post({ ...install, requestId: randomUUID() }, agent)).status).toBe(422);
   });
 
   it('persists a local conversation and restores a resident’s energy after resting', async () => {
