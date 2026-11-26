@@ -208,4 +208,69 @@ describe.skipIf(!supported)('café browser pairing', () => {
       }
     }
   });
+
+  it('offers only local actions and records a persistent construction walk with real waypoint arrivals', async () => {
+    const owner = browser();
+    const visitor = browser();
+    const agent = await redeem(await codeFor(owner));
+    const inspect = { action: 'interactCity', actionId: 'works.patrol', requestId: randomUUID() };
+    expect((await get('?control=city', agent).json()).availableActions).toEqual([]);
+    expect((await post(inspect, agent)).status).toBe(422);
+    const walk = await (await post({ action: 'moveTo', destination: { place: 'works' } }, agent)).json();
+    expect((await post(inspect, agent)).status).toBe(409);
+    vi.setSystemTime(walk.arrivesAt);
+    const site = await get('?control=city', agent).json();
+    expect(site.nearby.place).toBe('works');
+    expect(site.availableActions.map(({ kind }: { kind: string }) => kind)).toEqual(['talk', 'rest', 'work']);
+    expect((await post({ ...inspect, actionId: 'works.unlisted' }, agent)).status).toBe(422);
+
+    const response = await post(inspect, agent);
+    expect(response.status).toBe(200);
+    const started = await response.json();
+    expect(started).toMatchObject({ status: 'running', kind: 'work', requestId: inspect.requestId });
+    expect(started.events.filter(({ type }: { type: string }) => type === 'checkpoint')).toHaveLength(0);
+    const live = await get('?control=city', owner).json();
+    expect(live.recentActivities[0].requestId).toBe(inspect.requestId);
+    expect(live.movement).toMatchObject({ requestId: inspect.requestId, status: 'walking' });
+    expect(live.availableActions).toEqual([]);
+    expect((await post(inspect, agent)).status).toBe(200);
+    expect((await post({ ...inspect, actionId: 'works.rest' }, agent)).status).toBe(409);
+    expect((await post({ action: 'moveTo', destination: { place: 'plaza' } }, agent)).status).toBe(409);
+    expect((await get('?control=city', visitor).json()).recentActivities).toEqual([]);
+    expect((await post({ action: 'disconnectMcp' }, owner)).status).toBe(200);
+    expect((await post(inspect, agent)).status).toBe(401);
+
+    local.nexcivCafeStore?.close();
+    local.nexcivCafeStore = undefined;
+    vi.setSystemTime(started.endsAt);
+    const finished = await get('?control=city', owner).json();
+    const activity = finished.recentActivities[0];
+    expect(activity.status).toBe('completed');
+    expect(activity.events.filter(({ type }: { type: string }) => type === 'checkpoint')).toHaveLength(2);
+    expect(activity.events.at(-1).type).toBe('completed');
+    expect(finished.position).toEqual(site.position);
+    expect(finished.energy).toBeLessThan(site.energy);
+    expect(finished.canMove).toBe(true);
+  });
+
+  it('persists a local conversation and restores a resident’s energy after resting', async () => {
+    const owner = browser();
+    const agent = await redeem(await codeFor(owner));
+    const walk = await (await post({ action: 'moveTo', destination: { place: 'works' } }, agent)).json();
+    vi.setSystemTime(walk.arrivesAt);
+    const before = await get('?control=city', agent).json();
+    const chat = await (await post({ action: 'interactCity', actionId: 'works.chat' }, agent)).json();
+    expect(chat.events.some(({ type }: { type: string }) => type === 'reply')).toBe(false);
+    vi.setSystemTime(chat.endsAt);
+    const afterChat = await get('?control=city', agent).json();
+    expect(afterChat.recentActivities[0].events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'reply', speaker: '现场管理员', text: expect.stringContaining('巡查') }),
+    ]));
+    const rest = await (await post({ action: 'interactCity', actionId: 'works.rest' }, agent)).json();
+    expect((await get('?control=city', agent).json()).energy).toBe(before.energy);
+    vi.setSystemTime(rest.endsAt);
+    const afterRest = await get('?control=city', agent).json();
+    expect(afterRest.energy).toBeGreaterThan(before.energy);
+    expect(afterRest.recentActivities.map(({ kind }: { kind: string }) => kind)).toEqual(['rest', 'talk']);
+  });
 });

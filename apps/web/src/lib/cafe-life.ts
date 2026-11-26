@@ -31,6 +31,7 @@ export type CafeRun = {
 
 export type CafeView = Pick<CafeRun, 'phase' | 'since' | 'until' | 'place' | 'energy' | 'events' | 'requestedActivity' | 'fishResult' | 'observer'>;
 export type CafeSnapshot = { run: CafeView; serverTime: number; feedback?: string; accepted?: boolean; postcard?: CafePostcard };
+export const CAFE_INITIAL_ENERGY = 68;
 
 const frame = worldFrameV1Schema.parse(demoFrame);
 const baseline = buildAgentObservation(frame, {
@@ -159,9 +160,9 @@ function nextInterview(run: CafeRun, at: number) {
   return enter(run, 'interviewing', at, 8000, `01 号问${target.name}：“${question}”`);
 }
 
-export function beginCafe(at: number, preference: Preference, friendBusy: boolean, previousEncounter?: CafeEncounter, kind: CafeShiftKind = 'cafe', driver: ObserverDriver = 'rules'): CafeRun {
+export function beginCafe(at: number, preference: Preference, friendBusy: boolean, previousEncounter?: CafeEncounter, kind: CafeShiftKind = 'cafe', driver: ObserverDriver = 'rules', energy = CAFE_INITIAL_ENERGY): CafeRun {
   const run: CafeRun = {
-    phase: 'working', since: at, until: null, place: 'counter', energy: 68, preference,
+    phase: 'working', since: at, until: null, place: 'counter', energy, preference,
     friendBusyUntil: friendBusy ? at + 30000 : at, finishedWork: false, meeting: 'none', events: [],
   };
   if (previousEncounter) run.previousEncounter = previousEncounter;
@@ -203,7 +204,7 @@ export function advanceCafe(run: CafeRun, now: number): void {
       }
       case 'working':
         run.finishedWork = true;
-        run.energy += activities.work.energy;
+        run.energy = Math.max(0, run.energy + activities.work.energy);
         run.events.push({ at, text: activities.work.end });
         nextDecision(run, at);
         break;

@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes } from 'node:crypto';
-import { advanceCafe, beginCafe, observeExternalChoice, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
+import { advanceCafe, beginCafe, CAFE_INITIAL_ENERGY, observeExternalChoice, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
 import type { ObserverDriver } from './cafe-observer';
 import { writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
 import { buildCafePostcard } from './cafe-postcard';
@@ -8,6 +8,7 @@ import type { CafeSnapshot } from './cafe-life';
 import { CITY_MAP, cityRestingPoint, planCityWalk } from './city-navigation';
 import { CAFE_COUNTER } from './cafe-geometry';
 import { positionOnWalk, routeDistance, type CityDestination, type CityMovement, type CityObservation, type CityWalk } from './city-movement';
+import { availableCityActions, beginCityActivity, cityActivityView, nearbyCitySite, type CityActivity, type CityActivityView } from './city-activities';
 
 type Response = Omit<CafeSnapshot, 'run'> & { run: CafeRun };
 type Row = { state: string };
@@ -60,6 +61,15 @@ export class CafeDemoStore {
         PRIMARY KEY (resident,id)
       );
       CREATE UNIQUE INDEX IF NOT EXISTS city_current_walk ON city_walks(resident) WHERE shown=1;
+      CREATE TABLE IF NOT EXISTS city_activities (
+        resident TEXT NOT NULL,
+        id TEXT NOT NULL,
+        started INTEGER NOT NULL,
+        ends INTEGER NOT NULL,
+        activity TEXT NOT NULL,
+        PRIMARY KEY (resident,id)
+      );
+      CREATE INDEX IF NOT EXISTS city_activity_history ON city_activities(resident,started DESC);
     `);
     this.transaction(() => {
       if (!this.db.prepare('PRAGMA table_info(shifts)').all().some((column) => column.name === 'resident')) {
@@ -195,6 +205,19 @@ export class CafeDemoStore {
     return { ...walk, status: at < walk.arrivesAt ? 'walking' : 'arrived' };
   }
 
+  private cityActivityHistory(resident: string): CityActivity[] {
+    return this.db.prepare('SELECT activity FROM city_activities WHERE resident=? ORDER BY started DESC, rowid DESC LIMIT 6')
+      .all(resident).map(({ activity }) => JSON.parse(String(activity)));
+  }
+
+  private activityInProgress(resident: string, at: number) {
+    return Boolean(this.db.prepare('SELECT 1 FROM city_activities WHERE resident=? AND ends>? LIMIT 1').get(resident, at));
+  }
+
+  private energyFromActivities(history: CityActivity[], run: CafeRun | null, at: number) {
+    return history.find((activity) => activity.endsAt <= at && (!run || activity.endsAt >= run.since))?.energyAfter;
+  }
+
   cityMap(actor: CafeActor) {
     this.authorizedResident(actor);
     return CITY_MAP;
@@ -204,14 +227,59 @@ export class CafeDemoStore {
     return this.transaction(() => {
       const resident = this.authorizedResident(actor);
       const serverTime = this.clock();
-      const walk = this.currentWalk(resident);
       const run = this.activeRun(resident, serverTime);
       const activeShift = run !== null && run.phase !== 'done';
+      const history = this.cityActivityHistory(resident);
+      const activeActivity = history[0] && history[0].endsAt > serverTime ? history[0] : null;
+      const walk = activeActivity?.walk ?? this.currentWalk(resident);
       const movement = walk ? this.movement(walk, serverTime) : null;
-      const reason = activeShift ? '已有进行中的班次。' : movement?.status === 'walking' ? '01 号正在赶路。' : undefined;
+      const reason = activeShift ? '已有进行中的班次。' : activeActivity ? `进行中 · ${activeActivity.label}`
+        : movement?.status === 'walking' ? '01 号正在赶路。' : undefined;
       const position = walk ? positionOnWalk(walk, serverTime)
         : activeShift ? null : cityRestingPoint(run?.place, Boolean(run?.observer));
-      return { agentId: '01', serverTime, position, movement, canMove: !reason, reason };
+      const energy = this.energyFromActivities(history, run, serverTime) ?? run?.energy ?? CAFE_INITIAL_ENERGY;
+      const nearby = nearbyCitySite(position);
+      return {
+        agentId: '01', serverTime, position, movement, canMove: !reason, reason, energy,
+        nearby: nearby?.site ?? null,
+        availableActions: reason || !nearby ? [] : availableCityActions(nearby.actions, energy),
+        recentActivities: history.map((activity) => cityActivityView(activity, serverTime)),
+      };
+    });
+  }
+
+  interactCity(actor: CafeActor, requestId: string, actionId: string): CityActivityView | { error: string; code: 409 | 422 } {
+    return this.transaction(() => {
+      const resident = this.authorizedResident(actor);
+      const at = this.clock();
+      const row = this.db.prepare('SELECT activity FROM city_activities WHERE resident=? AND id=?').get(resident, requestId);
+      if (row) {
+        const activity: CityActivity = JSON.parse(String(row.activity));
+        return activity.actionId === actionId ? cityActivityView(activity, at)
+          : { error: '请求编号已用于另一项现场行动。', code: 409 };
+      }
+      if (this.db.prepare('SELECT 1 FROM city_walks WHERE resident=? AND id=?').get(resident, requestId)) {
+        return { error: '请求编号已用于一次试走。', code: 409 };
+      }
+      const run = this.activeRun(resident, at);
+      const walk = this.currentWalk(resident);
+      if ((run && run.phase !== 'done') || (walk && walk.arrivesAt > at) || this.activityInProgress(resident, at)) {
+        return { error: '请等当前行程或活动结束，再选择现场行动。', code: 409 };
+      }
+      const position = walk?.points.at(-1) ?? cityRestingPoint(run?.place, Boolean(run?.observer));
+      const nearby = nearbyCitySite(position);
+      const action = nearby?.actions.find(({ id }) => id === actionId);
+      if (!action || !nearby) return { error: '当前位置没有这项交互，请先查看附近可做的事。', code: 422 };
+      const history = this.cityActivityHistory(resident);
+      const energy = this.energyFromActivities(history, run, at) ?? run?.energy ?? CAFE_INITIAL_ENERGY;
+      if (!availableCityActions([action], energy).length) return { error: '精力不足，请先休息。', code: 409 };
+      const activity = beginCityActivity(action, nearby.site.place, position, energy, requestId, at);
+      if (!activity) return { error: '巡查点位目前无法沿步道到达。', code: 422 };
+      this.db.prepare('INSERT INTO city_activities(resident,id,started,ends,activity) VALUES (?,?,?,?,?)')
+        .run(resident, requestId, at, activity.endsAt, JSON.stringify(activity));
+      this.db.prepare('DELETE FROM city_activities WHERE resident=? AND ends<?')
+        .run(resident, at - CAFE_RETENTION_DAYS * 86400000);
+      return cityActivityView(activity, at);
     });
   }
 
@@ -227,6 +295,10 @@ export class CafeDemoStore {
         }
         return this.movement(saved, at);
       }
+      if (this.db.prepare('SELECT 1 FROM city_activities WHERE resident=? AND id=?').get(resident, requestId)) {
+        return { error: '请求编号已用于一项现场行动。', code: 409 };
+      }
+      if (this.activityInProgress(resident, at)) return { error: '01 号正在执行现场活动，结束后可以继续出发。', code: 409 };
       const run = this.activeRun(resident, at);
       if (run && run.phase !== 'done') return { error: '班次正在执行，请结束后再自由移动。', code: 409 };
       const previous = this.currentWalk(resident);
@@ -257,8 +329,9 @@ export class CafeDemoStore {
         if (originallyBusy !== busy || Boolean(existing.observer) !== (kind === 'observer') || (existing.observer?.driver ?? 'rules') !== driver) return { error: '开班编号已用于另一种班次。' };
         return { run: existing, serverTime: at };
       }
-      const latestId = this.latestId(resident);
-      if (latestId && this.current(latestId, at)?.phase !== 'done') return { error: '已有进行中的班次。' };
+      const run = this.activeRun(resident, at);
+      if (run && run.phase !== 'done') return { error: '已有进行中的班次。' };
+      if (this.activityInProgress(resident, at)) return { error: '01 号正在执行现场活动。' };
       const walk = this.currentWalk(resident);
       if (walk && (walk.arrivesAt > at || routeDistance(walk.points.at(-1)!, CAFE_COUNTER) > 1e-5)) {
         return { error: '请先让 01 号走回咖啡摊，再开始班次。' };
@@ -269,7 +342,8 @@ export class CafeDemoStore {
         FROM shifts WHERE resident=? AND json_extract(state, '$.meeting') IN ('declined', 'chatted')
         ORDER BY started DESC LIMIT 1
       `).get(resident) as CafeEncounter | undefined;
-      const initial = beginCafe(at, 'social', busy, memory, kind, driver);
+      const energy = this.energyFromActivities(this.cityActivityHistory(resident), run, at);
+      const initial = beginCafe(at, 'social', busy, memory, kind, driver, energy);
       this.db.prepare('INSERT INTO shifts(id,state,next_at,started,resident) VALUES (?,?,?,?,?)').run(id, JSON.stringify(initial), initial.until, at, resident);
       return { run: initial, serverTime: at };
     });

@@ -38,6 +38,9 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const [city, setCity] = useState<CityObservation | null>(null);
   const cityWalk = city?.movement;
   const cityMoving = cityWalk?.status === 'walking';
+  const recent = city?.recentActivities ?? [];
+  const currentActivity = recent[0]?.status === 'running' ? recent[0] : undefined;
+  const cityBusy = cityMoving || Boolean(currentActivity);
   const [shift, setShift] = useState('等待开班');
   const [greeting, setGreeting] = useState('');
   const updateCafe = useCallback((data: CafeSnapshot | null) => {
@@ -103,12 +106,12 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
       } catch {
         // Retry on the next poll, retaining the last position during a brief disconnect.
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(refresh, cityMoving ? 1000 : 2500);
+        if (!controller.signal.aborted) timer = setTimeout(refresh, cityBusy ? 1000 : 2500);
       }
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [cafeMode, cityMoving]);
+  }, [cafeMode, cityBusy]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
@@ -119,6 +122,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const sceneReady = state === 'ready';
   const agent = reports[selected];
   const cityLabel = cityWalk && (cityMoving ? `前往 ${cityWalk.name}` : `已到达 ${cityWalk.name}`);
+  const sceneCaption = currentActivity?.events.at(-1);
   const travelProgress = city && cityWalk && cityMoving
     ? Math.min(100, Math.max(0, Math.round(100 * (city.serverTime - cityWalk.startedAt) / (cityWalk.arrivesAt - cityWalk.startedAt))))
     : 100;
@@ -157,18 +161,37 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
           <small>{cafeMode ? 'AGENT 01 · AI SIMULATED · DEMO' : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
-          <strong role="status">{cafeMode ? cityLabel || shift : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
-          {!cityWalk && greeting && <p className={styles.greeting}>{greeting}</p>}
+          <strong role="status">{cafeMode ? currentActivity?.label || cityLabel || shift : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
+          {sceneCaption && <p className={styles.greeting}>
+            {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
+          </p>}
+          {!cityWalk && !sceneCaption && greeting && <p className={styles.greeting}>{greeting}</p>}
         </div>
         {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。下方可查看路线的两处实景。'}</p>}
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         {cafeMode ? <>
           {cityWalk && <div className={styles.route}>
-            <span>全城试走</span>
-            <progress aria-label={cityLabel || 'Agent 01 行程'} max={100} value={travelProgress} />
+            <span>{currentActivity?.kind === 'work' ? '巡查路线' : '全城试走'}</span>
+            <progress aria-label={currentActivity?.label || cityLabel || 'Agent 01 行程'} max={100} value={travelProgress} />
             <span>{cityWalk.name} · {Math.round(cityWalk.metres)} 米</span>
           </div>}
+          {city?.nearby && <div className={styles.cityNearby}>
+            <span>附近 · {[...city.nearby.people.map(({ name }) => name), ...city.nearby.facilities.map(({ name }) => name)].join('、')}</span>
+            <span>01 号精力 <b>{city.energy}</b> / 100</span>
+            {!!city.availableActions.length && <span className={styles.cityOptions}>
+              可选 · {city.availableActions.map(({ label }) => label).join('、')}
+            </span>}
+          </div>}
+          {recent.length > 0 && <details className={styles.cityActivity}>
+            <summary>现场活动记录 · {recent.length} 条{recent[0]?.status === 'completed' ? ` · 已完成${recent[0].label}` : ''}</summary>
+            {recent.map((entry) => <section key={entry.requestId}>
+              <strong>{entry.label} · {entry.status === 'running' ? '进行中' : '已完成'}</strong>
+              <ol>{entry.events.map((event) => <li key={`${event.at}:${event.type}`}>
+                {event.speaker && `${event.speaker} · `}{event.text}
+              </li>)}</ol>
+            </section>)}
+          </details>}
           <CafeShift onUpdate={updateCafe} />
         </> : <>
         <div className={styles.controls}>

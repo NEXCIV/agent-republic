@@ -54,7 +54,7 @@ async function pairBrowser(code) {
 }
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-observer', version: '0.3.0' });
+  const server = new McpServer({ name: 'nexciv-observer', version: '0.4.0' });
   let connection;
   async function request(query, command) {
     const token = await savedPairing();
@@ -99,17 +99,22 @@ serveStdio(() => {
     await request('', { action: 'moveTo', destination, requestId }),
   ));
 
-  tool('observe_city', '读取 01 号的城市位置、当前目的地和到达状态。可等待最多 20 秒。', z.strictObject({
+  tool('observe_city', '读取 01 号的位置、附近的人和设施、可选现场动作以及最近的活动记录。可等待当前行程或现场动作最多 20 秒。', z.strictObject({
     waitSeconds: z.number().int().min(0).max(20).default(0),
   }), true, async ({ waitSeconds }) => {
     const until = Date.now() + waitSeconds * 1000;
     let state = await request('?control=city');
-    while (state?.movement?.status === 'walking' && Date.now() < until) {
+    while ((state?.movement?.status === 'walking' || state?.recentActivities?.[0]?.status === 'running') && Date.now() < until) {
       await delay(Math.min(2500, Math.max(0, until - Date.now())));
       state = await request('?control=city');
     }
     return state?.movement ? { ...state, movement: movementSummary(state.movement) } : state;
   });
+
+  tool('interact_city', '执行最近一次 observe_city 的 availableActions 中的一项现场动作。到场后可选择聊天、休息或接任务。随后可用 observe_city 查看完成情况与记录。', z.strictObject({
+    actionId: z.string().regex(/^[a-z][a-z0-9_-]{0,23}\.[a-z][a-z0-9_-]{0,23}$/),
+    requestId: z.uuidv4().optional().describe('重试同一项现场动作时复用原 UUID'),
+  }), false, ({ actionId, requestId = randomUUID() }) => request('', { action: 'interactCity', actionId, requestId }));
 
   tool('start_observer', '为 01 号开启一次外部 Agent 观察员班次。配对时班次会同步到玩家的咖啡街网页。已有进行中的班次请先查看。', z.strictObject({
     busy: z.boolean().default(true).describe('开班时阿禾是否正在收摊'),

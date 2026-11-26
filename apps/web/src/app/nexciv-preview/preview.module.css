@@ -90,6 +90,13 @@
 .cafeLog { font-size: 14px; }
 .cafeLog summary { cursor: pointer; padding: 4px 0; }
 .cafeLog time { color: #c8bea8; margin-right: 12px; }
+.cityNearby { display: flex; flex-wrap: wrap; gap: 5px 18px; color: #d5cebd; font-size: 13px; }
+.cityNearby b { color: #f2cb67; }
+.cityOptions { flex-basis: 100%; }
+.cityActivity { max-width: 680px; font-size: 14px; }
+.cityActivity summary { width: fit-content; padding: 5px 0; cursor: pointer; color: #f2cb67; }
+.cityActivity section { margin-top: 8px; padding: 10px 14px; background: #202226; border-left: 2px solid #494849; }
+.cityActivity ol { margin: 5px 0 0; padding-left: 18px; color: #d5cebd; line-height: 1.55; }
 .cafePanel > .cafeLink { justify-self: start; padding: 5px 0; }
 .cafePairing { width: min(100%, 600px); color: #ede9df; font-size: 14px; }
 .cafePairing summary { width: fit-content; padding: 6px 0; cursor: pointer; color: #f2cb67; }

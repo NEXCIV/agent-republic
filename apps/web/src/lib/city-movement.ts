@@ -1,4 +1,5 @@
 import type { CityPoint } from './cafe-geometry';
+import type { CityActionOption, CityActivityView, CitySite } from './city-activities';
 
 export const CITY_PLACES = {
   cafe: '咖啡摊', plaza: '中央广场', market: 'Corner Market', governance: '议会大厅',
@@ -24,6 +25,10 @@ export type CityObservation = {
   movement: CityMovement | null;
   canMove: boolean;
   reason?: string;
+  energy: number;
+  nearby: CitySite | null;
+  availableActions: CityActionOption[];
+  recentActivities: CityActivityView[];
 };
 
 export function routeDistance(a: CityPoint, b: CityPoint) {

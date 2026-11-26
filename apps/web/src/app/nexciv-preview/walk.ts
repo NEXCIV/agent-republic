@@ -7,6 +7,7 @@ import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, join
 import { createMarketGreeting } from './marketGreeting';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import type { CityObservation } from '../../lib/city-movement';
+import type { CityPerson } from '../../lib/city-activities';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -347,6 +348,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let cityReceivedAt = 0;
   let cityAssetsFor: string | undefined;
   let cityJourney: { traveller: Patrol; id: string } | undefined;
+  let siteHost: { patrol: Patrol; asset: GLTF; position: THREE.Vector3; facing: THREE.Vector3 } | undefined;
+  let siteHostRequested = false;
   const fishingGear = cafeMode ? createFishingGear() : undefined;
   const fishingSpot = new THREE.Vector3(...FISHING_SPOT);
   const waterFacing = fishingSpot.clone().add(new THREE.Vector3(1, 0, 0));
@@ -594,6 +597,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const greeting = marketGreeting(!cafeMode && playing ? dt : 0, !cafeMode && primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
     const shift = cafeSnapshot?.run;
     const cityWalk = cityObservation?.movement;
+    const latestActivity = cityObservation?.recentActivities?.[0];
+    const conversation = latestActivity?.status === 'running' && latestActivity.kind === 'talk' ? latestActivity : undefined;
     const byPier = cafeMode && !cityWalk && shift?.place === 'pier';
     const observer = cityWalk ? undefined : shift?.observer;
     const interviewing = !cityWalk && shift?.phase === 'interviewing';
@@ -603,6 +608,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (cafeMode) {
       const poseDt = playing ? dt : 0;
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
+      const host = cityObservation?.nearby?.people[0];
+      if (host && !siteHostRequested) loadSiteHost(host);
+      if (siteHost) {
+        const face = conversation && primary ? primary.root.position : siteHost.facing;
+        siteHost.patrol.observe(poseDt, siteHost.position, face, false, conversation ? 'nod' : undefined);
+      }
       const time = (cafeSnapshot?.serverTime ?? 0) + (playing ? now - receivedAt : 0);
       const duration = shift?.until ? shift.until - shift.since : 0;
       const progress = shift && duration > 0 ? THREE.MathUtils.clamp((time - shift.since) / duration, 0, 1) : 0;
@@ -640,7 +651,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (primary) {
           const target = cityWalk.points.at(-1)!;
           const duration = cityWalk.arrivesAt - cityWalk.startedAt;
-          if (duration > 0) {
+          if (conversation?.person) {
+            observedPosition.set(...target);
+            primary.observe(poseDt, observedPosition, siteHost?.position ?? counterFacing, false, 'nod');
+          } else if (duration > 0) {
             if (cityJourney?.id !== cityWalk.requestId || cityJourney.traveller !== primary) {
               primary.plan(cityWalk.points, [target[0], target[2]]);
               cityJourney = { traveller: primary, id: cityWalk.requestId };
@@ -1118,6 +1132,24 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }).catch(() => {});
   }
 
+  function loadSiteHost(person: CityPerson) {
+    siteHostRequested = true;
+    request('agent-02.glb', 'low').then((response) => response.arrayBuffer()).then(async (bytes) => {
+      if (ended || contextLost) return;
+      const asset = await loader.parseAsync(bytes, ASSET_PATH);
+      if (ended || contextLost) { disposeModel(asset.scene); return; }
+      const position = new THREE.Vector3(...person.position);
+      const facing = position.clone().add(new THREE.Vector3(-1, 0, -0.4));
+      try {
+        const patrol = createAgentPatrol(asset, [person.position, facing.toArray()], [facing.x, facing.z]);
+        siteHost = { asset, patrol, position, facing };
+        street.add(patrol.root);
+      } catch {
+        disposeModel(asset.scene);
+      }
+    }).catch(() => {});
+  }
+
   request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
     if (ended || contextLost) return;
     const result = await loader.parseAsync(bytes, ASSET_PATH);
@@ -1201,6 +1233,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (pierRegular) {
         pierRegular.patrol.dispose();
         disposeModel(pierRegular.asset.scene);
+      }
+      if (siteHost) {
+        siteHost.patrol.dispose();
+        disposeModel(siteHost.asset.scene);
       }
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);

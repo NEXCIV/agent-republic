@@ -130,12 +130,13 @@ export async function POST(request: NextRequest) {
   if (request.headers.has('authorization')) {
     return mcpAction(request, (actor) => {
       if (input.action === 'moveTo') return move(actor, input.requestId, input.destination);
+      if (input.action === 'interactCity') return interact(actor, input.requestId, input.actionId);
       if (input.action === 'start' && input.kind === 'observer' && input.driver === 'external' && typeof input.busy === 'boolean') {
         const result = store().start(input.requestId, input.busy, actor, 'observer', 'external');
         return 'error' in result ? json(result, 409) : json(snapshot(result));
       }
       if (input.action === 'choose') return applyNote(actor, input);
-      return json({ error: '此连接仅允许试走、开始观察员班次或选择采访对象。' }, 403);
+      return json({ error: '此连接仅允许试走、现场交互和观察员班次。' }, 403);
     });
   }
   if (input.action === 'redeemMcpCode') {
@@ -146,9 +147,10 @@ export async function POST(request: NextRequest) {
   }
   const resident = request.cookies.get(residentCookie)?.value;
   if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
-  if (input.action === 'moveTo') {
-    if (!loopback(request)) return json({ error: '全城试走仅用于本机试玩。' }, 403);
-    return move(resident, input.requestId, input.destination);
+  if (input.action === 'moveTo' || input.action === 'interactCity') {
+    if (!loopback(request)) return json({ error: '城市行动仅用于本机试玩。' }, 403);
+    return input.action === 'moveTo' ? move(resident, input.requestId, input.destination)
+      : interact(resident, input.requestId, input.actionId);
   }
   if (input.action === 'issueMcpCode' || input.action === 'disconnectMcp') {
     if (!loopback(request)) return json({ error: '配对仅用于本机咖啡街试玩。' }, 403);
@@ -180,6 +182,14 @@ function move(actor: CafeActor, requestId: string, input: unknown) {
   }
   if (!destination) return json({ error: '目的地需使用地点 ID 或一组有限的 X、Z 坐标。' }, 400);
   const result = store().moveTo(actor, requestId, destination);
+  return 'error' in result ? json({ error: result.error }, result.code) : json(result);
+}
+
+function interact(actor: CafeActor, requestId: string, actionId: unknown) {
+  if (typeof actionId !== 'string' || !/^[a-z][a-z0-9_-]{0,23}\.[a-z][a-z0-9_-]{0,23}$/.test(actionId)) {
+    return json({ error: '请选择现场观测返回的动作 ID。' }, 400);
+  }
+  const result = store().interactCity(actor, requestId, actionId);
   return 'error' in result ? json({ error: result.error }, result.code) : json(result);
 }
 
