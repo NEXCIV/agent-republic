@@ -7,6 +7,7 @@ import shore from '../../public/nexciv-walk/lakeshore-route.json';
 import research from '../../public/nexciv-walk/research-route.json';
 import residential from '../../public/nexciv-walk/residential-route.json';
 import { cafeApproach, CAFE_COUNTER, CAFE_BENCH_FRONT, FISHING_SPOT, type CityPoint } from './cafe-geometry';
+import { COUNCIL_NOTICE_APPROACH } from './council-notice';
 import { CITY_PLACES, routeDistance, type CityDestination, type CityRegion, type CityRoute } from './city-movement';
 
 type Segment = { from: CityPoint; to: CityPoint; region?: CityRegion };
@@ -36,6 +37,7 @@ add(cafeApproach(marketPoints));
 add([CAFE_BENCH_FRONT, CAFE_COUNTER]);
 add(surveyed(north.points), 'north');
 add(surveyed(governance.points), 'north');
+add(COUNCIL_NOTICE_APPROACH, 'north');
 add(surveyed(east.avenue.points), 'east');
 add(surveyed(east.registry.points), 'east');
 add(surveyed(east.works.points), 'east');

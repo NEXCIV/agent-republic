@@ -279,14 +279,14 @@ describe.skipIf(!supported)('café browser pairing', () => {
       requestId: read.requestId, status: 'walking', name: '议事公告栏', regions: ['north'],
     });
     expect(walking.movement.metres).toBeGreaterThan(8);
-    expect((await post({ action: 'moveTo', requestId: read.requestId, destination: { x: 8, z: -77 } }, agent)).status).toBe(409);
+    expect((await post({ action: 'moveTo', requestId: read.requestId, destination: { x: 7.35, z: -76.3 } }, agent)).status).toBe(409);
     expect((await get('?control=city', other).json()).recentActivities).toEqual([]);
 
     local.nexcivCafeStore?.close();
     local.nexcivCafeStore = undefined;
     vi.setSystemTime(walking.movement.arrivesAt);
     const reading = await get('?control=city', owner).json();
-    expect(reading.position).toEqual([8, 0.182, -77]);
+    expect(reading.position).toEqual([7.35, 0.182, -76.3]);
     expect(reading.movement.status).toBe('arrived');
     expect(reading.recentActivities[0]).toMatchObject({
       status: 'running', events: [expect.any(Object), { type: 'checkpoint', position: reading.position, at: expect.any(Number), text: '已到达议事公告栏。' }],
