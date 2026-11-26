@@ -1,0 +1,70 @@
+.page {
+  --guide-gold: #e8c075;
+  --guide-ink: #151512;
+  --guide-line: #584b32;
+  --guide-type: #f4ead7;
+  min-height: 100svh;
+  padding: 24px clamp(20px, 5vw, 72px) 56px;
+  color: var(--guide-type);
+  background: var(--guide-ink);
+  font-family: var(--font-sans), 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+}
+
+:global(body):has(.page) > :global(.site-header),
+:global(body):has(.page) > :global(.scroll-progress),
+:global(body):has(.page) > footer { display: none; }
+:global(.page-shell):has(.page) { width: 100%; max-width: none; margin: 0; padding: 0; }
+
+.header {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--guide-line);
+  border-radius: 8px;
+  background: #21201c;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 17px;
+  font-weight: 730;
+  color: var(--guide-type);
+  text-decoration: none;
+}
+
+.mark { width: 29px; height: 29px; color: var(--guide-gold); }
+.brand strong, .page a:not(.brand) { color: var(--guide-gold); }
+.brand:hover { color: var(--guide-type); }
+.enter { font-size: 14px; }
+.page a:focus-visible { outline: 2px solid var(--guide-gold); outline-offset: 4px; }
+
+.guide { width: min(100%, 680px); margin: clamp(40px, 7vw, 92px) auto 0; }
+.guide h1 { margin: 0; color: var(--guide-type); font-size: clamp(32px, 5vw, 52px); line-height: 1.1; }
+.contents { display: flex; flex-wrap: wrap; gap: 12px 22px; margin-top: 20px; }
+.section { padding-top: 22px; margin-top: 34px; border-top: 1px solid var(--guide-line); scroll-margin-top: 20px; }
+.section h2 { margin: 0 0 12px; font-size: 23px; color: var(--guide-type); text-transform: none; }
+.section p, .section ol { font-size: 15px; color: #ddd0b7; line-height: 1.75; }
+.section p { margin: 0 0 10px; }
+.section ol { margin: 18px 0; padding-left: 21px; }
+.section li + li { margin-top: 6px; }
+.section pre {
+  overflow-x: auto;
+  padding: 13px 16px;
+  margin: 16px 0;
+  border: 1px solid var(--guide-line);
+  border-radius: 6px;
+  background: #201d16;
+  color: #f8dda0;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.links { display: flex; flex-wrap: wrap; gap: 10px 20px; }
+.section a, .contents a, .enter { text-decoration: underline; text-underline-offset: 4px; }
+.section a:hover, .contents a:hover, .enter:hover { color: #ffe0a5; }

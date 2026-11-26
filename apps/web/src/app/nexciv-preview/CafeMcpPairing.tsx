@@ -1,23 +1,54 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import styles from './preview.module.css';
 
 type Connection = { connected: boolean; expiresAt: number | null; codeExpiresAt: number | null };
 type PairingCode = { code: string; codeExpiresAt: number };
 
-export function CafeMcpPairing({ endpoint, ready }: { endpoint: string; ready: boolean }) {
-  const [local, setLocal] = useState(false);
-  const [open, setOpen] = useState(false);
+export function CafeMcpPairing({ endpoint, ready, openOnMount = false }: {
+  endpoint: string;
+  ready: boolean;
+  openOnMount?: boolean;
+}) {
+  const [local, setLocal] = useState<boolean | null>(null);
+  const [open, setOpen] = useState(openOnMount);
   const [connection, setConnection] = useState<Connection | null>(null);
   const [pairing, setPairing] = useState<PairingCode | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
   const revision = useRef(0);
+  const summary = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setLocal(['127.0.0.1', 'localhost'].includes(window.location.hostname));
   }, []);
+
+  useEffect(() => {
+    if (openOnMount) setOpen(true);
+  }, [openOnMount]);
+
+  useEffect(() => {
+    const target = summary.current;
+    if (!openOnMount || local === null || !target) return;
+    const reveal = () => {
+      target.scrollIntoView({ block: 'nearest' });
+      target.focus({ preventScroll: true });
+    };
+    const inactive = target.closest('[inert]');
+    if (!inactive) {
+      reveal();
+      return;
+    }
+    const observer = new MutationObserver(() => {
+      if (target.closest('[inert]')) return;
+      reveal();
+      observer.disconnect();
+    });
+    observer.observe(inactive, { attributes: true, attributeFilter: ['inert'] });
+    return () => observer.disconnect();
+  }, [local, openOnMount]);
 
   useEffect(() => {
     if (!ready || !local) return;
@@ -80,11 +111,14 @@ export function CafeMcpPairing({ endpoint, ready }: { endpoint: string; ready: b
     }
   }
 
-  if (!local) return null;
+  if (local === null || (!local && !openOnMount)) return null;
   return (
-    <details className={styles.cafePairing} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>连接 Agent{connection?.connected ? ' · 已连接' : ''}</summary>
-      <div className={styles.pairingContent}>
+    <details id="connect-agent" className={styles.cafePairing} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary ref={summary}>连接 Agent{connection?.connected ? ' · 已连接' : ''}</summary>
+      {!local ? <div className={styles.pairingContent}>
+        <p>Agent 配对仅在本机咖啡街开放。</p>
+        <Link href="/nexciv-preview/docs#agent">查看本机连接说明</Link>
+      </div> : <div className={styles.pairingContent}>
         {connection?.connected && <p>让 Codex 查看可到达的地点，选择下一站。01 号的路线和位置会显示在这个网页里。</p>}
         {pairing ? <>
           <p>把这条指令发给 Codex。配对码 5 分钟内有效，只能使用一次。</p>
@@ -100,7 +134,7 @@ export function CafeMcpPairing({ endpoint, ready }: { endpoint: string; ready: b
           </button>}
         </div>
         {message && <p role="status">{message}</p>}
-      </div>
+      </div>}
     </details>
   );
 }

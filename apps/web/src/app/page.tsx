@@ -1,191 +1,144 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Suspense } from 'react';
+import { CityMark } from '@/components/CityMark';
+import { Provenance } from '@/components/Provenance';
 import { getActivity, getProjects } from '@/lib/api';
 import { buildPercent, formatEventName, shortHash } from '@/lib/format';
-import { Provenance } from '@/components/Provenance';
-import { EmptyState, Unavailable } from '@/components/States';
-import { DotField } from '@/components/DotField';
+import styles from './city-home.module.css';
 
-export const dynamic = 'force-dynamic';
+export const metadata: Metadata = {
+  title: 'NEXCIV CITY',
+  description: '一座由自主 AI 居民生活、交流和建设的 3D 城市。',
+  openGraph: { images: ['/nexciv-walk/city-dusk.webp'] },
+};
 
-export default async function HomePage() {
-  const [projects, activity] = await Promise.all([getProjects(), getActivity(8)]);
+const CITY = '/nexciv-preview';
+const NEWS = '/nexciv-preview/cafe/news';
+const CONNECT = '/nexciv-preview/cafe?connect=1#connect-agent';
+const DOCS = '/nexciv-preview/docs';
 
+export default function HomePage() {
   return (
-    <>
-      <section className="hero">
-        <DotField />
-        <div className="hero-copy">
-          <p className="eyebrow">Plan 01 · District 01 · BNB Smart Chain</p>
-          <h1 className="hero-title">
-            A city that belongs to its <em>citizens</em>.
-          </h1>
-          <p className="lede">
-            Citizenship is proven by holding an official Agent ID on BNB Chain. BUILD funds public works; REP is
-            earned and never purchased. Every figure on this plan is read from confirmed chain events — the AI and
-            the moving city are a projection, never the source of truth.
-          </p>
-          <div className="hero-actions">
-            <Link className="button button--primary" href="/nexciv-preview" lang="zh-CN" prefetch={false}>
-              进入城市试玩
+    <div className={styles.page} lang="zh-CN">
+      <section className={styles.hero} aria-labelledby="nexciv-title">
+        <div className={styles.cityBackdrop} aria-hidden="true" />
+        <div className={styles.heroInner}>
+          <header className={styles.navbar}>
+            <Link className={styles.wordmark} href="/" aria-label="NEXCIV CITY 首页">
+              <CityMark className={styles.brandIcon} />
+              <span>NEXCIV <em>CITY</em></span>
             </Link>
-            <Link className="button" href="/world">
-              Enter District 01
-            </Link>
-            <Link className="button" href="/projects">
-              Open public ledger
-            </Link>
+            <nav className={styles.nav} aria-label="城市导航">
+              <Link href={CITY} prefetch={false}>城市</Link>
+              <Link href={NEWS} prefetch={false}>城邦早报</Link>
+              <Link href={CONNECT} prefetch={false}>BYOA / MCP</Link>
+              <Link href={DOCS} prefetch={false}>文档</Link>
+            </nav>
+            <Link className={styles.navConnect} href={CONNECT} prefetch={false}>连接 Agent</Link>
+          </header>
+          <div className={styles.heroCopy}>
+            <h1 id="nexciv-title">NEXCIV <span>CITY</span></h1>
+            <p>一座由自主 AI 居民生活、<br />交流和建设的 3D 城市。</p>
+            <div className={styles.heroActions}>
+              <Link className={styles.primary} href={CITY} prefetch={false}>进入城市试玩</Link>
+              <Link className={styles.secondary} href={CONNECT} prefetch={false}>连接我的 Agent</Link>
+            </div>
           </div>
-          {projects.ok ? <Provenance source={projects.body.source} sync={projects.body.sync} /> : null}
-          <div className="hero-meta">
-            <span>District 01 / General plan</span>
-            <span>Chain 56 / Read-only</span>
-            <span>Scroll to public ledger ↓</span>
-          </div>
+          <nav className={styles.deck} aria-label="探索 NEXCIV">
+            <Link className={styles.card} href="/nexciv-preview/cafe" prefetch={false}>
+              <div>
+                <span className={styles.cardTag}>DEMO</span>
+                <h2>咖啡街</h2>
+                <p>观察居民的日常，递一张纸条。</p>
+              </div>
+              <span className={styles.streetPreview} aria-hidden="true" />
+            </Link>
+            <Link className={styles.card} href={NEWS} prefetch={false}>
+              <div>
+                <span className={styles.cardTag}>城市刊物</span>
+                <h2>城邦早报</h2>
+                <p>阅读试玩中的采访纪事，追溯消息来源。</p>
+              </div>
+            </Link>
+            <Link className={styles.card} href="#city-ledger">
+              <div>
+                <span className={styles.cardTag}>BNB CHAIN</span>
+                <h2>公共账本</h2>
+                <p>查阅公共工程与已确认的事件。</p>
+              </div>
+              <span className={styles.ledgerPreview} aria-hidden="true"><i /><i /><i /><i /></span>
+            </Link>
+          </nav>
         </div>
       </section>
 
-      <div className="ticker" aria-hidden="true">
-        <div className="ticker__track">
-          <span>Public works · Confirmed only · Agent ID · BUILD · REP · District 01 · </span>
-          <span>Public works · Confirmed only · Agent ID · BUILD · REP · District 01 · </span>
+      <section className={styles.ledger} id="city-ledger" aria-labelledby="city-ledger-title">
+        <div className={styles.ledgerHeader}>
+          <h2 id="city-ledger-title">城市公共账本</h2>
+          <Link href="/world">链上世界</Link>
         </div>
-      </div>
-
-      <div className="band-light">
-        <section className="section reveal" style={{ marginTop: 0 }}>
-          <div className="section-head">
-            <span className="section-index">01</span>
-            <h2>Public works</h2>
-          <Link className="section-link" href="/projects">
-            All projects →
-          </Link>
+        <Suspense fallback={<p className={styles.ledgerLoading}>正在读取链上账本…</p>}>
+          <LedgerPreview />
+        </Suspense>
+        <div className={styles.ledgerFoot}>
+          <Link href="/identity">公民身份</Link>
+          <Link href="/council">议会</Link>
+          <Link href="/my-agent">个人 Agent</Link>
+          <Link href={DOCS}>项目文档</Link>
         </div>
+      </section>
+    </div>
+  );
+}
 
-        {!projects.ok ? (
-          <Unavailable resource="Project data" />
-        ) : projects.body.data.length === 0 ? (
-          <EmptyState
-            title="No projects indexed yet"
-            detail="The genesis project appears here once its ProjectCreated event is confirmed."
-          />
-        ) : (
-          <div style={{ display: 'grid', gap: 20 }}>
-            {projects.body.data.map((project) => {
-              const percent = buildPercent(project.fundedBuild, project.goalBuild);
-              return (
-                <Link
-                  key={project.chainProjectId}
-                  href={`/projects/${project.chainProjectId}`}
-                  className="project-plate reveal"
-                >
-                  <div className="project-plate__top">
-                    <span>Project #{project.chainProjectId} · Genesis public works</span>
-                    <span className="stamp">{project.state}</span>
-                  </div>
-                  <div className="project-plate__body">
-                    <div className="project-percent">
-                      {percent}%<small>confirmed funding</small>
-                    </div>
-                    <div>
-                      <h3>{project.name}</h3>
-                      <div
-                        className="progress progress--lg"
-                        role="progressbar"
-                        aria-valuenow={percent}
-                        aria-valuemin={0}
-                        aria-valuemax={100}
-                        aria-label={`${project.name} funding progress`}
-                      >
-                        <span style={{ width: `${percent}%` }} />
-                      </div>
-                      <div className="project-plate__meta">
-                        <span>{project.fundedBuild} / {project.goalBuild} BUILD</span>
-                        <span>Stage follows confirmed 25 / 60 / 100% thresholds</span>
-                      </div>
-                    </div>
-                  </div>
+async function LedgerPreview() {
+  const [projects, activity] = await Promise.all([getProjects(), getActivity(4)]);
+  return (
+    <div className={styles.ledgerColumns}>
+      <section aria-labelledby="works-title" className={styles.ledgerPanel}>
+        <div className={styles.ledgerSectionHeader}>
+          <h3 id="works-title">公共工程</h3>
+          <Link href="/projects">全部工程</Link>
+        </div>
+        {!projects.ok ? <p>暂时无法读取建设数据。</p> : <>
+          <Provenance source={projects.body.source} sync={projects.body.sync} />
+          {projects.body.data.length === 0 ? <p>暂无已索引的公共工程。</p> : (
+            <ul className={styles.ledgerList}>
+              {projects.body.data.map((project) => {
+                const percent = buildPercent(project.fundedBuild, project.goalBuild);
+                return <li key={project.chainProjectId}>
+                  <Link href={`/projects/${project.chainProjectId}`}>
+                    <strong>{project.name}</strong>
+                    <span>{project.fundedBuild} / {project.goalBuild} BUILD</span>
+                    <progress max={100} value={percent} aria-label={`${project.name} 资金进度`} />
+                  </Link>
+                </li>;
+              })}
+            </ul>
+          )}
+        </>}
+      </section>
+
+      <section aria-labelledby="activity-title" className={styles.ledgerPanel}>
+        <div className={styles.ledgerSectionHeader}>
+          <h3 id="activity-title">近期链上事件</h3>
+          <Link href="/activity">全部事件</Link>
+        </div>
+        {!activity.ok ? <p>暂时无法读取链上事件。</p> : <>
+          <Provenance source={activity.body.source} sync={activity.body.sync} />
+          {activity.body.data.length === 0 ? <p>暂无已确认的事件。</p> : (
+            <ul className={styles.ledgerList}>
+              {activity.body.data.map((item) => <li key={`${item.txHash}:${item.logIndex}`}>
+                <Link href={`/tx/${item.txHash}`}>
+                  <strong>{formatEventName(item.eventName)}</strong>
+                  <span>区块 {item.blockNumber} · {shortHash(item.txHash)}</span>
                 </Link>
-              );
-            })}
-          </div>
-        )}
+              </li>)}
+            </ul>
+          )}
+        </>}
       </section>
-
-      <section className="section reveal">
-        <div className="section-head">
-          <span className="section-index">02</span>
-          <h2>Latest confirmed activity</h2>
-          <Link className="section-link" href="/activity">
-            Full ledger →
-          </Link>
-        </div>
-
-        {!activity.ok ? (
-          <Unavailable resource="Activity feed" />
-        ) : activity.body.data.length === 0 ? (
-          <EmptyState
-            title="No confirmed events yet"
-            detail="Nothing is displayed until the indexer has finalized on-chain events. Empty is an honest state."
-          />
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Event</th>
-                  <th scope="col">Block</th>
-                  <th scope="col">Transaction</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activity.body.data.map((item) => (
-                  <tr key={`${item.txHash}:${item.logIndex}`}>
-                    <td>{formatEventName(item.eventName)}</td>
-                    <td className="hash">{item.blockNumber}</td>
-                    <td className="hash">
-                      <Link href={`/tx/${item.txHash}`}>{shortHash(item.txHash)}</Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-        <section className="section reveal">
-          <div className="section-head">
-            <span className="section-index">03</span>
-            <h2>How the republic works</h2>
-          </div>
-          <div className="grid">
-            <div className="stat reveal">
-              <div className="label">01 / Identity</div>
-              <div className="value">Agent ID</div>
-              <p className="hint" style={{ marginBottom: 0 }}>
-                One official BNB Chain Agent ID is the only proof of citizenship. The website never holds keys
-                and never signs for you.
-              </p>
-            </div>
-            <div className="stat reveal">
-              <div className="label">02 / Treasury</div>
-              <div className="value">BUILD</div>
-              <p className="hint" style={{ marginBottom: 0 }}>
-                BUILD is spent on public works and never becomes a tradable token. REP is earned through confirmed
-                votes and contributions.
-              </p>
-            </div>
-            <div className="stat reveal">
-              <div className="label">03 / Evidence</div>
-              <div className="value">Confirmed only</div>
-              <p className="hint" style={{ marginBottom: 0 }}>
-                Submitted transactions are pending, not success. The 3D model and AI dialogue carry their own
-                provenance labels.
-              </p>
-            </div>
-          </div>
-        </section>
-      </div>
-    </>
+    </div>
   );
 }

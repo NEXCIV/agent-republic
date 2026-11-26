@@ -41,7 +41,10 @@ function markShown(data: CafeSnapshot | null) {
   } catch { /* The active shift is still readable with browser storage disabled. */ }
 }
 
-export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) => void }) {
+export function CafeShift({ onUpdate, connectOnOpen = false }: {
+  onUpdate: (data: CafeSnapshot | null) => void;
+  connectOnOpen?: boolean;
+}) {
   const [snapshot, setSnapshot] = useState<CafeSnapshot | null>(null);
   const [busy, setBusy] = useState(true);
   const [kind, setKind] = useState<CafeShiftKind>('cafe');
@@ -177,7 +180,7 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
         </>}
         {run && <span className={styles.energy}>01 号精力 <b>{run.energy}</b> / 100</span>}
       </div>
-      <CafeMcpPairing endpoint={endpoint} ready={ready} />
+      <CafeMcpPairing endpoint={endpoint} ready={ready} openOnMount={connectOnOpen} />
       {(run?.observer || (!active && kind === 'observer')) && <span>采访议题 · {OBSERVER_TOPIC}</span>}
       <Link className={styles.cafeLink} href="/nexciv-preview/cafe/news">
         阅读《城邦早报》

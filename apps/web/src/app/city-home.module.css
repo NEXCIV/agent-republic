@@ -1,0 +1,235 @@
+.page {
+  --home-black: #0b0e10;
+  --home-paper: #f4efe5;
+  --home-muted: #c4beb3;
+  --home-gold: #e8bb37;
+  --home-gold-light: #edce83;
+  --home-edge: clamp(24px, 5.25vw, 92px);
+  --home-panel: #151819;
+  --home-rule: #674f2f;
+  background: var(--home-black);
+  color: var(--home-paper);
+  font-family: var(--font-sans), "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+:global(body):has(.page) > :global(.site-header),
+:global(body):has(.page) > :global(.scroll-progress),
+:global(body):has(.page) > footer { display: none; }
+:global(.page-shell):has(.page) { width: 100%; max-width: none; margin: 0; padding: 0; }
+
+.hero {
+  position: relative;
+  display: grid;
+  isolation: isolate;
+  min-height: 100svh;
+  overflow: hidden;
+}
+
+.cityBackdrop {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background:
+    linear-gradient(90deg, #0b0e10 0%, #0b0e10ee 9%, #0b0e10b8 27%, #0b0e1047 52%, #0b0e1005 85%),
+    linear-gradient(0deg, #0b0e108c, transparent 34%),
+    url("/nexciv-walk/city-dusk.webp") 59% 50% / cover no-repeat;
+}
+
+.heroInner {
+  width: min(100%, 1720px);
+  margin: 0 auto;
+  display: grid;
+  grid-template-rows: auto minmax(375px, 1fr) auto;
+  padding: 24px var(--home-edge) clamp(28px, 5.5svh, 52px);
+}
+
+.navbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 20px;
+  min-height: 68px;
+  padding: 0 22px;
+  border: 1px solid #ffffff2b;
+  border-radius: 12px;
+  background: #1d242ad9;
+  backdrop-filter: blur(12px);
+}
+
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  gap: 10px;
+  color: #e5dbc6;
+  font-family: var(--font-display-stack);
+  font-size: clamp(17px, 1.75vw, 26px);
+  font-weight: 770;
+  line-height: 1;
+  letter-spacing: 0.013em;
+  white-space: nowrap;
+}
+
+.wordmark em { color: var(--home-gold-light); font-style: normal; }
+.brandIcon { width: 37px; height: 39px; flex: none; color: var(--home-gold-light); }
+.nav { display: flex; align-items: center; gap: clamp(20px, 3.1vw, 48px); }
+.nav a { padding: 10px 0; color: var(--home-paper); font-size: 15px; font-weight: 530; white-space: nowrap; }
+.nav a:hover { color: var(--home-gold-light); text-decoration: none; }
+.wordmark:hover { text-decoration: none; }
+
+.navConnect, .primary, .secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  border: 1px solid #d0ac54;
+  border-radius: 9px;
+  padding: 0 24px;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.25;
+  white-space: nowrap;
+  transition: transform 300ms cubic-bezier(.22, 1, .36, 1), background-color 300ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.navConnect:hover, .primary:hover, .secondary:hover { text-decoration: none; transform: translateY(-2px); }
+.navConnect:active, .primary:active, .secondary:active { transform: translateY(1px); }
+.navConnect, .secondary { color: var(--home-gold-light); background: #231d14d9; }
+.navConnect:hover, .secondary:hover { background: #3b2d19; }
+.navConnect { justify-self: end; min-height: 45px; padding-inline: 19px; font-size: 15px; }
+
+.heroCopy {
+  align-self: center;
+  margin: 0 0 22px clamp(0px, 1.7vw, 26px);
+  animation: home-enter 680ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.heroCopy h1 {
+  margin: 0;
+  color: #fffdf8;
+  font-family: var(--font-display-stack);
+  font-size: clamp(53px, 6vw, 90px);
+  font-weight: 780;
+  letter-spacing: -.038em;
+  line-height: 1;
+}
+.heroCopy h1 span { color: var(--home-gold); }
+.heroCopy p {
+  margin: 18px 0 0;
+  color: #ded8cb;
+  font-size: clamp(20px, 2.05vw, 29px);
+  letter-spacing: .015em;
+  line-height: 1.48;
+}
+.heroActions { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 30px; }
+.primary { background: #efbf2d; color: #211b0d; }
+.primary:hover { background: #f5cf54; }
+
+.deck {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(12px, 1.65vw, 24px);
+  margin-inline: clamp(0px, 1.7vw, 26px);
+  animation: home-enter 690ms 120ms cubic-bezier(.22, 1, .36, 1) both;
+}
+
+.card {
+  min-width: 0;
+  min-height: 125px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border: 1px solid #937b4e;
+  border-radius: 13px;
+  background: #171918ec;
+  color: var(--home-paper);
+  backdrop-filter: blur(10px);
+  transition: transform 300ms cubic-bezier(.22, 1, .36, 1), border-color 300ms cubic-bezier(.22, 1, .36, 1);
+}
+.card:hover { transform: translateY(-2px); border-color: var(--home-gold-light); text-decoration: none; }
+.card h2 { margin: 3px 0 5px; color: var(--home-paper); font-size: clamp(18px, 2vw, 25px); font-weight: 650; letter-spacing: 0; line-height: 1.24; }
+.card p { margin: 0; color: var(--home-muted); font-size: 13px; line-height: 1.55; }
+.cardTag { color: var(--home-gold-light); font-size: 10px; letter-spacing: .1em; }
+.streetPreview {
+  flex: 0 0 clamp(52px, 6.5vw, 92px);
+  aspect-ratio: 1;
+  border: 1px solid #a58d56;
+  border-radius: 50%;
+  background: #26221c url("/nexciv-walk/market.webp") center / cover no-repeat;
+}
+
+.ledgerPreview {
+  display: grid;
+  align-content: center;
+  gap: 6px;
+  flex: 0 0 clamp(42px, 5vw, 68px);
+  aspect-ratio: .86;
+  padding: 10px 9px;
+  border: 1px solid #cab07d;
+  border-radius: 6px;
+  background: #d4bf91;
+  transform: rotate(5deg);
+}
+.ledgerPreview i { display: block; height: 2px; background: #5a4a2d; }
+.ledgerPreview i:first-child { width: 65%; height: 4px; margin-bottom: 3px; }
+.ledgerPreview i:last-child { width: 72%; }
+
+.ledger { max-width: 1440px; margin: 0 auto; padding: clamp(44px, 7vw, 106px) var(--home-edge) 42px; }
+.ledgerHeader, .ledgerSectionHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+.ledgerHeader { margin-bottom: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--home-rule); }
+.ledgerHeader h2, .ledgerSectionHeader h3 { margin: 0; color: var(--home-paper); letter-spacing: 0; }
+.ledgerHeader h2 { font-size: clamp(25px, 3vw, 39px); }
+.ledgerSectionHeader h3 { font-size: 19px; }
+.ledger a { color: var(--home-gold-light); }
+.ledgerColumns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.ledgerPanel { min-width: 0; padding: 20px; background: var(--home-panel); border: 1px solid #444038; border-radius: 10px; }
+.ledgerPanel p, .ledgerLoading, .ledgerPanel :global(.hint) { color: var(--home-muted); }
+.ledgerPanel :global(.row) { margin-top: 12px; }
+.ledgerList { list-style: none; padding: 0; margin: 12px 0 0; }
+.ledgerList a { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px; align-items: center; padding: 14px 0; border-top: 1px solid #3e3c36; color: var(--home-paper); }
+.ledgerList span { color: var(--home-muted); font-size: 13px; }
+.ledgerList progress { width: 100%; height: 8px; grid-column: 1 / -1; accent-color: var(--home-gold); }
+.ledgerFoot { display: flex; flex-wrap: wrap; gap: 16px 24px; margin-top: 28px; font-size: 14px; }
+
+@keyframes home-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 950px) {
+  .nav { gap: 18px; }
+  .card { gap: 10px; padding-inline: 14px; }
+  .heroInner { grid-template-rows: auto minmax(350px, 1fr) auto; }
+}
+
+@media (max-width: 730px) {
+  .navbar { grid-template-columns: 1fr auto; padding: 10px 14px; gap: 8px 12px; }
+  .nav { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; gap: 10px; }
+  .nav a { font-size: 13px; }
+  .navConnect { padding-inline: 12px; min-height: 40px; font-size: 13px; }
+  .heroInner { grid-template-rows: auto minmax(300px, 1fr) auto; }
+  .heroCopy { margin: 0; }
+  .heroCopy h1 { font-size: clamp(42px, 10vw, 64px); }
+  .cityBackdrop { background-position: center, center, 58% 50%; }
+  .deck, .ledgerColumns { grid-template-columns: 1fr; margin-inline: 0; }
+  .card { min-height: 90px; }
+  .streetPreview, .ledgerPreview { flex-basis: 43px; }
+}
+
+@media (max-width: 400px) {
+  .heroActions { gap: 9px; }
+  .primary, .secondary { padding-inline: 13px; font-size: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .heroCopy, .deck { animation: none; }
+  .card, .navConnect, .primary, .secondary { transition: none; }
+  .card:hover, .navConnect:is(:hover, :active), .primary:is(:hover, :active), .secondary:is(:hover, :active) { transform: none; }
+}

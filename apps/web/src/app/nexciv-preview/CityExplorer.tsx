@@ -35,7 +35,6 @@ type Props = {
   residentIds: readonly FollowId[];
   managerPresent: boolean;
   children?: ReactNode;
-  trigger: RefObject<HTMLButtonElement | null>;
   heading: RefObject<HTMLHeadingElement | null>;
   onOpen: () => void;
   onClose: () => void;
@@ -43,10 +42,8 @@ type Props = {
   onFocus: (selection: WalkSelection) => void;
 };
 
-export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, managerPresent, children, trigger, heading, onOpen, onClose, onSelect, onFocus }: Props) {
-  if (!open) return <button ref={trigger} className={styles.explorerTrigger} type="button" onClick={onOpen} aria-expanded={false}>
-    地点与居民
-  </button>;
+export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, managerPresent, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
+  if (!open) return null;
 
   const landmark = selection?.kind === 'building' ? LANDMARKS[selection.id] : undefined;
   const manager = selection?.kind === 'person';
@@ -58,7 +55,7 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
   const residentStatus = sceneState === 'fallback' ? '静态预览中无法获取实时位置'
     : marketGuest ? '在街角市集活动' : residentActivity(residentReport);
 
-  return <aside className={styles.explorer} aria-labelledby="city-explorer-title">
+  return <aside id="city-explorer" className={styles.explorer} aria-labelledby="city-explorer-title">
     <header className={styles.explorerHeader}>
       {selection && <button className={styles.explorerBack} type="button" onClick={onOpen}>‹ 地点与居民</button>}
       <button className={styles.explorerClose} type="button" onClick={onClose} aria-label="关闭地点与居民面板">×</button>

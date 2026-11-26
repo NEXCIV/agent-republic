@@ -2,6 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { CityMark } from '@/components/CityMark';
+import { CityGlyph } from './CityGlyph';
+import { CityLoading } from './CityLoading';
 import { CafeShift, shiftLabel } from './CafeShift';
 import { CityExplorer } from './CityExplorer';
 import { WORKS_MANAGER, CityVisitPanel } from './CityVisitPanel';
@@ -64,16 +67,28 @@ function activity(id: AgentId, report: AgentReport) {
   }[report.status];
 }
 
-export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?: boolean; requestedActivity?: string }) {
+export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen = false }: {
+  cafeMode?: boolean;
+  requestedActivity?: string;
+  connectOnOpen?: boolean;
+}) {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const explorerTrigger = useRef<HTMLButtonElement>(null);
   const explorerHeading = useRef<HTMLHeadingElement>(null);
   const explorerFocus = useRef<'trigger' | 'heading' | null>(null);
+  const modeControl = useRef<HTMLButtonElement>(null);
   const [explorerOpen, setExplorerOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(!cafeMode);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [shiftOpen, setShiftOpen] = useState(cafeMode);
+  const [usingStatic, setUsingStatic] = useState(false);
+  const [renderAttempt, setRenderAttempt] = useState(0);
   const [selection, setSelection] = useState<WalkSelection | null>(null);
+  const selectionRef = useRef<WalkSelection | null>(null);
   const [inspectionCamera, setInspectionCamera] = useState<WalkSelection | null>(null);
   const inspect = useCallback((item: WalkSelection | null) => {
+    selectionRef.current = item;
     world.current?.select(item);
     setSelection(item);
     if (item) setExplorerOpen(true);
@@ -126,11 +141,13 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     || theatre?.phase === 'scheduled' || theatre?.phase === 'open';
   const pilotStatus = pilot ? LIGHTING_PILOT_STATUS[pilot.stage] : '';
   const [shift, setShift] = useState('等待开班');
+  const [shiftEnergy, setShiftEnergy] = useState<number>();
   const [greeting, setGreeting] = useState('');
   const updateCafe = useCallback((data: CafeSnapshot | null) => {
     latest.current = data;
     world.current?.syncCafe(data);
     setShift(data ? shiftLabel(data.run) : '等待开班');
+    setShiftEnergy(data?.run.energy);
     const phase = data?.run.phase;
     setGreeting(phase === 'reconnecting' || phase === 'interviewing' || phase === 'waitingForAhe'
       ? data?.run.events.at(-1)?.text ?? '' : '');
@@ -149,7 +166,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
 
   useEffect(() => {
     const host = viewport.current;
-    if (!host) return;
+    if (!host || usingStatic) return;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const initialView = cafeMode ? 'follow' : 'overview';
     setView(initialView);
@@ -165,6 +182,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         onSelect: cafeMode ? undefined : inspect,
       }, cafeMode);
       world.current = controller;
+      controller.select(selectionRef.current);
       controller.syncCity(latestCity.current);
       if (cafeMode) {
         controller.syncCafe(latest.current);
@@ -174,7 +192,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     } catch {
       setState('fallback');
     }
-  }, [cafeMode, inspect]);
+  }, [cafeMode, inspect, renderAttempt, usingStatic]);
 
   useEffect(() => {
     const target = explorerFocus.current;
@@ -307,23 +325,55 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     ready: '300 米城区与北岸湖畔',
     unavailable: '全城载入失败，点击全城重试',
   }[overview] : undefined;
+  const loadingStage = state === 'loading' ? 'scene'
+    : sceneReady && view === 'overview' && !inspectionCamera && (overview === 'idle' || overview === 'loading') ? 'overview' : null;
+  const energy = cafeMode ? shiftEnergy ?? city?.energy : visitObservation?.energy;
+  const updates = (cafeMode ? recent : visitObservation?.recentActivities ?? [])
+    .flatMap(({ requestId, events }) => events.map((event) => ({ ...event, id: `${requestId}:${event.at}:${event.type}` })))
+    .sort((a, b) => b.at - a.at).slice(0, 3);
+
+  function useStatic() {
+    setUsingStatic(true);
+    setState('fallback');
+    setCameraOpen(false);
+    requestAnimationFrame(() => modeControl.current?.focus({ preventScroll: true }));
+  }
+
+  function start3D() {
+    setState('loading');
+    setOverview('idle');
+    setInspectionCamera(null);
+    setUsingStatic(false);
+    setRenderAttempt((attempt) => attempt + 1);
+  }
 
   return (
     <div className={styles.page} lang="zh-CN" data-preview="nexciv-walk">
-      <a className={styles.skip} href="#walk-controls">跳到操作</a>
-      <header className={styles.header}>
-        <Link className={styles.brand} href="/" prefetch={false} aria-label="返回 NEXCIV 首页">NEXCIV</Link>
-        <span className={styles.divider} />
-        <h1>{cafeMode ? '咖啡街的一个班次' : '城市试玩'}</h1>
-        <Link className={styles.cafeLink} href={cafeMode ? '/nexciv-preview' : '/nexciv-preview/cafe'} prefetch={false}>{cafeMode ? '返回街区' : '观察咖啡街'}</Link>
-        <span className={styles.status} role="status">
-          {state === 'ready' ? '实时 3D · DEMO' : state === 'loading' ? '正在载入街区' : '静态预览 · DEMO'}
-        </span>
-      </header>
       <section className={styles.viewer} aria-label="NEXCIV 实时街区">
-        <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
-        <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
+        <img className={styles.poster} src="/nexciv-walk/city-dusk.webp" alt="NEXCIV 湖畔城区的黄昏俯视图" />
+        <div ref={viewport} className={styles.viewport} data-visual data-live={sceneReady && !loadingStage} />
+        <div className={styles.hud} inert={Boolean(loadingStage)}>
+        <a className={styles.skip} href="#walk-controls">跳到操作</a>
+        <header className={styles.hudHeader}>
+          <h1><Link className={styles.hudBrand} href="/" prefetch={false} aria-label="NEXCIV CITY 首页"><CityMark /><span>NEXCIV <b>CITY</b></span></Link>
+            <span className={styles.srOnly}>{cafeMode ? '咖啡街的一个班次' : '城市试玩'}</span></h1>
+          <div className={styles.tools}>
+            <span className={styles.status}><i />{sceneReady ? '实时 3D' : '2D 导览'} <small>DEMO</small></span>
+            {!cafeMode && sceneReady && <button type="button" aria-label="镜头控制" aria-expanded={cameraOpen} aria-controls="camera-controls" onClick={() => setCameraOpen(!cameraOpen)}><CityGlyph name="camera" /></button>}
+            <button ref={modeControl} type="button" onClick={sceneReady ? useStatic : start3D}>{sceneReady ? '2D' : '开启 3D'}</button>
+            {!cafeMode && <Link className={styles.connectLink} href="/nexciv-preview/cafe?connect=1#connect-agent" prefetch={false}>连接 Agent</Link>}
+          </div>
+        </header>
         <div className={styles.destination}>
+          <div className={styles.profile}>
+            <img src="/nexciv-walk/citizen-01-portrait.webp" alt="" width={48} height={48} />
+            <div><b>01 号居民</b>
+              {energy === undefined ? <small>城市居民 · DEMO</small> : <div className={styles.profileEnergy}>
+                <span>精力</span><meter min={0} max={100} value={energy} aria-label="01 号精力" /><span>{energy}</span>
+              </div>}
+            </div>
+          </div>
+          <div className={styles.cameraCaption}>
           <small>{watchingTheatre ? '社区剧场 · DEMO' : cafeMode ? `AGENT ${cafeFollow} · AI SIMULATED · DEMO`
             : inspectionCamera ? (cameraLandmark ? '地标镜头' : '居民镜头') : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
           <strong role="status">{cafeMode ? cafeTitle
@@ -339,21 +389,38 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
               : `${theatre.booking.name} · 已到场 ${theatre.attendees.length} 人`}
           </p>}
           {!cityWalk && !sceneCaption && greeting && <p className={styles.greeting}>{greeting}</p>}
+          </div>
         </div>
+        {activityOpen && <aside className={styles.pulse} aria-labelledby="pulse-title">
+          <div className={styles.panelHeading}><h2 id="pulse-title">城市动态</h2><button type="button" onClick={() => setActivityOpen(false)} aria-label="关闭城市动态">×</button></div>
+          {updates.length ? <ul>{updates.map(({ id, text, speaker }) => <li key={id}>
+            {speaker && <b>{speaker} · </b>}{text}
+          </li>)}</ul> : <p>{visitMovement?.status === 'walking' ? `01 号正前往${visitMovement.name}。` : '本次试玩暂无现场活动。'}</p>}
+          <Link href="/nexciv-preview/cafe/news" prefetch={false}>查看城邦早报</Link>
+        </aside>}
         {!cafeMode && <CityExplorer selection={selection} open={explorerOpen} sceneState={state}
           focusActive={focusActive} residentReport={selectedResident} residentIds={availableResidents}
           managerPresent={managerPresent}
-          trigger={explorerTrigger} heading={explorerHeading} onOpen={openDirectory} onClose={closeExplorer}
+          heading={explorerHeading} onOpen={openDirectory} onClose={closeExplorer}
           onSelect={openDetails} onFocus={focusSelection}>
           {visitVenue && (
             <CityVisitPanel venue={visitVenue} session={visitSession} talkingToManager={selection?.kind === 'person'}
               onMeet={() => openDetails(WORKS_MANAGER)} onCommand={visit} />
           )}
         </CityExplorer>}
-        {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。可打开「地点与居民」查看详情。'}</p>}
-      </section>
-      <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
+        <nav id="walk-controls" tabIndex={-1} className={styles.dock} aria-label="城市快捷操作">
+          {cafeMode ? <Link href="/nexciv-preview" prefetch={false}><CityGlyph name="places" /><span>返回街区</span></Link>
+            : <button ref={explorerTrigger} type="button" aria-expanded={explorerOpen} aria-controls="city-explorer" onClick={explorerOpen ? closeExplorer : openDirectory}><CityGlyph name="places" /><span>地点与居民</span></button>}
+          <button type="button" aria-expanded={activityOpen} onClick={() => setActivityOpen(!activityOpen)}><CityGlyph name="pulse" /><span>动态</span></button>
+          {cafeMode ? <button type="button" aria-expanded={shiftOpen} aria-controls="cafe-controls" onClick={() => setShiftOpen(!shiftOpen)}><CityGlyph name="coffee" /><span>咖啡班次</span></button>
+            : <Link href="/nexciv-preview/cafe" prefetch={false}><CityGlyph name="coffee" /><span>咖啡街</span></Link>}
+          <Link href="/nexciv-preview/cafe/news" prefetch={false}><CityGlyph name="paper" /><span>城邦早报</span></Link>
+        </nav>
+        {state === 'fallback' && <p className={styles.fallback} role="status">{usingStatic ? '已切换到 2D 导览。' : '3D 场景暂时无法加载。'}{cafeMode ? ' 可继续观察班次。' : ' 可从「地点与居民」继续互动。'}</p>}
+      <aside id={cafeMode ? 'cafe-controls' : 'camera-controls'} className={`${styles.footer} ${cafeMode ? styles.shiftPanel : styles.cameraPanel}`}
+        aria-label={cafeMode ? '咖啡街班次' : '镜头控制'} hidden={cafeMode ? !shiftOpen : !cameraOpen}>
         {cafeMode ? <>
+          <div className={styles.panelHeading}><h2>咖啡街班次</h2><button type="button" aria-label="关闭咖啡街班次" onClick={() => setShiftOpen(false)}>×</button></div>
           {cityWalk && !watchingTheatre && <div className={styles.route}>
             <span>{followingAttendee ? '剧场行程' : cafeFollow === '03' ? '傍晚行程' : cafeFollow === '02' ? '施工路线' : movementActivity?.kind === 'survey' ? '调研路线'
               : movementActivity?.kind === 'work' ? '巡查路线' : movementActivity?.kind === 'read' ? '公告栏路线' : '全城试走'}</span>
@@ -393,8 +460,9 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
               </p>}
             </section>)}
           </details>}
-          <CafeShift onUpdate={updateCafe} />
+          <CafeShift onUpdate={updateCafe} connectOnOpen={connectOnOpen && !loadingStage} />
         </> : <>
+        <div className={styles.panelHeading}><h2>镜头控制</h2><button type="button" aria-label="关闭镜头控制" onClick={() => setCameraOpen(false)}>×</button></div>
         <div className={styles.controls}>
           <div className={styles.switcher} role="group" aria-label="视角">
             <button disabled={!sceneReady} aria-pressed={!inspectionCamera && view === 'overview'} onClick={() => select('overview')}>全城</button>
@@ -428,14 +496,11 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
           </>}
           <span className={styles.performance} aria-label="本机实时渲染指标">{fps > 0 ? `${fps} FPS · ${(readyTime / 1000).toFixed(1)} s` : ''}</span>
         </div>
-        {state === 'fallback' && (
-          <div className={styles.fallbackLinks}>
-            <a href="/nexciv-walk/poster.webp">中央广场鸟瞰</a>
-            <a href="/nexciv-walk/market.webp">Corner Market 门前</a>
-          </div>
-        )}
         </>}
-      </footer>
+      </aside>
+        </div>
+        {loadingStage && <CityLoading stage={loadingStage} cafeMode={cafeMode} onUseStatic={useStatic} />}
+      </section>
     </div>
   );
 }
