@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CafeShift, shiftLabel } from './CafeShift';
 import type { CafeSnapshot } from '../../lib/cafe-life';
-import { CITY_PLACES, type CityObservation } from '../../lib/city-movement';
+import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
+import { COUNCIL_SURVEY_RECEIPT } from '../../lib/council-notice';
 import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type View, type WalkController } from './walk';
 import type { Place } from './navigation';
 import styles from './preview.module.css';
@@ -122,10 +123,11 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
 
   const sceneReady = state === 'ready';
   const agent = reports[selected];
-  const cityLabel = cityWalk && (cityMoving ? `前往 ${cityWalk.name}` : `已到达 ${cityWalk.name}`);
+  const cityLabel = cityWalk && (cityMoving ? `前往 ${cityWalk.name}`
+    : movementActivity?.kind === 'survey' ? '已返回 议事公告栏' : `已到达 ${cityWalk.name}`);
   const sceneCaption = currentActivity?.events.at(-1);
   const travelProgress = city && cityWalk && cityMoving
-    ? Math.min(100, Math.max(0, Math.round(100 * (city.serverTime - cityWalk.startedAt) / (cityWalk.arrivesAt - cityWalk.startedAt))))
+    ? Math.round(100 * cityWalkTiming(cityWalk, city.serverTime).progress)
     : 100;
   const origin = PLACES[agent.from ?? 'plaza'];
   const destination = agent.destination ? PLACES[agent.destination] : '';
@@ -173,13 +175,16 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         {cafeMode ? <>
           {cityWalk && <div className={styles.route}>
-            <span>{movementActivity?.kind === 'work' ? '巡查路线' : movementActivity?.kind === 'read' ? '公告栏路线' : '全城试走'}</span>
+            <span>{movementActivity?.kind === 'survey' ? '调研路线'
+              : movementActivity?.kind === 'work' ? '巡查路线' : movementActivity?.kind === 'read' ? '公告栏路线' : '全城试走'}</span>
             <progress aria-label={currentActivity?.label || cityLabel || 'Agent 01 行程'} max={100} value={travelProgress} />
             <span>{cityWalk.name} · {Math.round(cityWalk.metres)} 米</span>
           </div>}
           {city?.nearby && <div className={styles.cityNearby}>
             <span>附近 · {[...city.nearby.people.map(({ name }) => name), ...city.nearby.facilities.map(({ name }) => name)].join('、')}</span>
             <span>01 号精力 <b>{city.energy}</b> / 100</span>
+            {city.nearby.place === 'governance' && city.lightingSurvey === 'submitted'
+              && <span>公告栏 · {COUNCIL_SURVEY_RECEIPT}</span>}
             {!!city.availableActions.length && <span className={styles.cityOptions}>
               可选 · {city.availableActions.map(({ label }) => label).join('、')}
             </span>}

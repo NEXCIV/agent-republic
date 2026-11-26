@@ -8,7 +8,10 @@ import type { CafeSnapshot } from './cafe-life';
 import { CITY_MAP, cityRestingPoint, planCityWalk } from './city-navigation';
 import { CAFE_COUNTER } from './cafe-geometry';
 import { positionOnWalk, routeDistance, type CityDestination, type CityMovement, type CityObservation, type CityWalk } from './city-movement';
-import { availableCityActions, beginCityActivity, cityActivityView, nearbyCitySite, type CityActivity, type CityActivityView } from './city-activities';
+import {
+  availableCityActions, beginCityActivity, cityActivityView, councilLightingSurvey, COUNCIL_LIGHTING_ACTIONS, nearbyCitySite,
+  type CityActivity, type CityActivityView,
+} from './city-activities';
 
 type Response = Omit<CafeSnapshot, 'run'> & { run: CafeRun };
 type Row = { state: string };
@@ -216,6 +219,15 @@ export class CafeDemoStore {
       .all(resident).map(({ activity }) => JSON.parse(String(activity)));
   }
 
+  private lightingSurvey(resident: string, at: number) {
+    const records = this.db.prepare(`
+      SELECT activity FROM city_activities
+      WHERE resident=? AND json_extract(activity, '$.actionId') IN (?,?,?)
+      ORDER BY started DESC, rowid DESC
+    `).all(resident, ...COUNCIL_LIGHTING_ACTIONS);
+    return councilLightingSurvey(records.map(({ activity }) => JSON.parse(String(activity))), at);
+  }
+
   private activityInProgress(resident: string, at: number) {
     return Boolean(this.db.prepare('SELECT 1 FROM city_activities WHERE resident=? AND ends>? LIMIT 1').get(resident, at));
   }
@@ -244,10 +256,12 @@ export class CafeDemoStore {
       const position = walk ? positionOnWalk(walk, serverTime)
         : activeShift ? null : cityRestingPoint(run?.place, Boolean(run?.observer));
       const energy = this.energyFromActivities(history, run, serverTime) ?? run?.energy ?? CAFE_INITIAL_ENERGY;
-      const nearby = nearbyCitySite(position);
+      const lightingSurvey = this.lightingSurvey(resident, serverTime)?.stage;
+      const nearby = nearbyCitySite(position, lightingSurvey);
       return {
         agentId: '01', serverTime, position, movement, canMove: !reason, reason, energy,
         nearby: nearby?.site ?? null,
+        ...(lightingSurvey ? { lightingSurvey } : {}),
         availableActions: reason || !nearby ? [] : availableCityActions(nearby.actions, energy),
         recentActivities: history.map((activity) => cityActivityView(activity, serverTime)),
       };
@@ -273,17 +287,18 @@ export class CafeDemoStore {
         return { error: '请等当前行程或活动结束，再选择现场行动。', code: 409 };
       }
       const position = walk?.points.at(-1) ?? cityRestingPoint(run?.place, Boolean(run?.observer));
-      const nearby = nearbyCitySite(position);
+      const survey = this.lightingSurvey(resident, at);
+      const nearby = nearbyCitySite(position, survey?.stage);
       const action = nearby?.actions.find(({ id }) => id === actionId);
       if (!action || !nearby) return { error: '当前位置没有这项交互，请先查看附近可做的事。', code: 422 };
       const history = this.cityActivityHistory(resident);
       const energy = this.energyFromActivities(history, run, at) ?? run?.energy ?? CAFE_INITIAL_ENERGY;
       if (!availableCityActions([action], energy).length) return { error: '精力不足，请先休息。', code: 409 };
-      const activity = beginCityActivity(action, nearby.site.place, position, energy, requestId, at);
+      const activity = beginCityActivity(action, nearby.site.place, position, energy, requestId, at, survey?.report);
       if (!activity) return { error: '活动点位目前无法沿步道到达。', code: 422 };
       this.db.prepare('INSERT INTO city_activities(resident,id,started,ends,activity) VALUES (?,?,?,?,?)')
         .run(resident, requestId, at, activity.endsAt, JSON.stringify(activity));
-      if (activity.kind === 'read' && activity.walk) this.saveCityWalk(resident, activity.walk);
+      if ((activity.kind === 'read' || activity.kind === 'survey') && activity.walk) this.saveCityWalk(resident, activity.walk);
       this.db.prepare('DELETE FROM city_activities WHERE resident=? AND ends<?')
         .run(resident, at - CAFE_RETENTION_DAYS * 86400000);
       return cityActivityView(activity, at);

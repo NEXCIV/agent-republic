@@ -111,7 +111,7 @@ serveStdio(() => {
     return state?.movement ? { ...state, movement: movementSummary(state.movement) } : state;
   });
 
-  tool('interact_city', '执行最近一次 observe_city 的 availableActions 中的一项现场动作。到场后可选择查看公告、聊天、休息或接任务。随后可用 observe_city 查看完成情况与记录。', z.strictObject({
+  tool('interact_city', '执行最近一次 observe_city 的 availableActions 中的一项现场动作。议会试玩可读公告、调研湖畔路灯并回公告栏交报告。其他地点可聊天、休息或接任务。用 observe_city 查看现场结果。', z.strictObject({
     actionId: z.string().regex(/^[a-z][a-z0-9_-]{0,23}\.[a-z][a-z0-9_-]{0,23}$/),
     requestId: z.uuidv4().optional().describe('重试同一项现场动作时复用原 UUID'),
   }), false, ({ actionId, requestId = randomUUID() }) => request('', { action: 'interactCity', actionId, requestId }));

@@ -5,9 +5,9 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
 import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
-import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING } from '../../lib/council-notice';
+import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING, COUNCIL_SURVEY_RECEIPT } from '../../lib/council-notice';
 import type { CafeSnapshot } from '../../lib/cafe-life';
-import type { CityObservation } from '../../lib/city-movement';
+import { cityWalkTiming, type CityObservation } from '../../lib/city-movement';
 import type { CityPerson } from '../../lib/city-activities';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
@@ -293,6 +293,19 @@ function addCouncilNotice(asset: THREE.Object3D) {
   notice.position.set(...COUNCIL_NOTICE_BOARD);
   notice.rotation.y = COUNCIL_NOTICE_HEADING;
   asset.add(notice);
+  let showingReceipt = false;
+  return (received: boolean) => {
+    if (showingReceipt === received) return;
+    showingReceipt = received;
+    brush.fillStyle = received ? '#edbe56' : '#193640';
+    brush.fillRect(24, 352, 336, 49);
+    if (received) {
+      brush.fillStyle = '#18252a';
+      brush.font = '700 28px "Microsoft YaHei", sans-serif';
+      brush.fillText(COUNCIL_SURVEY_RECEIPT, 40, 385);
+    }
+    texture.needsUpdate = true;
+  };
 }
 
 export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks, cafeMode = false): WalkController {
@@ -414,6 +427,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let citywide: THREE.Object3D | undefined;
   let overviewStatus: DistrictStatus = 'idle';
   let north: THREE.Object3D | undefined;
+  let updateCouncilNotice: ReturnType<typeof addCouncilNotice>;
   let northLoading: Promise<void> | undefined;
   let northFailed = false;
   const districts: Record<District, { asset?: THREE.Object3D; pending?: Promise<void>; status: DistrictStatus }> = {
@@ -634,6 +648,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const cityWalk = cityObservation?.movement;
     const latestActivity = cityObservation?.recentActivities?.[0];
     const conversation = latestActivity?.status === 'running' && latestActivity.kind === 'talk' ? latestActivity : undefined;
+    const surveying = latestActivity?.status === 'running' && latestActivity.kind === 'survey';
     const byPier = cafeMode && !cityWalk && shift?.place === 'pier';
     const observer = cityWalk ? undefined : shift?.observer;
     const interviewing = !cityWalk && shift?.phase === 'interviewing';
@@ -685,21 +700,23 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         }
         if (primary) {
           const target = cityWalk.points.at(-1)!;
-          const duration = cityWalk.arrivesAt - cityWalk.startedAt;
           const cityTime = cityObservation!.serverTime + (playing ? now - cityReceivedAt : 0);
+          const { walkingMs, progress, stop } = cityWalkTiming(cityWalk, cityTime);
           if (conversation?.person) {
             observedPosition.set(...target);
             primary.observe(poseDt, observedPosition, siteHost?.position ?? counterFacing, false, 'nod');
-          } else if (cityWalk.facing && cityTime >= cityWalk.arrivesAt) {
-            observedPosition.set(...target);
-            observedFacing.set(cityWalk.facing[0], target[1], cityWalk.facing[1]);
+          } else if (stop || (cityWalk.facing && cityTime >= cityWalk.arrivesAt)) {
+            const position = stop?.position ?? target;
+            const facing = stop?.facing ?? cityWalk.facing!;
+            observedPosition.set(...position);
+            observedFacing.set(facing[0], position[1], facing[1]);
             primary.observe(poseDt, observedPosition, observedFacing);
-          } else if (duration > 0) {
+          } else if (walkingMs > 0) {
             if (cityJourney?.id !== cityWalk.requestId || cityJourney.traveller !== primary) {
               primary.plan(cityWalk.points, [target[0], target[2]]);
               cityJourney = { traveller: primary, id: cityWalk.requestId };
             }
-            primary.observeJourney(poseDt, THREE.MathUtils.clamp((cityTime - cityWalk.startedAt) / duration, 0, 1), duration / 1000);
+            primary.observeJourney(poseDt, progress, walkingMs / 1000);
           } else {
             observedPosition.set(...target);
             primary.observe(poseDt, observedPosition, counterFacing);
@@ -783,6 +800,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const registryFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.registry), 3, 17);
       const worksFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.works), 3, 17);
       const noticeFrame = cityWalk?.facing ? 1 - THREE.MathUtils.smoothstep(feet.distanceTo(councilNotice), 2, 7) : 0;
+      const surveyFrame = surveying ? THREE.MathUtils.smoothstep(-feet.z, 150, 164) : 0;
       const hallFrame = (1 - THREE.MathUtils.smoothstep(feet.distanceTo(landmarkEntrances.hall), 7, 41)) * (1 - noticeFrame);
       const forumFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(forumEntrance), 3, 20);
       const pierFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(pierEntrance), 4, 23);
@@ -790,10 +808,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const residenceFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(residenceEntrance), 4, 21);
       const entranceFrame = Math.max(registryFrame, worksFrame, hallFrame, forumFrame, pierFrame, centerFrame, residenceFrame);
       aim.y += 0.58 * entranceFrame;
-      aim.y += 3.15 * hallFrame + 1.45 * centerFrame + 1.08 * residenceFrame + 0.48 * noticeFrame;
+      aim.y += 3.15 * hallFrame + 1.45 * centerFrame + 1.08 * residenceFrame + 0.48 * noticeFrame + 0.41 * surveyFrame;
       aim.x -= 1.1 * centerFrame;
       aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame
-        - 1.2 * residenceFrame - 3.7 * hallFrame - 0.48 * noticeFrame;
+        - 1.2 * residenceFrame - 3.7 * hallFrame - 0.48 * noticeFrame - 0.8 * surveyFrame;
       if (byPier && !observer) {
         aim.x += 1.42;
         aim.y -= 1.20;
@@ -811,8 +829,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         aim.z = THREE.MathUtils.lerp(aim.z, guest.z, greetingFraming * 0.5);
       }
       const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
-      const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming)
+      const streetDistance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming)
         + 2.2 * entranceFrame + 1.8 * forumFrame + 3.3 * centerFrame + 3.3 * residenceFrame + 8.8 * hallFrame;
+      const distance = THREE.MathUtils.lerp(streetDistance, Math.min(followDistance, 4.8), surveyFrame);
       // Frame the shop from the street side as the Agent passes the entrance tree.
       const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
       const northSide = 1 - THREE.MathUtils.smoothstep(feet.z, -22, 18);
@@ -825,14 +844,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const closeCafe = cafeMode && !travelling && !byPier;
       const usualYaw = byPier && !travelling ? observer ? 0.10 : 0.49
         : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
-      const yaw = followYaw + THREE.MathUtils.lerp(usualYaw, 0.20, Math.max(hallFrame, noticeFrame));
+      const entranceYaw = THREE.MathUtils.lerp(usualYaw, 0.20, Math.max(hallFrame, noticeFrame));
+      const yaw = followYaw + THREE.MathUtils.lerp(entranceYaw, 0.85, surveyFrame);
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
       const northCrossing = THREE.MathUtils.smoothstep(feet.z, -82, -74)
         * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
       const pitch = Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
-        - 0.12 * greetingFraming - 0.07 * residenceFrame - 0.20 * hallFrame);
+        - 0.12 * greetingFraming - 0.07 * residenceFrame - 0.20 * hallFrame - 0.11 * surveyFrame);
       camera.position.set(
         aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
         aim.y + distance * Math.sin(pitch),
@@ -1128,7 +1148,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       navigation.connect('plazaNorth', 'governance', layout);
       north = city.scene;
       prepareEnvironment(north, streetAnisotropy);
-      addCouncilNotice(north);
+      updateCouncilNotice = addCouncilNotice(north);
+      updateCouncilNotice?.(cityObservation?.lightingSurvey === 'submitted');
       street.add(north);
       softenRetailWindows(north);
       registerRetail(north);
@@ -1253,7 +1274,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   return {
     syncCafe(snapshot) { cafeSnapshot = snapshot; receivedAt = performance.now(); },
-    syncCity(observation) { cityObservation = observation; cityReceivedAt = performance.now(); },
+    syncCity(observation) {
+      cityObservation = observation;
+      cityReceivedAt = performance.now();
+      updateCouncilNotice?.(observation?.lightingSurvey === 'submitted');
+    },
     view: setView,
     zoom,
     play(enabled) { playing = enabled; },

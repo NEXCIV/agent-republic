@@ -1,5 +1,5 @@
 import type { CityPoint } from './cafe-geometry';
-import type { CityActionOption, CityActivityView, CitySite } from './city-activities';
+import type { CityActionOption, CityActivityView, CitySite, LightingSurveyStage } from './city-activities';
 
 export const CITY_PLACES = {
   cafe: '咖啡摊', plaza: '中央广场', market: 'Corner Market', governance: '议会大厅',
@@ -16,7 +16,19 @@ export type CityRoute = {
   regions: CityRegion[];
   metres: number;
 };
-export type CityWalk = CityRoute & { requestId: string; startedAt: number; arrivesAt: number; facing?: [number, number] };
+type CityWalkStop = {
+  startsAt: number;
+  endsAt: number;
+  position: CityPoint;
+  facing: [number, number];
+};
+export type CityWalk = CityRoute & {
+  requestId: string;
+  startedAt: number;
+  arrivesAt: number;
+  facing?: [number, number];
+  stops?: CityWalkStop[];
+};
 export type CityMovement = CityWalk & { status: 'walking' | 'arrived' };
 export type CityObservation = {
   agentId: '01';
@@ -27,6 +39,7 @@ export type CityObservation = {
   reason?: string;
   energy: number;
   nearby: CitySite | null;
+  lightingSurvey?: LightingSurveyStage;
   availableActions: CityActionOption[];
   recentActivities: CityActivityView[];
 };
@@ -35,10 +48,26 @@ export function routeDistance(a: CityPoint, b: CityPoint) {
   return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
 }
 
+export function cityWalkTiming(walk: CityWalk, time: number) {
+  let walkingMs = walk.arrivesAt - walk.startedAt;
+  let walkedMs = time - walk.startedAt;
+  let stop: CityWalkStop | undefined;
+  for (const planned of walk.stops ?? []) {
+    const holdMs = planned.endsAt - planned.startsAt;
+    walkingMs -= holdMs;
+    walkedMs -= Math.max(0, Math.min(holdMs, time - planned.startsAt));
+    if (time >= planned.startsAt && time < planned.endsAt) stop = planned;
+  }
+  const progress = walkingMs > 0 ? Math.min(1, Math.max(0, walkedMs / walkingMs)) : Number(time >= walk.arrivesAt);
+  return { walkingMs, progress, stop };
+}
+
 export function positionOnWalk(walk: CityWalk, time: number): CityPoint {
   if (time >= walk.arrivesAt) return walk.points.at(-1)!;
   if (time <= walk.startedAt) return walk.points[0]!;
-  let remaining = walk.metres * (time - walk.startedAt) / (walk.arrivesAt - walk.startedAt);
+  const { progress, stop } = cityWalkTiming(walk, time);
+  if (stop) return stop.position;
+  let remaining = walk.metres * progress;
   for (let i = 1; i < walk.points.length; i++) {
     const from = walk.points[i - 1]!;
     const to = walk.points[i]!;

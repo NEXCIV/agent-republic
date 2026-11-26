@@ -1,11 +1,11 @@
 import type { CityPoint } from './cafe-geometry';
-import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_READING_SPOT } from './council-notice';
+import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_READING_SPOT, COUNCIL_SURVEY_RECEIPT } from './council-notice';
 import { CITY_MAP, planCityWalk } from './city-navigation';
 import { routeDistance, type CityRegion, type CityWalk } from './city-movement';
 
 export type CityPerson = { id: string; name: string; position: CityPoint };
 export type CitySite = { place: string; name: string; people: CityPerson[]; facilities: Array<{ id: string; name: string }> };
-type CityActionKind = 'talk' | 'rest' | 'work' | 'read';
+type CityActionKind = 'talk' | 'rest' | 'work' | 'read' | 'survey' | 'report';
 export type CityActionOption = { id: string; label: string; kind: CityActionKind; target: string };
 type Checkpoint = { name: string; x: number; z: number };
 type Action = CityActionOption & (
@@ -13,10 +13,11 @@ type Action = CityActionOption & (
   | { kind: 'rest'; restored: number }
   | { kind: 'work'; energyCost: number; checkpoints: Checkpoint[] }
   | { kind: 'read'; board: string; text: string; destination: { x: number; z: number }; facing: [number, number] }
+  | { kind: 'survey' | 'report' }
 );
 type Venue = CitySite & { entrance: CityPoint; reach: number; actions: Action[] };
 type CityActivityEvent = {
-  type: 'started' | 'reply' | 'checkpoint' | 'completed';
+  type: 'started' | 'reply' | 'checkpoint' | 'observation' | 'completed';
   at: number;
   text: string;
   speaker?: string;
@@ -39,6 +40,40 @@ export type CityActivityView = Omit<CityActivity, 'walk' | 'energyAfter'> & {
   status: 'running' | 'completed';
   energyAfter?: number;
 };
+
+export type LightingSurveyStage = 'available' | 'surveying' | 'ready' | 'submitted';
+export const COUNCIL_LIGHTING_ACTIONS = ['governance.read', 'governance.survey', 'governance.submit'] as const;
+const [READ_AGENDA, SURVEY_LIGHTS, SUBMIT_REPORT] = COUNCIL_LIGHTING_ACTIONS;
+const councilFacing: [number, number] = [COUNCIL_NOTICE_BOARD[0], COUNCIL_NOTICE_BOARD[2]];
+const surveyStops: Array<Checkpoint & { facing: [number, number]; finding: string }> = [
+  {
+    name: '北岸步道入口', x: 5, z: -165.3, facing: [5, -169.24],
+    finding: '北岸步道入口旁已有一座高位灯，灯杆位于岸边一侧。',
+  },
+  {
+    name: '东侧临水步道', x: 13, z: -165.3, facing: [13, -169.24],
+    finding: '两座高位灯相隔 16 米，中段没有独立灯具。',
+  },
+];
+const SURVEY_STOP_MS = 4500;
+
+export function councilLightingSurvey(activities: CityActivity[], at: number): { stage: LightingSurveyStage; report?: string } | undefined {
+  if (activities.some((activity) => activity.actionId === SUBMIT_REPORT && activity.endsAt <= at)) {
+    return { stage: 'submitted' };
+  }
+  const survey = activities.find((activity) => activity.actionId === SURVEY_LIGHTS);
+  if (survey) {
+    if (survey.endsAt > at) return { stage: 'surveying' };
+    const findings = survey.events.filter(({ type }) => type === 'observation').map(({ text }) => text);
+    if (findings.length === surveyStops.length) {
+      return {
+        stage: 'ready',
+        report: `DEMO · ${COUNCIL_SURVEY_RECEIPT}。${findings.join('')}建议在东侧临水步道中段试设一盏低位步道灯，靠岸侧布置并留出行人通道。`,
+      };
+    }
+  }
+  if (activities.some((activity) => activity.actionId === READ_AGENDA && activity.endsAt <= at)) return { stage: 'available' };
+}
 
 const works = CITY_MAP.places.find(({ id }) => id === 'works')!;
 const governance = CITY_MAP.places.find(({ id }) => id === 'governance')!;
@@ -67,18 +102,31 @@ const venues: Venue[] = [{
   people: [],
   facilities: [{ id: 'governance.notice', name: '议事公告栏' }],
   actions: [{
-    id: 'governance.read', kind: 'read', label: '查看议事公告', target: 'governance.notice',
+    id: READ_AGENDA, kind: 'read', label: '查看议事公告', target: 'governance.notice',
     board: '议事公告栏', destination: COUNCIL_NOTICE_READING_SPOT,
-    facing: [COUNCIL_NOTICE_BOARD[0], COUNCIL_NOTICE_BOARD[2]],
+    facing: councilFacing,
     text: `DEMO 议程：讨论${COUNCIL_DEMO_AGENDA.join('和')}。`,
+  }, {
+    id: SURVEY_LIGHTS, kind: 'survey', label: '调研湖畔步道路灯', target: 'governance.notice',
+  }, {
+    id: SUBMIT_REPORT, kind: 'report', label: '提交路灯调研报告', target: 'governance.notice',
   }],
 }];
 
-export function nearbyCitySite(position: CityPoint | null) {
-  const venue = position && venues.find((entry) => routeDistance(position, entry.entrance) <= entry.reach);
+export function nearbyCitySite(position: CityPoint | null, lightingSurvey?: LightingSurveyStage) {
+  if (!position) return null;
+  const venue = venues.find((entry) => routeDistance(position, entry.entrance) <= entry.reach);
   if (!venue) return null;
   const { place, name, people, facilities, actions } = venue;
-  return { site: { place, name, people, facilities }, actions };
+  const atNotice = Math.hypot(position[0] - COUNCIL_NOTICE_READING_SPOT.x, position[2] - COUNCIL_NOTICE_READING_SPOT.z) <= 1.8;
+  return {
+    site: { place, name, people, facilities },
+    actions: actions.filter(({ kind }) => {
+      if (kind === 'survey') return atNotice && lightingSurvey === 'available';
+      if (kind === 'report') return atNotice && lightingSurvey === 'ready';
+      return true;
+    }),
+  };
 }
 
 export function availableCityActions(actions: Action[], energy: number): CityActionOption[] {
@@ -97,7 +145,23 @@ export function cityActivityView(activity: CityActivity, at: number): CityActivi
   };
 }
 
-export function beginCityActivity(action: Action, place: string, position: CityPoint, energy: number, requestId: string, at: number): CityActivity | null {
+function activityRoute(position: CityPoint, stops: Array<{ x: number; z: number }>) {
+  const points = [position];
+  const regions = new Set<CityRegion>();
+  const arrivals: Array<{ position: CityPoint; metres: number }> = [];
+  let metres = 0;
+  for (const { x, z } of stops) {
+    const leg = planCityWalk(points.at(-1)!, { x, z });
+    if (!leg) return null;
+    points.push(...leg.points.slice(1));
+    for (const region of leg.regions) regions.add(region);
+    metres += leg.metres;
+    arrivals.push({ position: points.at(-1)!, metres });
+  }
+  return metres > 0 ? { points, regions: [...regions], metres, arrivals } : null;
+}
+
+export function beginCityActivity(action: Action, place: string, position: CityPoint, energy: number, requestId: string, at: number, report?: string): CityActivity | null {
   const events: CityActivityEvent[] = [{ type: 'started', at, text: action.label }];
   const base = { requestId, actionId: action.id, kind: action.kind, label: action.label, place, startedAt: at, events };
   if (action.kind === 'talk') {
@@ -129,29 +193,39 @@ export function beginCityActivity(action: Action, place: string, position: CityP
     return { ...base, endsAt, energyAfter: energy, walk };
   }
 
-  const points = [position];
-  const regions = new Set<CityRegion>();
-  const arrivals: Array<{ name: string; position: CityPoint; metres: number }> = [];
-  const home = { x: position[0], z: position[2] };
-  let metres = 0;
-  for (const stop of [...action.checkpoints, { ...home, name: '' }]) {
-    const leg = planCityWalk(points.at(-1)!, { x: stop.x, z: stop.z });
-    if (!leg) return null;
-    points.push(...leg.points.slice(1));
-    for (const region of leg.regions) regions.add(region);
-    metres += leg.metres;
-    if (stop.name) arrivals.push({ name: stop.name, position: points.at(-1)!, metres });
+  if (action.kind === 'report') {
+    if (!report) return null;
+    events.push({ type: 'completed', at, text: report });
+    return { ...base, endsAt: at, energyAfter: energy };
   }
-  if (metres <= 0) return null;
-  const duration = Math.ceil(metres * 1000 / 1.6);
-  const endsAt = at + duration;
-  for (const arrival of arrivals) {
-    events.push({
-      type: 'checkpoint', at: at + Math.ceil(duration * arrival.metres / metres),
-      position: arrival.position, text: `已到达${arrival.name}。`,
-    });
-  }
-  events.push({ type: 'completed', at: endsAt, text: `已走完 ${arrivals.length} 个巡查点并返回出发点。` });
-  const walk: CityWalk = { requestId, name: action.label, destination: home, points, regions: [...regions], metres, startedAt: at, arrivesAt: endsAt };
-  return { ...base, endsAt, energyAfter: energy - action.energyCost, walk };
+  const lighting = action.kind === 'survey';
+  const home = lighting ? COUNCIL_NOTICE_READING_SPOT : { x: position[0], z: position[2] };
+  const checkpoints = action.kind === 'work' ? action.checkpoints : surveyStops;
+  const route = activityRoute(position, [...checkpoints, home]);
+  if (!route) return null;
+  const { points, regions, metres, arrivals } = route;
+  const walkingMs = Math.ceil(metres * 1000 / (lighting ? 4 : 1.6));
+  const holdMs = lighting ? SURVEY_STOP_MS : 0;
+  const endsAt = at + walkingMs + holdMs * checkpoints.length;
+  const stops: NonNullable<CityWalk['stops']> = [];
+  checkpoints.forEach((checkpoint, index) => {
+    const arrival = arrivals[index]!;
+    const startsAt = at + Math.ceil(walkingMs * arrival.metres / metres) + index * holdMs;
+    events.push({ type: 'checkpoint', at: startsAt, position: arrival.position, text: `已到达${checkpoint.name}。` });
+    if (lighting) {
+      const { finding, facing } = surveyStops[index]!;
+      const endsAt = startsAt + holdMs;
+      stops.push({ startsAt, endsAt, position: arrival.position, facing });
+      events.push({ type: 'observation', at: endsAt, position: arrival.position, text: finding });
+    }
+  });
+  events.push({
+    type: 'completed', at: endsAt,
+    text: lighting ? '已带着两处观察记录返回议事公告栏。' : `已走完 ${checkpoints.length} 个巡查点并返回出发点。`,
+  });
+  const walk: CityWalk = {
+    requestId, name: action.label, destination: home, points, regions, metres, startedAt: at, arrivesAt: endsAt,
+    ...(lighting ? { stops, facing: councilFacing } : {}),
+  };
+  return { ...base, endsAt, energyAfter: action.kind === 'work' ? energy - action.energyCost : energy, walk };
 }

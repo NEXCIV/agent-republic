@@ -306,6 +306,59 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(planCityWalk([7.35, 0.182, -76.3], { x: 5.5, z: -77.75 })?.points.at(-1)).toEqual(reading.position);
   });
 
+  it('unlocks the lakeside survey from the agenda and accepts a report only after both observations and return', async () => {
+    const owner = browser();
+    const other = browser();
+    const agent = await redeem(await codeFor(owner));
+    const survey = { action: 'interactCity', actionId: 'governance.survey', requestId: randomUUID() };
+    const submit = { action: 'interactCity', actionId: 'governance.submit', requestId: randomUUID() };
+    const trip = await (await post({ action: 'moveTo', destination: { place: 'governance' } }, agent)).json();
+    vi.setSystemTime(trip.arrivesAt);
+    expect((await post(survey, agent)).status).toBe(422);
+    expect((await post(submit, agent)).status).toBe(422);
+    const read = await (await post({ action: 'interactCity', actionId: 'governance.read' }, agent)).json();
+    vi.setSystemTime(read.endsAt);
+    const initial = await get('?control=city', owner).json();
+    expect(initial.lightingSurvey).toBe('available');
+    expect(initial.availableActions).toContainEqual(expect.objectContaining({ id: survey.actionId }));
+    const response = await post(survey, agent);
+    expect(response.status).toBe(200);
+    const started = await response.json();
+    expect(started.events.map(({ type }: { type: string }) => type)).toEqual(['started']);
+    expect((await post(submit, agent)).status).toBe(409);
+    const walking = await get('?control=city', owner).json();
+    expect(walking.lightingSurvey).toBe('surveying');
+    expect(walking.movement.regions).toEqual(expect.arrayContaining(['north', 'shore']));
+    const [first, second] = walking.movement.stops;
+    vi.setSystemTime(first.startsAt + 1000);
+    const observing = await get('?control=city', agent).json();
+    expect(observing.position).toEqual(first.position);
+    expect(observing.recentActivities[0].events.map(({ type }: { type: string }) => type)).toEqual(['started', 'checkpoint']);
+    vi.setSystemTime(second.startsAt + 1000);
+    const halfway = await get('?control=city', owner).json();
+    expect(halfway.position).toEqual(second.position);
+    expect(halfway.recentActivities[0].events.filter(({ type }: { type: string }) => type === 'observation')).toHaveLength(1);
+    expect((await get('?control=city', other).json()).lightingSurvey).toBeUndefined();
+
+    local.nexcivCafeStore?.close();
+    local.nexcivCafeStore = undefined;
+    vi.setSystemTime(started.endsAt);
+    const returned = await get('?control=city', owner).json();
+    expect(returned.position).toEqual(initial.position);
+    expect(returned.lightingSurvey).toBe('ready');
+    expect(returned.recentActivities[0].events.filter(({ type }: { type: string }) => type === 'observation')).toHaveLength(2);
+    const accepted = await post(submit, agent);
+    expect(accepted.status).toBe(200);
+    const report = await accepted.json();
+    expect(report.events.at(-1).text).toMatch(/^DEMO.*已收到调研报告.*16 米.*低位步道灯/);
+    expect((await (await post(submit, agent)).json()).requestId).toBe(submit.requestId);
+    expect((await post({ ...submit, requestId: randomUUID() }, agent)).status).toBe(422);
+    const displayed = await get('?control=city', owner).json();
+    expect(displayed.lightingSurvey).toBe('submitted');
+    expect(displayed.recentActivities[0]).toMatchObject({ status: 'completed', requestId: submit.requestId });
+    expect((await get('?control=city', other).json()).recentActivities).toEqual([]);
+  });
+
   it('persists a local conversation and restores a resident’s energy after resting', async () => {
     const owner = browser();
     const agent = await redeem(await codeFor(owner));

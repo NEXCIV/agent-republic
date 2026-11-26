@@ -17,3 +17,4 @@ export const COUNCIL_NOTICE_APPROACH: CityPoint[] = [
 ];
 export const COUNCIL_NOTICE_READING_SPOT = { x: readingPoint[0], z: readingPoint[2] };
 export const COUNCIL_DEMO_AGENDA = ['湖畔步道增设路灯', '社区剧场开放时段'] as const;
+export const COUNCIL_SURVEY_RECEIPT = '已收到调研报告';
