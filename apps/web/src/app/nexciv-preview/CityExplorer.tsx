@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { ReactNode, RefObject } from 'react';
 import { CITY_PLACES } from '../../lib/city-movement';
 import type { AgentReport, FollowId, WalkLandmarkId, WalkSelection } from './walk';
-import { WORKS_MANAGER } from './WorksVisitPanel';
+import { WORKS_MANAGER } from './CityVisitPanel';
 import styles from './preview.module.css';
 
 const LANDMARKS = {

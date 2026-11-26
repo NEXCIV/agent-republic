@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CafeShift, shiftLabel } from './CafeShift';
 import { CityExplorer } from './CityExplorer';
-import { WORKS_MANAGER, WorksVisitPanel } from './WorksVisitPanel';
+import { WORKS_MANAGER, CityVisitPanel } from './CityVisitPanel';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
 import { COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
@@ -12,7 +12,7 @@ import { THEATRE_CLOCK } from '../../lib/theatre-layout';
 import type { TheatreView } from '../../lib/theatre-trial';
 import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController, type WalkSelection } from './walk';
 import type { Place } from './navigation';
-import { useWorksVisit, type WorksCommand } from './useWorksVisit';
+import { useCityVisit, type VisitCommand } from './useCityVisit';
 import styles from './preview.module.css';
 
 const PLACES: Record<Place, string> = CITY_PLACES;
@@ -89,7 +89,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     latestCity.current = observation;
     world.current?.syncCity(observation);
   }, []);
-  const worksSession = useWorksVisit(!cafeMode, syncCity);
+  const visitSession = useCityVisit(!cafeMode, syncCity);
   const seenCityJob = useRef<string | undefined>(undefined);
   const seenTheatre = useRef<number | undefined>(undefined);
   const followedCafeId = useRef<FollowId>('01');
@@ -245,9 +245,9 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     inspect(item);
   }
 
-  async function visitWorks(command: WorksCommand) {
-    const accepted = await worksSession.send(command);
-    if (accepted && command === 'move') select('follow', '01');
+  async function visit(command: VisitCommand) {
+    const accepted = await visitSession.send(command);
+    if (accepted && command !== 'works.chat' && command !== 'works.rest') select('follow', '01');
   }
 
   function focusSelection(item: WalkSelection) {
@@ -266,14 +266,17 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     ? inspectionCamera.kind === selection.kind && inspectionCamera.id === selection.id
     : selection.kind === 'resident' && view === 'follow' && selection.id === selected));
   const cameraLandmark = inspectionCamera?.kind === 'building' ? PLACES[inspectionCamera.id] : undefined;
-  const worksObservation = worksSession.observation;
-  const worksMovement = worksObservation?.movement;
-  const worksTrip = worksMovement && 'place' in worksMovement.destination && worksMovement.destination.place === 'works'
-    ? worksMovement : null;
-  const managerPresent = worksMovement?.status !== 'walking' && worksObservation?.nearby?.place === 'works'
-    && worksObservation.nearby.people.some(({ id }) => id === WORKS_MANAGER.id);
-  const followingWorks = !cafeMode && !inspectionCamera && view === 'follow' && selected === '01' && worksTrip;
-  const showingCityResident = !cafeMode && selected === '01' && Boolean(worksObservation?.position);
+  const visitObservation = visitSession.observation;
+  const visitMovement = visitObservation?.movement;
+  const visitActivity = visitObservation?.recentActivities.find(({ requestId }) => requestId === visitMovement?.requestId);
+  const managerPresent = visitMovement?.status !== 'walking' && Boolean(visitObservation?.nearby?.people.some(({ id }) => id === WORKS_MANAGER.id));
+  const followingVisit = !cafeMode && !inspectionCamera && view === 'follow' && selected === '01' && visitMovement;
+  const visitLabel = followingVisit && (followingVisit.status === 'walking'
+    ? visitActivity?.kind === 'work' ? visitActivity.label : `前往 ${followingVisit.name}`
+    : visitActivity?.status === 'running' && visitActivity.kind === 'read' ? '正在阅读议事公告' : `已到达 ${followingVisit.name}`);
+  const showingCityResident = !cafeMode && selected === '01' && Boolean(visitObservation?.position);
+  const visitVenue = selection?.kind === 'person' ? 'works'
+    : selection?.kind === 'building' && (selection.id === 'works' || selection.id === 'governance') ? selection.id : null;
   const watchingTheatre = cafeMode && view === 'west' && Boolean(theatre?.booking);
   const theatreResident = cafeFollow !== '02' ? theatre?.residents[cafeFollow] : undefined;
   const followingAttendee = Boolean(theatreResident?.walk?.requestId && theatreResident.walk.requestId === cityWalk?.requestId);
@@ -288,7 +291,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     ? Math.round(100 * cityWalkTiming(cityWalk, city.serverTime).progress)
     : 100;
   const origin = PLACES[agent.from ?? 'plaza'];
-  const destination = agent.destination ? PLACES[agent.destination] : '';
+  const destination = showingCityResident ? visitMovement?.name : agent.destination ? PLACES[agent.destination] : '';
   const agentReady = sceneReady && agent.status !== 'loading' && agent.status !== 'unavailable';
   const playbackReady = sceneReady && Object.values(reports).some(({ status }) => status !== 'loading' && status !== 'unavailable');
   const district = view === 'overview' || view === 'follow' ? undefined : { ...DISTRICTS[view], status: districts[view] };
@@ -325,7 +328,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
             : inspectionCamera ? (cameraLandmark ? '地标镜头' : '居民镜头') : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
           <strong role="status">{cafeMode ? cafeTitle
             : inspectionCamera ? cameraLandmark ?? (inspectionCamera.kind === 'person' ? '现场管理员' : '跟随 02 号居民')
-              : followingWorks ? `${worksTrip.status === 'walking' ? '前往' : '已到达'} 公共建设中心`
+              : visitLabel ? visitLabel
               : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
           {sceneCaption && <p className={styles.greeting}>
             {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
@@ -342,9 +345,9 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
           managerPresent={managerPresent}
           trigger={explorerTrigger} heading={explorerHeading} onOpen={openDirectory} onClose={closeExplorer}
           onSelect={openDetails} onFocus={focusSelection}>
-          {(selection?.kind === 'person' || (selection?.kind === 'building' && selection.id === 'works')) && (
-            <WorksVisitPanel session={worksSession} talkingToManager={selection.kind === 'person'}
-              onMeet={() => openDetails(WORKS_MANAGER)} onCommand={visitWorks} />
+          {visitVenue && (
+            <CityVisitPanel venue={visitVenue} session={visitSession} talkingToManager={selection?.kind === 'person'}
+              onMeet={() => openDetails(WORKS_MANAGER)} onCommand={visit} />
           )}
         </CityExplorer>}
         {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。可打开「地点与居民」查看详情。'}</p>}
@@ -418,7 +421,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
           </span>
         </div>
         <div className={styles.route}>
-          {showingCityResident && !worksMovement ? <span>01 号 · 等待行动</span> : <>
+          {showingCityResident && !visitMovement ? <span>01 号 · 等待行动</span> : <>
             {!showingCityResident && <span>{origin}</span>}
             <progress aria-label={destination ? `Agent ${selected} 前往 ${destination} 的行程` : `Agent ${selected} 的行程`} max={100} value={agent.progress} />
             <span>{destination}</span>

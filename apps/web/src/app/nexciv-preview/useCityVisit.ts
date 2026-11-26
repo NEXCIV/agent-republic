@@ -3,11 +3,15 @@ import type { CityObservation } from '../../lib/city-movement';
 
 const endpoint = '/api/nexciv-preview/cafe';
 const commands = {
-  move: { action: 'moveTo', destination: { place: 'works' } },
-  chat: { action: 'interactCity', actionId: 'works.chat' },
+  'visit.works': { action: 'moveTo', destination: { place: 'works' } },
+  'visit.governance': { action: 'moveTo', destination: { place: 'governance' } },
+  'works.chat': { action: 'interactCity', actionId: 'works.chat' },
+  'works.patrol': { action: 'interactCity', actionId: 'works.patrol' },
+  'works.rest': { action: 'interactCity', actionId: 'works.rest' },
+  'governance.read': { action: 'interactCity', actionId: 'governance.read' },
 } as const;
 
-export type WorksCommand = keyof typeof commands;
+export type VisitCommand = keyof typeof commands;
 type Connection = 'connecting' | 'ready' | 'offline' | 'unavailable';
 
 async function errorMessage(response: Response, fallback: string) {
@@ -15,15 +19,15 @@ async function errorMessage(response: Response, fallback: string) {
   return typeof body?.error === 'string' ? body.error : fallback;
 }
 
-export function useWorksVisit(enabled: boolean, applyObservation: (observation: CityObservation) => void) {
+export function useCityVisit(enabled: boolean, applyObservation: (observation: CityObservation) => void) {
   const [observation, setObservation] = useState<CityObservation | null>(null);
   const [connection, setConnection] = useState<Connection>('connecting');
   const [message, setMessage] = useState('');
   const [commandError, setCommandError] = useState('');
-  const [pending, setPending] = useState<WorksCommand | null>(null);
+  const [pending, setPending] = useState<VisitCommand | null>(null);
   const commandVersion = useRef(0);
   const writing = useRef(false);
-  const retry = useRef<{ command: WorksCommand; id: string } | null>(null);
+  const retry = useRef<{ command: VisitCommand; id: string } | null>(null);
 
   useEffect(() => {
     if (!enabled || pending) return;
@@ -78,7 +82,7 @@ export function useWorksVisit(enabled: boolean, applyObservation: (observation: 
     return () => { controller.abort(); clearTimeout(timer); };
   }, [applyObservation, enabled, pending]);
 
-  async function send(command: WorksCommand) {
+  async function send(command: VisitCommand) {
     if (!enabled || connection !== 'ready' || writing.current) return false;
     writing.current = true;
     commandVersion.current++;
