@@ -6,6 +6,7 @@ import styles from './preview.module.css';
 
 export const phaseLabel = {
   working: '在咖啡摊帮工', inviting: '邀请阿禾聊两句', chatting: '和阿禾聊天',
+  reconnecting: '阿禾认出了 01 号',
   walking: '走向街边长椅', resting: '坐下休息', done: '休息结束',
   toPier: '前往北岸码头 · 行程快进', casting: '在北岸码头抛竿', fishing: '等鱼咬钩', reeling: '收线起竿',
 };
@@ -60,13 +61,14 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
     revision.current++;
     setPending(true);
     setError('');
-    const key = JSON.stringify(command);
+    const payload = command.action === 'note' ? { ...command, shiftStartedAt: run?.events[0]?.at } : command;
+    const key = JSON.stringify(payload);
     try {
       const id = retry.current?.command === key ? retry.current.id : crypto.randomUUID();
       retry.current = { command: key, id };
       const response = await fetch(endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...command, requestId: id }),
+        body: JSON.stringify({ ...payload, requestId: id }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error ?? '操作未送达，请重试。');

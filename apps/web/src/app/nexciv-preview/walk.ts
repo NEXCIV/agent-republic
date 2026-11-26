@@ -583,7 +583,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const greeting = marketGreeting(!cafeMode && playing ? dt : 0, !cafeMode && primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
     const shift = cafeSnapshot?.run;
     const byPier = cafeMode && shift?.place === 'pier';
-    const social = shift?.phase === 'inviting' || shift?.phase === 'chatting';
+    const social = shift?.phase === 'inviting' || shift?.phase === 'chatting' || shift?.phase === 'reconnecting';
     if (cafeMode) {
       const poseDt = playing ? dt : 0;
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);

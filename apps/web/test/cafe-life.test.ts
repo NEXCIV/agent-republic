@@ -2,6 +2,32 @@ import { describe, expect, it } from 'vitest';
 import { advanceCafe, beginCafe, suggestCafe } from '../src/lib/cafe-life';
 
 describe('isolated café activities', () => {
+  it.each([
+    ['declined', '上回我忙着收摊'],
+    ['chatted', '上回聊完我还在想'],
+  ] as const)('lets 阿禾 initiate the next encounter after %s', (previous, line) => {
+    const memory = { outcome: previous, shiftStartedAt: 20 };
+    const run = beginCafe(1000, 'social', false, memory);
+    advanceCafe(run, run.until!);
+    expect(run.phase).toBe('reconnecting');
+    expect(run.events.at(-1)?.text).toContain(line);
+    expect(run.events.at(-1)?.recall).toEqual(memory);
+    expect(run.meeting).toBe('none');
+    advanceCafe(run, 100000);
+    expect(run.meeting).toBe('chatted');
+  });
+  it('uses the old encounter without assuming 阿禾 is free or overruling a fishing note', () => {
+    const busy = beginCafe(1000, 'social', true, { outcome: 'declined', shiftStartedAt: 20 });
+    const fishing = structuredClone(busy);
+    advanceCafe(busy, busy.until!);
+    expect(busy.events.at(-1)?.text).toContain('今天也还没忙完');
+    advanceCafe(busy, 100000);
+    expect(busy.meeting).toBe('declined');
+    expect(suggestCafe(fishing, 'fish').accepted).toBe(true);
+    advanceCafe(fishing, 100000);
+    expect(fishing.place).toBe('pier');
+    expect(fishing.meeting).toBe('none');
+  });
   it('rejects unknown activities without altering the current shift', () => {
     const run = beginCafe(1000, 'social', false);
     const before = structuredClone(run);

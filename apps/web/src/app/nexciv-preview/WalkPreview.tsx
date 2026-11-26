@@ -44,10 +44,12 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const world = useRef<WalkController | null>(null);
   const latest = useRef<CafeSnapshot | null>(null);
   const [shift, setShift] = useState('等待开班');
+  const [greeting, setGreeting] = useState('');
   const updateCafe = useCallback((data: CafeSnapshot | null) => {
     latest.current = data;
     world.current?.syncCafe(data);
     setShift(data ? shiftLabel(data.run) : '等待开班');
+    setGreeting(data?.run.phase === 'reconnecting' ? data.run.events.at(-1)?.text ?? '' : '');
   }, []);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');
@@ -129,6 +131,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
         <div className={styles.destination}>
           <small>{cafeMode ? 'AGENT 01 · AI SIMULATED · DEMO' : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
           <strong role="status">{cafeMode ? shift : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
+          {greeting && <p className={styles.greeting}>{greeting}</p>}
         </div>
         {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。下方可查看路线的两处实景。'}</p>}
       </section>

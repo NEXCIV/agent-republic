@@ -218,6 +218,7 @@ export const agentObservationV1Schema = z
       available: z.array(z.enum(['work', 'rest', 'invite', 'visitPier', 'fish'])),
       finishedWork: z.boolean(),
       lastMeeting: z.enum(['none', 'declined', 'chatted']),
+      previousMeeting: z.enum(['declined', 'chatted']).optional(),
       preference: z.enum(['social', 'quiet']),
       requestedActivity: z.literal('fish').optional(),
     }).strict().optional(),

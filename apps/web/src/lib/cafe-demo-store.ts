@@ -1,8 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { advanceCafe, beginCafe, suggestCafe, type CafeRun } from './cafe-life';
+import { advanceCafe, beginCafe, suggestCafe, type CafeEncounter, type CafeRun } from './cafe-life';
 
 type Response = { run: CafeRun; serverTime: number; feedback?: string; accepted?: boolean };
 type Row = { state: string };
+export const CAFE_RETENTION_DAYS = 30;
 
 export class CafeDemoStore {
   private readonly db: DatabaseSync;
@@ -17,7 +18,7 @@ export class CafeDemoStore {
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
       CREATE TABLE IF NOT EXISTS shifts (
-        id TEXT PRIMARY KEY, state TEXT NOT NULL, next_at INTEGER, started INTEGER NOT NULL
+        id TEXT PRIMARY KEY, state TEXT NOT NULL, next_at INTEGER, started INTEGER NOT NULL, resident TEXT
       );
       CREATE INDEX IF NOT EXISTS cafe_due ON shifts(next_at);
       CREATE TABLE IF NOT EXISTS notes (
@@ -25,6 +26,12 @@ export class CafeDemoStore {
         suggestion TEXT NOT NULL, reply TEXT NOT NULL, PRIMARY KEY(shift,id)
       );
     `);
+    this.transaction(() => {
+      if (!this.db.prepare('PRAGMA table_info(shifts)').all().some((column) => column.name === 'resident')) {
+        this.db.exec('ALTER TABLE shifts ADD COLUMN resident TEXT');
+      }
+      this.db.exec('CREATE INDEX IF NOT EXISTS cafe_resident_shifts ON shifts(resident, started DESC)');
+    });
     this.arm();
   }
 
@@ -78,35 +85,60 @@ export class CafeDemoStore {
     this.timer.unref();
   }
 
-  start(id: string, busy: boolean): Response {
+  private latestId(resident: string): string | undefined {
+    const row = this.db.prepare('SELECT id FROM shifts WHERE resident=? ORDER BY started DESC LIMIT 1').get(resident);
+    return typeof row?.id === 'string' ? row.id : undefined;
+  }
+
+  start(id: string, busy: boolean, resident: string): Response | { error: string } {
     const at = this.clock();
-    const result = this.transaction((): Response => {
-      this.db.prepare('DELETE FROM shifts WHERE started < ?').run(at - 7 * 86400000);
-      const existing = this.current(id, at);
-      if (existing) {
+    const result = this.transaction(() => {
+      this.db.prepare('DELETE FROM shifts WHERE started < ?').run(at - CAFE_RETENTION_DAYS * 86400000);
+      const owner = this.db.prepare('SELECT resident FROM shifts WHERE id=?').get(id);
+      if (owner) {
+        if (owner.resident !== resident) return { error: '开班编号已使用，请刷新后重试。' };
+        if (this.latestId(resident) !== id) return { error: '该请求属于上一个班次。' };
+        const existing = this.current(id, at)!;
         const originallyBusy = existing.friendBusyUntil > existing.events[0]!.at;
-        if (originallyBusy !== busy) return { run: existing, serverTime: at, accepted: false, feedback: '开班编号已用于另一种班次。' };
+        if (originallyBusy !== busy) return { error: '开班编号已用于另一种班次。' };
         return { run: existing, serverTime: at };
       }
-      const initial = beginCafe(at, 'social', busy);
-      this.db.prepare('INSERT INTO shifts VALUES (?, ?, ?, ?)').run(id, JSON.stringify(initial), initial.until, at);
+      const latestId = this.latestId(resident);
+      if (latestId && this.current(latestId, at)?.phase !== 'done') return { error: '已有进行中的班次。' };
+      const memory = this.db.prepare(`
+        SELECT json_extract(state, '$.meeting') AS outcome, started AS shiftStartedAt
+        FROM shifts WHERE resident=? AND json_extract(state, '$.meeting') IN ('declined', 'chatted')
+        ORDER BY started DESC LIMIT 1
+      `).get(resident) as CafeEncounter | undefined;
+      const initial = beginCafe(at, 'social', busy, memory);
+      this.db.prepare('INSERT INTO shifts(id,state,next_at,started,resident) VALUES (?,?,?,?,?)').run(id, JSON.stringify(initial), initial.until, at, resident);
       return { run: initial, serverTime: at };
     });
     this.arm();
     return result;
   }
 
-  read(id: string): Response | null {
-    const serverTime = this.clock();
-    const run = this.transaction(() => this.current(id, serverTime));
-    return run && { run, serverTime };
-  }
-
-  note(id: string, request: string, suggestion: string): Response | null {
+  read(resident: string, migrateLegacy = false): Response | null {
     const serverTime = this.clock();
     return this.transaction(() => {
-      const run = this.current(id, serverTime);
-      if (!run) return null;
+      if (migrateLegacy) {
+        this.db.prepare('UPDATE shifts SET resident=? WHERE id=? AND resident IS NULL').run(resident, resident);
+      }
+      const id = this.latestId(resident);
+      const run = id ? this.current(id, serverTime) : null;
+      return run && { run, serverTime };
+    });
+  }
+
+  note(resident: string, shiftStartedAt: number, request: string, suggestion: string): Response | null {
+    const serverTime = this.clock();
+    return this.transaction(() => {
+      const id = this.latestId(resident);
+      if (!id) return null;
+      const run = this.current(id, serverTime)!;
+      if (run.events[0]?.at !== shiftStartedAt) {
+        return { run, serverTime, accepted: false, feedback: '已进入另一个班次，请为当前班次重新递纸条。' };
+      }
       const saved = this.db.prepare('SELECT suggestion,reply FROM notes WHERE shift=? AND id=?').get(id, request);
       if (saved && saved.suggestion !== suggestion) return { run, serverTime, accepted: false, feedback: '纸条编号已用于另一项建议。' };
       const reply: ReturnType<typeof suggestCafe> = saved ? JSON.parse(String(saved.reply)) : suggestCafe(run, suggestion);

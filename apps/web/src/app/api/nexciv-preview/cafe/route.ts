@@ -1,11 +1,13 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
-import { CafeDemoStore } from '../../../../lib/cafe-demo-store';
+import { CAFE_RETENTION_DAYS, CafeDemoStore } from '../../../../lib/cafe-demo-store';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-const cookie = 'nexciv_cafe_demo';
+const residentCookie = 'nexciv_cafe_resident';
+const legacyCookie = 'nexciv_cafe_demo';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const local = globalThis as typeof globalThis & { nexcivCafeStore?: CafeDemoStore };
 
@@ -38,11 +40,23 @@ function snapshot(data: ReturnType<CafeDemoStore['read']>) {
   return { ...data, run: { phase, since, until, place, energy, events, requestedActivity, fishResult } };
 }
 
+function setResident(response: NextResponse, request: NextRequest, resident: string) {
+  response.cookies.set(residentCookie, resident, {
+    httpOnly: true, sameSite: 'strict', secure: request.nextUrl.protocol === 'https:',
+    path: '/api/nexciv-preview/cafe', maxAge: CAFE_RETENTION_DAYS * 86400,
+  });
+}
+
 export function GET(request: NextRequest) {
   const unavailable = checkRuntime();
   if (unavailable) return unavailable;
-  const id = request.cookies.get(cookie)?.value;
-  return json(id && uuid.test(id) ? snapshot(store().read(id)) : null);
+  const resident = request.cookies.get(residentCookie)?.value;
+  if (resident && uuid.test(resident)) return json(snapshot(store().read(resident)));
+  const legacy = request.cookies.get(legacyCookie)?.value;
+  const migrated = legacy && uuid.test(legacy) ? store().read(legacy, true) : null;
+  const response = json(snapshot(migrated));
+  setResident(response, request, migrated ? legacy! : randomUUID());
+  return response;
 }
 
 export async function POST(request: NextRequest) {
@@ -54,19 +68,17 @@ export async function POST(request: NextRequest) {
   }
   const input = await request.json().catch(() => null);
   if (!input || typeof input.requestId !== 'string' || !uuid.test(input.requestId)) return json({ error: '无效的请求编号。' }, 400);
+  const resident = request.cookies.get(residentCookie)?.value;
+  if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
   if (input.action === 'start' && typeof input.busy === 'boolean') {
-    const result = store().start(input.requestId, input.busy);
-    if (result.accepted === false) return json({ error: result.feedback }, 409);
+    const result = store().start(input.requestId, input.busy, resident);
+    if ('error' in result) return json({ error: result.error }, 409);
     const response = json(snapshot(result));
-    response.cookies.set(cookie, input.requestId, {
-      httpOnly: true, sameSite: 'strict', secure: request.nextUrl.protocol === 'https:',
-      path: '/api/nexciv-preview/cafe', maxAge: 7 * 86400,
-    });
+    setResident(response, request, resident);
     return response;
   }
-  const id = request.cookies.get(cookie)?.value;
-  if (!id || !uuid.test(id)) return json({ error: '请先开始一个班次。' }, 409);
   if (input.action !== 'note' || !['chat', 'rest', 'fish'].includes(input.suggestion)) return json({ error: '街区尚未开放这项动作。' }, 400);
-  const result = store().note(id, input.requestId, input.suggestion);
+  if (!Number.isSafeInteger(input.shiftStartedAt)) return json({ error: '纸条缺少班次信息，请刷新后重试。' }, 400);
+  const result = store().note(resident, input.shiftStartedAt, input.requestId, input.suggestion);
   return result ? json(snapshot(result)) : json({ error: '班次已过期，请重新开始。' }, 410);
 }

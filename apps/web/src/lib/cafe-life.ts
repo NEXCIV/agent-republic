@@ -5,8 +5,9 @@ import demoFrame from '../../../../examples/world-frame.demo.json';
 
 type Perception = NonNullable<AgentObservationV1['cafeDemo']>;
 export type Preference = Perception['preference'];
-export type CafePhase = 'working' | 'inviting' | 'chatting' | 'walking' | 'resting' | 'toPier' | 'casting' | 'fishing' | 'reeling' | 'done';
+export type CafePhase = 'working' | 'inviting' | 'reconnecting' | 'chatting' | 'walking' | 'resting' | 'toPier' | 'casting' | 'fishing' | 'reeling' | 'done';
 export type CafeSuggestion = 'chat' | 'rest' | 'fish';
+export type CafeEncounter = { outcome: NonNullable<Perception['previousMeeting']>; shiftStartedAt: number };
 export type CafeRun = {
   phase: CafePhase;
   since: number;
@@ -17,9 +18,10 @@ export type CafeRun = {
   friendBusyUntil: number;
   finishedWork: boolean;
   meeting: Perception['lastMeeting'];
+  previousEncounter?: CafeEncounter;
   requestedActivity?: Perception['requestedActivity'];
   fishResult?: 'released' | 'noCatch';
-  events: { at: number; text: string }[];
+  events: { at: number; text: string; recall?: CafeEncounter }[];
 };
 
 export type CafeView = Pick<CafeRun, 'phase' | 'since' | 'until' | 'place' | 'energy' | 'events' | 'requestedActivity' | 'fishResult'>;
@@ -50,6 +52,7 @@ function localObservation(run: CafeRun): AgentObservationV1 {
   return agentObservationV1Schema.parse({ ...baseline, cafeDemo: {
     place: run.place, energy: run.energy, nearbyFriend, available, finishedWork: run.finishedWork,
     lastMeeting: run.meeting, preference: run.preference,
+    previousMeeting: nearbyFriend ? run.previousEncounter?.outcome : undefined,
     requestedActivity: run.requestedActivity,
   } });
 }
@@ -61,20 +64,38 @@ function decide(observation: AgentObservationV1) {
     if (seen.available.includes('fish')) return 'fish';
     if (seen.available.includes('visitPier')) return 'visitPier';
   }
-  if (seen.preference === 'social' && seen.energy >= 30 && seen.lastMeeting === 'none' && seen.available.includes('invite')) return 'invite';
+  if (seen.preference === 'social' && seen.energy >= 30 && seen.lastMeeting === 'none' && seen.available.includes('invite')) {
+    return seen.previousMeeting ? 'reconnect' : 'invite';
+  }
   return seen.available.includes('rest') ? 'rest' : 'walkToBench';
 }
 
-function enter(run: CafeRun, phase: CafePhase, at: number, duration: number, text: string) {
+function enter(run: CafeRun, phase: CafePhase, at: number, duration: number, text: string, recall?: CafeEncounter) {
   run.phase = phase;
   run.since = at;
   run.until = duration ? at + duration : null;
-  run.events.push({ at, text });
+  run.events.push(recall ? { at, text, recall } : { at, text });
 }
+
+const RECALL_LINES = {
+  declined: {
+    busy: '01 号，又见面了。上回我忙着收摊，今天也还没忙完。',
+    free: '01 号！上回我忙着收摊，没聊成。今天有空，接着聊吧。',
+  },
+  chatted: {
+    busy: '又见面了。上回聊得挺开心，等我收完摊再聊。',
+    free: '又见面了。上回聊完我还在想，今天你这班怎么样？',
+  },
+};
 
 function nextDecision(run: CafeRun, at: number) {
   const action = decide(localObservation(run));
   if (action === 'invite') return enter(run, 'inviting', at, 3000, '看见阿禾还在摊边，招手问她能不能聊两句。');
+  if (action === 'reconnect') {
+    const memory = run.previousEncounter!;
+    const timing = at + 3000 < run.friendBusyUntil ? 'busy' : 'free';
+    return enter(run, 'reconnecting', at, 3000, `阿禾主动打招呼：“${RECALL_LINES[memory.outcome][timing]}”`, memory);
+  }
   if (action === 'walkToBench') return enter(run, 'walking', at, 4000, '决定去街边的空长椅歇会儿。');
   if (action === 'visitPier') return enter(run, 'toPier', at, PIER_TRAVEL_MS, '交班后带上鱼竿，沿街前往北岸码头。');
   const activity = activities[action];
@@ -82,11 +103,12 @@ function nextDecision(run: CafeRun, at: number) {
   enter(run, activity.phase, at, activity.duration, activity.start);
 }
 
-export function beginCafe(at: number, preference: Preference, friendBusy: boolean): CafeRun {
+export function beginCafe(at: number, preference: Preference, friendBusy: boolean, previousEncounter?: CafeEncounter): CafeRun {
   const run: CafeRun = {
     phase: 'working', since: at, until: null, place: 'counter', energy: 68, preference,
     friendBusyUntil: friendBusy ? at + 30000 : at, finishedWork: false, meeting: 'none', events: [],
   };
+  if (previousEncounter) run.previousEncounter = previousEncounter;
   nextDecision(run, at);
   return run;
 }
@@ -102,14 +124,21 @@ export function advanceCafe(run: CafeRun, now: number): void {
         nextDecision(run, at);
         break;
       case 'inviting':
+      case 'reconnecting': {
+        const initiatedByFriend = run.phase === 'reconnecting';
         if (at < run.friendBusyUntil) {
           run.meeting = 'declined';
-          run.events.push({ at, text: '阿禾还在收摊，婉拒了邀请：“等我忙完再聊吧。”' });
+          run.events.push({ at, text: initiatedByFriend
+            ? '阿禾继续收摊，01 号让她先忙。'
+            : '阿禾还在收摊，婉拒了邀请：“等我忙完再聊吧。”' });
           nextDecision(run, at);
         } else {
-          enter(run, 'chatting', at, 6000, '阿禾点头：“今天客人挺多，辛苦了。”两人在摊前聊了起来。');
+          enter(run, 'chatting', at, 6000, initiatedByFriend
+            ? '01 号应下邀约，停下来跟阿禾讲了讲今天摊上的事。'
+            : '阿禾点头：“今天客人挺多，辛苦了。”两人在摊前聊了起来。');
         }
         break;
+      }
       case 'chatting':
         run.meeting = 'chatted';
         run.events.push({ at, text: '记住了这次收工后的交谈，向阿禾道别。' });
