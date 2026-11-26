@@ -17,6 +17,7 @@ import type { TheatreView } from '../../lib/theatre-trial';
 import { createWalk, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController, type WalkSelection } from './walk';
 import type { Place } from './navigation';
 import { useCityVisit, type VisitCommand } from './useCityVisit';
+import { demoEndpoint, demoRetryDelay, GUEST_DEMO_ENDPOINT } from './demoEndpoint';
 import styles from './preview.module.css';
 
 const PLACES: Record<Place, string> = CITY_PLACES;
@@ -154,6 +155,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
       ? data?.run.events.at(-1)?.text ?? '' : '');
   }, []);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
+  const [guestView, setGuestView] = useState(false);
   const [view, setView] = useState<View>(cafeMode ? 'follow' : 'overview');
   const [overview, setOverview] = useState<DistrictStatus>('idle');
   const [districts, setDistricts] = useState<Record<District, DistrictStatus>>({
@@ -165,6 +167,10 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   const [reports, setReports] = useState<Record<FollowId, AgentReport>>({ '01': STARTING, '02': STARTING, '03': STARTING });
   const [fps, setFps] = useState(0);
   const [readyTime, setReadyTime] = useState(0);
+
+  useEffect(() => {
+    setGuestView(demoEndpoint() === GUEST_DEMO_ENDPOINT);
+  }, []);
 
   useEffect(() => {
     const host = viewport.current;
@@ -231,13 +237,18 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   }, [followWorker, state, visitWorker]);
 
   useEffect(() => {
-    if (!cafeMode || !['127.0.0.1', 'localhost'].includes(window.location.hostname)) return;
+    if (!cafeMode) return;
+    const endpoint = demoEndpoint();
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
+      let nextPoll = cityBusy ? 1000 : 2500;
       try {
-        const response = await fetch('/api/nexciv-preview/cafe?control=city', { cache: 'no-store', signal: controller.signal });
-        if (!response.ok) return;
+        const response = await fetch(`${endpoint}?control=city`, { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) {
+          nextPoll = [403, 404, 503].includes(response.status) ? 0 : demoRetryDelay(response, nextPoll);
+          return;
+        }
         const observation: CityObservation = await response.json();
         if (controller.signal.aborted) return;
         syncCity(observation);
@@ -258,7 +269,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
       } catch {
         // Retry on the next poll, retaining the last position during a brief disconnect.
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(refresh, cityBusy ? 1000 : 2500);
+        if (nextPoll && !controller.signal.aborted) timer = setTimeout(refresh, nextPoll);
       }
     }
     void refresh();
@@ -386,7 +397,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
           <h1><Link className={styles.hudBrand} href="/" prefetch={false} aria-label="NEXCIV CITY 首页"><CityMark /><span>NEXCIV <b>CITY</b></span></Link>
             <span className={styles.srOnly}>{cafeMode ? '咖啡街的一个班次' : '城市试玩'}</span></h1>
           <div className={styles.tools}>
-            <span className={styles.status}><i />{sceneReady ? '实时 3D' : '2D 导览'} <small>DEMO</small></span>
+            <span className={styles.status}><i />{sceneReady ? '实时 3D' : '2D 导览'} <small>{guestView ? '游客 DEMO' : 'DEMO'}</small></span>
             {!cafeMode && sceneReady && <button type="button" aria-label="镜头控制" aria-expanded={cameraOpen} aria-controls="camera-controls" onClick={() => setCameraOpen(!cameraOpen)}><CityGlyph name="camera" /></button>}
             <button ref={modeControl} type="button" onClick={sceneReady ? useStatic : start3D}>{sceneReady ? '2D' : '开启 3D'}</button>
             {!cafeMode && <Link className={styles.connectLink} href="/nexciv-preview/cafe?connect=1#connect-agent" prefetch={false}>连接 Agent</Link>}

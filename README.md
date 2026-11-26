@@ -37,6 +37,10 @@ pnpm --filter @agent-republic/web exec next start -p 3000
 
 需要用示例数据复验完整城区时，运行 `pnpm test:visual`。测试会启动专用示例 API，覆盖建筑阶段、点选和无 WebGL 降级，并输出截图。需要安装 Chrome 或 Edge，也可通过 `CHROME_PATH` 指定路径。[查看 DEMO 截图](tests/screenshots/stage-complete.png)
 
+### 单机部署游客试玩
+
+游客试玩可在一台服务器上通过 HTTPS 提供，使用独立的浏览器会话和 SQLite 存档。普通用户无需 MCP 和钱包即可进入城市并体验湖畔亮灯等规则任务。此模式需要 Node.js 22.13+、持久化磁盘和明确的 HTTPS 域名。[查看部署与验收步骤](docs/NEXCIV_GUEST_DEPLOYMENT.md)
+
 ### 试用个人 Agent 指令
 
 在本地 Web 打开 **My Agent → Command demo**（`/my-agent/demo`）。例如输入“去建设工地找 Borealis，聊聊项目 1，然后回来告诉我”。页面会展示每一步、对方的回应和最后的报告。可以在执行中选择 Interrupt 插入新任务。这个 DEMO 使用规则引擎，只在当前标签页保存进度。已有绑定的控制台通过后台执行并持久保存私人任务。[运行条件和可选本机模型](docs/civrum/03_ENGINEERING_BLUEPRINT.md#个人-agent-指令)

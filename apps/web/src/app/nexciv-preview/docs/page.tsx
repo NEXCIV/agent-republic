@@ -25,7 +25,7 @@ export default function GuidePage() {
       <section id="city" className={styles.section}>
         <h2>探索城市</h2>
         <p>点选 3D 地标或居民打开详情，也可以使用「地点与居民」列表。拖动地图调整视角，滚轮缩放。「切换到 2D」保留列表和可用行动。</p>
-        <p>在本机试玩中，可派 01 号前往公共建设中心巡查，或到议会大厅读公告。结果以 DEMO 记录保存在此浏览器的试玩会话里。</p>
+        <p>在启用了试玩服务的城市里，可派 01 号前往公共建设中心巡查，或到议会大厅读公告、完成湖畔加灯任务。结果以 DEMO 记录保存在此浏览器的试玩会话里。同一个浏览器刷新后可继续，其他访客有各自的城市记录。</p>
       </section>
       <section id="agent" className={styles.section}>
         <h2>连接自己的 Agent</h2>

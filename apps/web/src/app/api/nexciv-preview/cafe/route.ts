@@ -7,6 +7,7 @@ import { OBSERVER_ACTIONS, type ObserverAction } from '../../../../lib/cafe-obse
 import type { CityDestination } from '../../../../lib/city-movement';
 import { eveningChoiceSchema } from '../../../../lib/evening-stroll';
 import { theatreDecisionSchema } from '../../../../lib/theatre-trial';
+import { cafeSnapshot as snapshot } from '../../../../lib/cafe-http';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -33,15 +34,10 @@ function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
 }
 function disabled() { return process.env.NODE_ENV === 'production' && !process.env.NEXCIV_CAFE_DEMO_DB; }
-function checkRuntime() {
+function checkRuntime(request: NextRequest) {
+  if (process.env.NEXCIV_GUEST_ORIGIN && !loopback(request)) return json({ error: '本机咖啡街服务仅接受本机访问。' }, 403);
   if (disabled()) return json({ error: '此环境未启用咖啡街试玩。' }, 404);
   if (!process.getBuiltinModule?.('node:sqlite')) return json({ error: '咖啡街试玩需要支持 SQLite 的 Node.js 22.13 或更高版本。' }, 503);
-}
-
-function snapshot(data: ReturnType<CafeDemoStore['read']>) {
-  if (!data) return null;
-  const { phase, since, until, place, energy, events, requestedActivity, fishResult, observer } = data.run;
-  return { ...data, run: { phase, since, until, place, energy, events, requestedActivity, fishResult, observer } };
 }
 
 function setResident(response: NextResponse, request: NextRequest, resident: string) {
@@ -67,7 +63,7 @@ function mcpAction(request: NextRequest, perform: (actor: CafeActor) => NextResp
 }
 
 export function GET(request: NextRequest) {
-  const unavailable = checkRuntime();
+  const unavailable = checkRuntime(request);
   if (unavailable) return unavailable;
   const resident = request.cookies.get(residentCookie)?.value;
   const params = request.nextUrl.searchParams;
@@ -121,7 +117,7 @@ export function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const unavailable = checkRuntime();
+  const unavailable = checkRuntime(request);
   if (unavailable) return unavailable;
   if (request.headers.get('origin') !== new URL(request.url).origin &&
       request.headers.get('origin') !== `${request.nextUrl.protocol}//${request.headers.get('host')}`) {

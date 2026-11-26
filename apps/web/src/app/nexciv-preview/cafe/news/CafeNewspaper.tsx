@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { CityMark } from '@/components/CityMark';
+import { demoEndpoint } from '../../demoEndpoint';
 import type { CityNewspaperEdition, NewspaperSnapshot } from '../../../../lib/cafe-newspaper';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS } from '../../../../lib/cafe-observer';
 import styles from '../../preview.module.css';
@@ -47,7 +48,7 @@ export function CafeNewspaper({ requestedIssue }: { requestedIssue?: string }) {
     const query = new URLSearchParams({ newspaper: requestedIssue ?? 'latest' });
     setSnapshot(null);
     setError('');
-    fetch(`/api/nexciv-preview/cafe?${query}`, { cache: 'no-store', signal: controller.signal })
+    fetch(`${demoEndpoint()}?${query}`, { cache: 'no-store', signal: controller.signal })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error ?? '暂时无法打开早报。');

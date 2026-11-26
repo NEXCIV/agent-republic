@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CafeMcpPairing } from './CafeMcpPairing';
+import { demoEndpoint, demoRetryDelay, LOCAL_DEMO_ENDPOINT } from './demoEndpoint';
 import type { CafeShiftKind, CafeSnapshot, CafeSuggestion, CafeView } from '../../lib/cafe-life';
 import type { CafePostcard } from '../../lib/cafe-postcard';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC } from '../../lib/cafe-observer';
@@ -22,7 +23,6 @@ export function shiftLabel(run: CafeView) {
   if (run.phase === 'done' && run.fishResult) return run.fishResult === 'released' ? '钓到小鱼，已放回湖里' : '这一竿没钓到鱼';
   return phaseLabel[run.phase];
 }
-const endpoint = '/api/nexciv-preview/cafe';
 const seenKey = 'nexciv-cafe-seen-at';
 type Command = { action: 'start'; busy: boolean; kind: CafeShiftKind } | { action: 'note'; suggestion: CafeSuggestion };
 
@@ -62,6 +62,7 @@ export function CafeShift({ onUpdate, connectOnOpen = false }: {
   const active = !!run && run.phase !== 'done';
 
   useEffect(() => {
+    const endpoint = demoEndpoint();
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
     let reading = false;
@@ -71,14 +72,20 @@ export function CafeShift({ onUpdate, connectOnOpen = false }: {
       reading = true;
       const current = revision.current;
       const visibility = visibilityVersion;
+      let nextPoll = active ? 900 : 4000;
       try {
         if (inFlight.current) return;
         const seenAt = onReturn.current ? savedCheckpoint() : undefined;
         const response = await fetch(seenAt === undefined ? endpoint : `${endpoint}?seenAt=${seenAt}`,
           { cache: 'no-store', signal: controller.signal });
+        nextPoll = demoRetryDelay(response, nextPoll);
         const data = await response.json();
         if (current !== revision.current || visibility !== visibilityVersion || controller.signal.aborted) return;
-        if (!response.ok) throw new Error(data?.error ?? '班次暂时无法读取。');
+        if (!response.ok) {
+          setReady(false);
+          if ([403, 404, 503].includes(response.status)) nextPoll = 0;
+          throw new Error(data?.error ?? '班次暂时无法读取。');
+        }
         if (data?.postcard) setPostcard(data.postcard);
         onReturn.current = false;
         markShown(data);
@@ -90,7 +97,7 @@ export function CafeShift({ onUpdate, connectOnOpen = false }: {
         if (!controller.signal.aborted && current === revision.current) setError(cause instanceof Error ? cause.message : '连接中断，正在重试。');
       } finally {
         reading = false;
-        if (!controller.signal.aborted && document.visibilityState === 'visible') timer = setTimeout(read, active ? 900 : 4000);
+        if (nextPoll && !controller.signal.aborted && document.visibilityState === 'visible') timer = setTimeout(read, nextPoll);
       }
     }
     function visibilityChanged() {
@@ -121,7 +128,7 @@ export function CafeShift({ onUpdate, connectOnOpen = false }: {
     try {
       const id = retry.current?.command === key ? retry.current.id : crypto.randomUUID();
       retry.current = { command: key, id };
-      const response = await fetch(endpoint, {
+      const response = await fetch(demoEndpoint(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...payload, requestId: id }),
       });
@@ -180,7 +187,7 @@ export function CafeShift({ onUpdate, connectOnOpen = false }: {
         </>}
         {run && <span className={styles.energy}>01 号精力 <b>{run.energy}</b> / 100</span>}
       </div>
-      <CafeMcpPairing endpoint={endpoint} ready={ready} openOnMount={connectOnOpen} />
+      <CafeMcpPairing endpoint={LOCAL_DEMO_ENDPOINT} ready={ready} openOnMount={connectOnOpen} />
       {(run?.observer || (!active && kind === 'observer')) && <span>采访议题 · {OBSERVER_TOPIC}</span>}
       <Link className={styles.cafeLink} href="/nexciv-preview/cafe/news">
         阅读《城邦早报》

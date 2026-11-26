@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CityObservation } from '../../lib/city-movement';
+import { demoEndpoint, demoRetryDelay } from './demoEndpoint';
 
-const endpoint = '/api/nexciv-preview/cafe';
 const commands = {
   'visit.works': { action: 'moveTo', destination: { place: 'works' } },
   'visit.governance': { action: 'moveTo', destination: { place: 'governance' } },
@@ -34,11 +34,7 @@ export function useCityVisit(enabled: boolean, applyObservation: (observation: C
 
   useEffect(() => {
     if (!enabled || pending) return;
-    if (!['localhost', '127.0.0.1'].includes(window.location.hostname)) {
-      setConnection('unavailable');
-      setMessage('现场互动目前在本机试玩开放。');
-      return;
-    }
+    const endpoint = demoEndpoint();
 
     const controller = new AbortController();
     const options: RequestInit = { cache: 'no-store', signal: controller.signal };
@@ -56,6 +52,7 @@ export function useCityVisit(enabled: boolean, applyObservation: (observation: C
         }
         if (controller.signal.aborted || version !== commandVersion.current) return;
         if (!response.ok) {
+          nextPoll = demoRetryDelay(response, nextPoll);
           const problem = response.status === 409 ? '请允许浏览器保存试玩会话，再刷新页面。'
             : await errorMessage(response, '暂时无法读取城市状态。');
           if (controller.signal.aborted || version !== commandVersion.current) return;
@@ -95,7 +92,7 @@ export function useCityVisit(enabled: boolean, applyObservation: (observation: C
     try {
       const id = retry.current?.command === command ? retry.current.id : crypto.randomUUID();
       retry.current = { command, id };
-      const response = await fetch(endpoint, {
+      const response = await fetch(demoEndpoint(), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...commands[command], requestId: id }),
       });
