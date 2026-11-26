@@ -1,11 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { createDemoCity } from './nexciv-demo-city.mjs';
 
-const city = new URL(process.env.NEXCIV_DEMO_URL ?? 'http://127.0.0.1:3137');
-if (city.protocol !== 'http:' || city.hostname !== '127.0.0.1') {
-  throw new Error('This harness expects a local NEXCIV demo on 127.0.0.1.');
-}
-const endpoint = new URL('/api/nexciv-preview/cafe', city);
+const city = createDemoCity();
 const provider = new URL(process.env.NEXCIV_MODEL_BASE_URL ?? '');
 if (provider.protocol !== 'https:' || provider.username || provider.password || provider.search || provider.hash) {
   throw new Error('NEXCIV_MODEL_BASE_URL must be an HTTPS API base URL without credentials or query parameters.');
@@ -65,19 +62,7 @@ async function decide(observation) {
 
 async function run() {
   // The isolated demo issues a distinct resident cookie to this harness.
-  const session = await fetch(endpoint, { redirect: 'error' });
-  const cookie = session.headers.getSetCookie().find((entry) => entry.startsWith('nexciv_cafe_resident='))?.split(';')[0];
-  if (!session.ok || !cookie) throw new Error('Start the local NEXCIV demo before running the harness.');
-  const headers = { Cookie: cookie, Origin: city.origin, 'Content-Type': 'application/json' };
-
-  async function request(query = '', command) {
-    const response = await fetch(endpoint + query, {
-      headers, redirect: 'error', signal: globalThis.AbortSignal.timeout(8000),
-      ...(command && { method: 'POST', body: JSON.stringify(command) }),
-    });
-    if (!response.ok) throw new Error(`City API returned HTTP ${response.status}.`);
-    return response.json();
-  }
+  const request = city.useSession(await city.createSession());
 
   await request('', { action: 'start', kind: 'observer', driver: 'external', busy: true, requestId: randomUUID() });
   const observation = await request('?control=observer');
