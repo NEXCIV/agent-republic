@@ -33,3 +33,12 @@ export const sharedPilotSocialRequestSchema = z.discriminatedUnion('action', [
   z.object({ requestId: actionId, action: z.literal('say'), meetingId: actionId, line: z.enum(SHARED_PILOT_LINES) }).strict(),
 ]);
 export type SharedPilotSocialRequest = z.infer<typeof sharedPilotSocialRequestSchema>;
+
+export const SHARED_PILOT_SURVEY_CHECKS = ['entrance-path', 'pedestrian-passage'] as const;
+export const sharedPilotSurveyRequestSchema = z.discriminatedUnion('action', [
+  z.object({ requestId: actionId, action: z.literal('proposeSurvey'), meetingId: actionId }).strict(),
+  z.object({ requestId: actionId, action: z.literal('respondSurvey'), taskId: actionId, decision: z.enum(['accept', 'decline']) }).strict(),
+  z.object({ requestId: actionId, action: z.literal('inspectSurvey'), taskId: actionId, checkId: z.enum(SHARED_PILOT_SURVEY_CHECKS) }).strict(),
+  z.object({ requestId: actionId, action: z.literal('submitSurvey'), taskId: actionId }).strict(),
+]);
+export type SharedPilotSurveyRequest = z.infer<typeof sharedPilotSurveyRequestSchema>;

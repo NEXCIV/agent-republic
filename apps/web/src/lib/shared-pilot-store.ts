@@ -3,18 +3,19 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  SHARED_PILOT_PLACE_IDS, SHARED_PILOT_PROVENANCE, SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema,
+  SHARED_PILOT_PLACE_IDS, SHARED_PILOT_PROVENANCE, SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
   type SharedPilotPlaceId, type SharedPilotResidentId,
 } from '@agent-republic/domain';
 import type { CityPoint } from './cafe-geometry';
 import { positionOnWalk, type CityRoute, type CityWalk } from './city-movement';
 import { CITY_MAP, planCityWalk } from './city-navigation';
 import { advanceSocial, emptySocialState, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
+import { advanceSurvey, emptySurveyState, performSurvey, publicSurvey, SURVEY_CHECKPOINTS, surveyActive, SurveyActionError, type SurveyState, type SurveyReceipt } from './shared-pilot-survey';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
 const APPLICATION_ID = 0x4e585350; // NXSP
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const CREDENTIAL_LIFETIME = 3600000;
 const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
@@ -24,7 +25,8 @@ const TOKEN_PATTERN = /^nxc_shared_[A-Za-z0-9_-]{43}$/;
 const V1_TABLES = [
   'shared_pilot_credentials', 'shared_pilot_events', 'shared_pilot_meta', 'shared_pilot_moves', 'shared_pilot_residents',
 ];
-const EXPECTED_TABLES = [...V1_TABLES, 'shared_pilot_social'];
+const V2_TABLES = [...V1_TABLES, 'shared_pilot_social'];
+const EXPECTED_TABLES = [...V2_TABLES, 'shared_pilot_survey'];
 const INITIAL_PLACES: Record<SharedPilotResidentId, SharedPilotPlaceId> = { '01': 'plaza', '02': 'cafe' };
 
 export type SharedPilotErrorCode = 'INVALID_CONFIG' | 'INCOMPATIBLE_DB' | 'INVALID_CLOCK' | 'INVALID_REQUEST'
@@ -170,19 +172,20 @@ export class SharedPilotStore {
     this.db = new sqlite.DatabaseSync(file);
     try {
       // Reject unrelated DBs before setting WAL or running any schema changes.
-      let migrateV1 = false;
+      let migrateFrom: 1 | 2 | undefined;
       if (existing) {
         const application = Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
         const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(({ name }) => name);
-        migrateV1 = application === APPLICATION_ID && version === 1 && JSON.stringify(tables) === JSON.stringify(V1_TABLES);
-        if (!migrateV1 && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
+        if (application === APPLICATION_ID && version === 1 && JSON.stringify(tables) === JSON.stringify(V1_TABLES)) migrateFrom = 1;
+        if (application === APPLICATION_ID && version === 2 && JSON.stringify(tables) === JSON.stringify(V2_TABLES)) migrateFrom = 2;
+        if (!migrateFrom && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
           throw new SharedPilotError('INCOMPATIBLE_DB', 'Refusing to open a non-pilot database.');
         }
       }
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL;');
       if (initialAt !== null) this.initialize(initialAt);
-      else if (migrateV1) this.migrateSocial();
+      else if (migrateFrom) this.migratePilot(migrateFrom);
     } catch (error) {
       this.db.close();
       throw error;
@@ -218,9 +221,11 @@ export class SharedPilotStore {
           UNIQUE(movement_seq,kind)
         );
         CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);
+        CREATE TABLE shared_pilot_survey (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);
       `);
       this.db.prepare('INSERT INTO shared_pilot_meta (id,logical_now) VALUES (1,?)').run(at);
       this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
+      this.db.prepare('INSERT INTO shared_pilot_survey (id,state) VALUES (1,?)').run(JSON.stringify(emptySurveyState()));
       const insert = this.db.prepare('INSERT INTO shared_pilot_residents (id,place) VALUES (?,?)');
       for (const id of SHARED_PILOT_RESIDENT_IDS) insert.run(id, INITIAL_PLACES[id]);
       this.db.exec('COMMIT');
@@ -230,11 +235,15 @@ export class SharedPilotStore {
     }
   }
 
-  private migrateSocial() {
+  private migratePilot(version: 1 | 2) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      this.db.exec('CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
-      this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
+      if (version === 1) {
+        this.db.exec('CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
+        this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
+      }
+      this.db.exec('CREATE TABLE shared_pilot_survey (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
+      this.db.prepare('INSERT INTO shared_pilot_survey (id,state) VALUES (1,?)').run(JSON.stringify(emptySurveyState()));
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
@@ -245,6 +254,14 @@ export class SharedPilotStore {
 
   private saveSocial(state: SocialState) {
     this.db.prepare('UPDATE shared_pilot_social SET state=? WHERE id=1').run(JSON.stringify(state));
+  }
+
+  private readSurvey(): SurveyState {
+    return JSON.parse(String(this.db.prepare('SELECT state FROM shared_pilot_survey WHERE id=1').get()?.state)) as SurveyState;
+  }
+
+  private saveSurvey(state: SurveyState) {
+    this.db.prepare('UPDATE shared_pilot_survey SET state=? WHERE id=1').run(JSON.stringify(state));
   }
 
   private lastMove(id: SharedPilotResidentId) {
@@ -318,7 +335,10 @@ export class SharedPilotStore {
       event.run(movement.seq, movement.arrives_at);
     }
     const social = this.readSocial();
-    if (advanceSocial(social, at, this.socialResidents(at))) this.saveSocial(social);
+    const residents = this.socialResidents(at);
+    if (advanceSocial(social, at, residents)) this.saveSocial(social);
+    const survey = this.readSurvey();
+    if (advanceSurvey(survey, at, residents)) this.saveSurvey(survey);
   }
 
   /** Server operator only. Issues a new secret and immediately invalidates the old one. */
@@ -359,7 +379,8 @@ export class SharedPilotStore {
       const { requestId, destination } = parsed.data;
       this.settle(at);
       const social = this.readSocial();
-      if (social.requests[actor][requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a social action.');
+      const survey = this.readSurvey();
+      if (social.requests[actor][requestId] || survey.requests[actor][requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different city action.');
       const previous = this.findReceipt(actor, requestId);
       if (previous) {
         if (previous.destination !== destination.place) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different movement.');
@@ -374,11 +395,16 @@ export class SharedPilotStore {
       if (social.meeting?.status === 'talking' || (social.meeting?.status === 'accepted' && destination.place !== 'cafe')) {
         throw new SharedPilotError('BUSY', 'Resident is attending a café meeting.');
       }
+      if (survey.task?.status === 'surveying' || (survey.task?.status === 'accepted' && destination.place !== 'works')) {
+        throw new SharedPilotError('BUSY', 'Resident is attending a construction center survey.');
+      }
       const origin = this.residentPosition(actor, resident.place, at);
       const anchor = social.meeting?.status === 'accepted' ? meetingPoint(actor) : undefined;
-      const route = planCityWalk(origin, anchor ? { x: anchor[0], z: anchor[2] } : destination);
+      const checkpoint = survey.task?.status === 'accepted' ? SURVEY_CHECKPOINTS[actor] : undefined;
+      const route = planCityWalk(origin, checkpoint ? { x: checkpoint.x, z: checkpoint.z } : anchor ? { x: anchor[0], z: anchor[2] } : destination);
       if (!route) throw new SharedPilotError('UNREACHABLE', 'No surveyed route to this pilot place.');
       if (anchor) route.name = '咖啡街会面';
+      if (checkpoint) route.name = `共同调研 · ${checkpoint.label}`;
       const arrivesAt = at + Math.ceil(route.metres / SPEED * 1000);
       const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
         VALUES (?,?,?,?,?,?)`).run(actor, requestId, destination.place, JSON.stringify(route), at, arrivesAt);
@@ -396,6 +422,9 @@ export class SharedPilotStore {
       if (this.findReceipt(actor, parsed.data.requestId)) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a movement.');
       this.settle(at);
       const social = this.readSocial();
+      const survey = this.readSurvey();
+      if (survey.requests[actor][parsed.data.requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a survey action.');
+      if (surveyActive(survey.task) && !social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('BUSY', 'A shared survey is active.');
       try {
         const residents = this.socialResidents(at);
         const receipt = performSocial(social, actor, parsed.data, at, residents);
@@ -404,6 +433,28 @@ export class SharedPilotStore {
         return receipt;
       } catch (error) {
         if (error instanceof SocialActionError) throw new SharedPilotError(error.code, error.message);
+        throw error;
+      }
+    });
+  }
+
+  surveyAction(token: unknown, input: unknown): SurveyReceipt {
+    return this.transaction((at) => {
+      const actor = this.authenticate(token, at);
+      const parsed = sharedPilotSurveyRequestSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', 'Invalid shared survey action.');
+      this.settle(at);
+      const social = this.readSocial();
+      if (this.findReceipt(actor, parsed.data.requestId) || social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies another city action.');
+      const survey = this.readSurvey();
+      try {
+        const residents = this.socialResidents(at);
+        const receipt = performSurvey(survey, actor, parsed.data, at, residents, social.meeting);
+        advanceSurvey(survey, at, residents);
+        this.saveSurvey(survey);
+        return receipt;
+      } catch (error) {
+        if (error instanceof SurveyActionError) throw new SharedPilotError(error.code, error.message);
         throw error;
       }
     });
@@ -442,10 +493,12 @@ export class SharedPilotStore {
           provenance: SHARED_PILOT_PROVENANCE,
         }));
       const social = this.readSocial();
+      const survey = this.readSurvey();
       return {
         mode: 'DEMO' as const, provenance: SHARED_PILOT_PROVENANCE, viewerResidentId, serverTime: at,
         revision: events.at(-1)?.id ?? '0', residents, events,
         social: publicSocial(social, this.socialResidents(at)),
+        survey: publicSurvey(survey, this.socialResidents(at), social.meeting),
         privateSocial: { memories: social.memories[viewerResidentId], encounters: social.encounters[viewerResidentId] },
       };
     });

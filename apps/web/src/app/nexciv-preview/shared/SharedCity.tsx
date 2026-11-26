@@ -10,7 +10,7 @@ import base from '../preview.module.css';
 import styles from './shared.module.css';
 
 type ResidentId = '01' | '02';
-type CameraView = 'overview' | 'meeting' | ResidentId;
+type CameraView = 'overview' | 'meeting' | 'survey' | ResidentId;
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
 const endpoint = '/api/nexciv-preview/shared';
 
@@ -23,6 +23,7 @@ export function SharedCity() {
   const [message, setMessage] = useState('');
   const [view, setView] = useState<CameraView>('overview');
   const watchedMeeting = useRef<string | undefined>(undefined);
+  const watchedSurvey = useRef<string | undefined>(undefined);
   const [staticMode, setStaticMode] = useState(false);
   const [scene, setScene] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [overview, setOverview] = useState<DistrictStatus>('idle');
@@ -32,8 +33,8 @@ export function SharedCity() {
 
   const focus = useCallback((id: CameraView) => {
     setView(id);
-    world.current?.view(id === 'overview' ? 'overview' : 'follow', id === 'overview' ? undefined : id === 'meeting' ? '01' : id);
-    world.current?.select(id === 'overview' || id === 'meeting' ? null : { kind: 'resident', id });
+    world.current?.view(id === 'overview' ? 'overview' : 'follow', id === 'overview' ? undefined : id === 'meeting' || id === 'survey' ? '01' : id);
+    world.current?.select(id === 'overview' || id === 'meeting' || id === 'survey' ? null : { kind: 'resident', id });
   }, []);
 
   useEffect(() => {
@@ -95,15 +96,25 @@ export function SharedCity() {
   const live3d = scene === 'ready' && !staticMode;
   const social = snapshot?.social;
   const meeting = social?.meeting;
+  const survey = snapshot?.survey;
+  const task = survey?.task;
+  const surveyTitle = task ? ({ proposed: '等待对方接受', accepted: '前往调研点', surveying: '现场调研中', completed: '共同报告已完成', declined: '调研被拒绝', expired: '调研超时' })[task.status] : '等待会面约定';
+  const submitted = task ? Object.values(task.inspections).filter(({ finding }) => finding).length : 0;
   const lastLine = meeting?.lines.at(-1);
   const meetingTitle = meeting ? ({ invited: '等待回应', accepted: '双方赴约中', talking: '正在交流', completed: '会面已结束', declined: '邀请被婉拒', expired: '会面超时' })[meeting.status] : '暂未发起会面';
   const events = (snapshot ? [...snapshot.events.map((event) => ({ ...event, text: `${event.residentId} 号 ${event.kind === 'MOVE_STARTED' ? '出发前往' : '已到达'} ${CITY_PLACES[event.place]}` })),
-    ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text }))] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
+    ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text })),
+    ...(survey?.events ?? [])] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
   useEffect(() => {
     if (!live3d || meeting?.status !== 'talking' || watchedMeeting.current === meeting.id) return;
     watchedMeeting.current = meeting.id;
     if (view === 'overview') focus('meeting');
   }, [focus, live3d, meeting?.id, meeting?.status, view]);
+  useEffect(() => {
+    if (!live3d || task?.status !== 'surveying' || watchedSurvey.current === task.id) return;
+    watchedSurvey.current = task.id;
+    if (view === 'overview' || view === 'meeting') focus('survey');
+  }, [focus, live3d, task?.id, task?.status, view]);
   return <main className={base.page}>
     <section className={`${base.viewer} ${styles.viewer}`} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
@@ -128,11 +139,14 @@ export function SharedCity() {
           const destination = movement?.destination.place;
           const speaking = meeting?.status === 'talking';
           const waiting = meeting?.status === 'accepted' && social?.arrived.includes(id);
+          const inspection = task?.status === 'surveying' ? task.inspections[id] : undefined;
+          const waitingSurvey = task?.status === 'accepted' && survey?.arrived.includes(id);
           return <article key={id} className={styles.resident} data-resident={id}>
             <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{names[id]}</b><small>{resident ? '规则 Agent 已接入' : '连接中'}</small></div>
               <button type="button" disabled={!live3d || failedAgents.includes(id)} aria-pressed={view === id} onClick={() => focus(id)}>跟随</button></div>
-            <strong role="status" data-resident-status={id}>{resident ? speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
-            {movement && <div className={styles.progress}><progress aria-label={`${id} 号行程进度`} max={100} value={progress} /><span>{progress}%</span></div>}
+            <strong role="status" data-resident-status={id}>{resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
+            {inspection ? <div className={styles.progress}><progress aria-label={`${id} 号现场观察进度`} max={8} value={inspection.finding ? 8 : Math.min(8, Math.max(0, ((snapshot?.serverTime ?? 0) - (inspection.startedAt ?? snapshot?.serverTime ?? 0)) / 1000))} /><span>{inspection.finding ? '已记录' : '观察'}</span></div>
+              : movement && <div className={styles.progress}><progress aria-label={`${id} 号行程进度`} max={100} value={progress} /><span>{progress}%</span></div>}
             {resident && <small className={styles.position}>X {resident.position[0].toFixed(1)} · Z {resident.position[2].toFixed(1)}</small>}
             {failedAgents.includes(id) && <small>角色模型未载入，行动记录仍可查看。</small>}
           </article>;
@@ -142,15 +156,32 @@ export function SharedCity() {
         {!live3d && <p className={styles.explain}>{staticMode || scene === 'fallback' ? '2D 状态观察 · 地图为静态背景' : '正在载入实时城市模型...'}</p>}
       </aside>
       <aside className={styles.journal} aria-label="实时城市动态">
-        <section className={styles.meeting} aria-label="咖啡街会面">
+        {task && <section className={styles.meeting} aria-label="公共建设中心共同调研">
+          <div className={styles.panelHead}><h2>公共建设中心调研</h2><small>{survey?.completed ?? 0} 次完成</small></div>
+          <p className={styles.meetingState} data-survey-status={task.status}><i />{surveyTitle}{task.status === 'accepted' && ` · ${survey?.arrived.length ?? 0}/2 到场`}{task.status === 'surveying' && ` · ${submitted}/2 已记录`}</p>
+          <p>来源：咖啡街会面约定 · 两人分别执行</p>
+          {(['01', '02'] as const).map((id) => {
+            const finding = task.inspections[id].finding;
+            const began = task.inspections[id].startedAt !== undefined;
+            return <div key={id} className={styles.surveyCheck} data-resident={id}>
+              <b>{id} 号 · {survey?.checkpoints[id].label}</b><small>{finding ? '✓ 已提交' : began ? '观察中' : survey?.arrived.includes(id) ? '已到场' : '待到场'}</small>
+              {finding && <p>{finding.text}</p>}
+              {finding && <small>坐标 X {finding.position[0].toFixed(2)} · Z {finding.position[2].toFixed(2)}</small>}
+            </div>;
+          })}
+          {task.status === 'completed' && survey?.report?.taskId === task.id && <div className={styles.report} data-report-ready="true"><b>✓ 共同调研报告</b><p>{survey.report.summary}</p><small>2 份独立记录 · {new Date(survey.report.completedAt).toLocaleTimeString('zh-CN',{hour12:false})} · DEMO</small></div>}
+          {survey?.report && survey.report.taskId !== task.id && <details className={styles.previousReport}><summary>查看上一份共同调研报告</summary><p>{survey.report.summary}</p>{survey.report.findings.map(finding => <p key={finding.checkId}>{finding.residentId} 号 · {finding.label}：{finding.text}（X {finding.position[0].toFixed(2)}, Z {finding.position[2].toFixed(2)}）</p>)}</details>}
+          {(['accepted', 'surveying'].includes(task.status) || task.status === 'completed' && survey?.arrived.length === 2) && <button type="button" className={styles.meetingButton} disabled={!live3d} aria-pressed={view === 'survey'} onClick={() => focus('survey')}>查看调研现场</button>}
+        </section>}
+        {(!task || (meeting && ['invited', 'accepted', 'talking'].includes(meeting.status))) && <section className={styles.meeting} aria-label="咖啡街会面">
           <div className={styles.panelHead}><h2>咖啡街会面</h2><small>{social?.completedMeetings ?? 0} 次交流</small></div>
           <p className={styles.meetingState} data-meeting-status={meeting?.status ?? 'none'}><i />{meetingTitle}{meeting?.status === 'accepted' && ` · ${social?.arrived.length ?? 0}/2 已到场`}{meeting?.status === 'talking' && ` · ${meeting.lines.length}/4 轮`}</p>
           {meeting?.status === 'invited' && <p>{meeting.inviter} 号邀请 {meeting.invitee} 号到咖啡街，等待对方自行回应。</p>}
           {lastLine && <blockquote data-speaker={lastLine.residentId}><b>{lastLine.residentId} 号</b>{lastLine.text}</blockquote>}
           {meeting?.status === 'completed' && <p className={styles.memory}>✓ 双方已各自留下私人记忆。{(social?.completedMeetings ?? 0) > 1 ? '关系：逐渐熟悉' : '关系：初次认识'}</p>}
           {meeting && ['accepted', 'talking'].includes(meeting.status) && <button type="button" className={styles.meetingButton} disabled={!live3d} aria-pressed={view === 'meeting'} onClick={() => focus('meeting')}>查看会面现场</button>}
-        </section>
-        <div className={styles.panelHead}><h2>城市动态</h2><small>{snapshot ? `事件 #${Number(snapshot.revision) + (social?.revision ?? 0)}` : '等待连接'}</small></div>
+        </section>}
+        <div className={styles.panelHead}><h2>城市动态</h2><small>{snapshot ? `事件 #${Number(snapshot.revision) + (social?.revision ?? 0) + (survey?.revision ?? 0)}` : '等待连接'}</small></div>
         {events.length ? <ol>{events.map((event) => <li key={event.id}><i data-resident={event.residentId} />
           <div>{event.text}</div>
           <time dateTime={new Date(event.happenedAt).toISOString()}>{new Date(event.happenedAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>

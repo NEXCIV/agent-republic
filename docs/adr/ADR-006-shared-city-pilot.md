@@ -89,4 +89,12 @@ node node_modules/vitest/vitest.mjs run packages/domain/test/shared-city-pilot.t
 
 复现：`node node_modules/vitest/vitest.mjs run apps/web/test/shared-pilot-social.test.ts apps/web/test/shared-pilot-store.test.ts apps/web/test/shared-pilot-runtime.test.ts packages/domain/test/shared-city-pilot.test.ts`；在本机 3142 共享页面观察真实赴约过程、两个模型站位、发言和回执。公开事件保留最近 60 条社交记录，个人记忆保留最近 16 条，累计已完成次数持久保存；每名居民最多 300 个社交请求回执，与移动记录的限额独立。
 
+## G. 从会面约定到公共建设中心共同调研（E3-05）
+
+完成咖啡街四轮对话后，已核验的会面 ID 可作为共同调研的来源；每个会面只允许创建一次调研邀请。两名规则主体分别发起、接受/拒绝、移动、开始观察、提交记录。继续依赖既有短期凭据、严格动作 schema 和每居民幂等请求键；不接受调用者自填调研结果、坐标、时长、报告作者或完成状态。建设中心调研复用 `works.patrol` 已测绘的入口外侧步道（01：X=95，Z=67.346）与施工区人行通道（02：X=95，Z=60.55），高度由现有导航路网计算。两人独立赴约到不同地点；只有两人都在站位并且没有未完行程才进入观察。每人至少观察 8 秒，在原站位提交自己分配的检查项，服务器生成位置、时间和受控场景观察文本。两份记录齐备时同一事务生成唯一共同报告和完成事件，单份不算任务完成。
+
+SQLite 试验库 v3 只新增调研表，保留既有移动与会面记录。任务邀请、赴约、观察各有期限，超时或拒绝不生成完成报告；重启、重复提交、跨主体和无到场证据重试不增加计数。运行器优先履行上一轮会面约定；网页显示双方任务、调研站点、实际记录、完成回执和同框镜头。只记录 NEXCIV 虚拟场景的规则观察，不冒充现实安全检测、链上贡献或 BUILD/REP；正式身份、外部 LLM/MCP、经济与 `WorldFrameV1` 不变。
+
+专项验证：`node node_modules/vitest/vitest.mjs run apps/web/test/shared-pilot-survey.test.ts apps/web/test/shared-pilot-social.test.ts apps/web/test/shared-pilot-store.test.ts apps/web/test/shared-pilot-runtime.test.ts packages/domain/test/shared-city-pilot.test.ts`。试点保留最近 12 份已完成共同报告、最近 60 条调研公开事件及每名居民最多 300 条调研请求回执；共享页面展示当前任务及上一份已完成报告（若有）。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。

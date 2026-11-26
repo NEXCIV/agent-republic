@@ -32,11 +32,20 @@
 .resident[data-resident="02"] .progress progress { accent-color: #75aaa9; }
 .overview { width: 100%; }
 .alert { color: #ffc59b; font-size: 12px; line-height: 1.5; }
-.journal { bottom: 24px; right: 24px; width: 360px; }
+.journal { bottom: 24px; right: 24px; width: 360px; max-height: calc(100svh - 110px); overflow-y: auto; }
 .meeting { border-bottom: 1px solid #514b3e; margin-bottom: 12px; padding-bottom: 12px; }
 .meeting p.meetingState { color: #e5c469; font-size: 14px; font-weight: 650; margin: 8px 0; display: flex; gap: 8px; align-items: center; }
 .meetingState i { width: 7px; height: 7px; background: #d1ad57; border-radius: 50%; }
 .meetingState[data-meeting-status="talking"] i,.meetingState[data-meeting-status="completed"] i { background: #79cda2; }
+.meetingState[data-survey-status="surveying"] i,.meetingState[data-survey-status="completed"] i { background: #79cda2; }
+.surveyCheck { margin: 8px 0; padding: 9px 10px; border-left: 2px solid #e5c469; background: #2d2c27; display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
+.surveyCheck[data-resident="02"] { border-color: #79bab7; }
+.surveyCheck b { flex: 1; font-size: 12px; color: #f3e5be; }
+.surveyCheck small { color: #c7bdab; font-size: 11px; }
+.surveyCheck p { width: 100%; margin: 4px 0 0; color: #e5e0d4; font-size: 12px; }
+.report { margin: 10px 0; padding: 10px; border: 1px solid #54876b; color: #a3d9b1; background: #20342a; border-radius: 4px; }
+.report b { font-size: 14px; }.report p { color: #d8e5d8; margin: 5px 0; }.report small { font-size: 11px; color: #adcbb3; }
+.previousReport { margin: 10px 0; color: #d4c48d; font-size: 12px; }.previousReport summary { cursor: pointer; }.previousReport p { margin: 7px 0; }
 .meeting blockquote { margin: 9px 0; padding: 9px 12px; background: #2d2c27; border-left: 2px solid #d1ad57; border-radius: 3px; color: #f5ecda; font-size: 14px; line-height: 1.5; }
 .meeting blockquote b { display: block; color: #efbd55; font-size: 11px; margin-bottom: 4px; }
 .meeting blockquote[data-speaker="02"] { border-color: #79bab7; }

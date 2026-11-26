@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { SHARED_PILOT_LINES, SHARED_PILOT_RESIDENT_IDS, type SharedPilotPlaceId, type SharedPilotResidentId } from '@agent-republic/domain';
 import { SharedPilotStore } from './shared-pilot-store';
 import { meetingActive, nextSpeaker } from './shared-pilot-social';
+import { SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS, surveyActive } from './shared-pilot-survey';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
@@ -31,6 +32,40 @@ export class SharedPilotRuntime {
       this.store.close();
       throw error;
     }
+  }
+
+  private surveyTick(connection: RuleConnection, observation: Observation): boolean {
+    if (!this.socialEnabled) return false;
+    const { task, arrived, eligibleMeetingId } = observation.survey;
+    const at = observation.serverTime;
+    const actor = connection.residentId;
+    const own = observation.residents.find(({ residentId }) => residentId === actor)!;
+    if (task && surveyActive(task)) {
+      if (task.status === 'proposed' && actor === task.invitee && at >= task.createdAt + 2000) {
+        const busy = own.movement?.status === 'walking' && own.movement.arrivesAt - at > 20000;
+        this.store.surveyAction(connection.token, { requestId: randomUUID(), action: 'respondSurvey', taskId: task.id, decision: busy ? 'decline' : 'accept' });
+      } else if (task.status === 'accepted' && !arrived.includes(actor) && own.movement?.status !== 'walking'
+        && at >= (task.acceptedAt ?? at) + (actor === '02' ? 1500 : 0)) {
+        this.store.moveTo(connection.token, { requestId: randomUUID(), action: 'moveTo', destination: { place: 'works' } });
+        connection.decisions++;
+      } else if (task.status === 'surveying') {
+        const inspection = task.inspections[actor];
+        if (inspection.startedAt === undefined) {
+          this.store.surveyAction(connection.token, { requestId: randomUUID(), action: 'inspectSurvey', taskId: task.id, checkId: SURVEY_CHECKPOINTS[actor].checkId });
+        } else if (!inspection.finding && at >= inspection.startedAt + SURVEY_OBSERVATION_MS + (actor === '02' ? 2000 : 0)) {
+          this.store.surveyAction(connection.token, { requestId: randomUUID(), action: 'submitSurvey', taskId: task.id });
+        }
+      }
+      return true;
+    }
+    if (eligibleMeetingId && this.connections.every(({ decisions }) => decisions < MAX_DECISIONS)) {
+      const ready = at >= this.notBefore && at >= (observation.social.meeting?.endedAt ?? at) + 3000;
+      if (actor === '01' && ready && observation.residents.every(({ movement }) => movement?.status !== 'walking')) {
+        this.store.surveyAction(connection.token, { requestId: randomUUID(), action: 'proposeSurvey', meetingId: eligibleMeetingId });
+      }
+      return true;
+    }
+    return !!task?.endedAt && at < task.endedAt + 12000;
   }
 
   private socialTick(connection: RuleConnection, observation: Observation): boolean {
@@ -87,6 +122,7 @@ export class SharedPilotRuntime {
     if (this.failure) return;
     for (const connection of this.connections) {
       const observation = this.store.observe(connection.token);
+      if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
       const destination = this.choose(connection, observation);
@@ -101,7 +137,9 @@ export class SharedPilotRuntime {
     this.timer = setInterval(() => {
       try {
         this.tick();
-        if (this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS) && !meetingActive(this.snapshot().social.meeting)) {
+        if (this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS)) {
+          const { social, survey } = this.snapshot();
+          if (meetingActive(social.meeting) || surveyActive(survey.task)) return;
           clearInterval(this.timer); this.timer = undefined;
         }
       } catch { this.failure = true; clearInterval(this.timer); this.timer = undefined; }
@@ -110,10 +148,10 @@ export class SharedPilotRuntime {
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events, social } = this.store.observe(this.connections[0]!.token);
-    return { mode, provenance, serverTime, revision, residents, events, social,
+    const { mode, provenance, serverTime, revision, residents, events, social, survey } = this.store.observe(this.connections[0]!.token);
+    return { mode, provenance, serverTime, revision, residents, events, social, survey,
       engines: this.connections.map(({ residentId }) => ({ residentId, driver: 'RULES' as const })),
-      running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting)),
+      running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting) || surveyActive(survey.task)),
     };
   }
 

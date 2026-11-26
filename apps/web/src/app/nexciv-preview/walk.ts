@@ -993,20 +993,27 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const previous = move?.points.at(-2);
         observedPosition.set(x, y, z);
         const meeting = projection?.social?.meeting;
+        const task = projection?.survey?.task;
+        const surveying = task?.status === 'surveying' && projection?.survey.arrived.includes(id);
+        const inspecting = surveying && task?.inspections[id].startedAt !== undefined && !task.inspections[id].finding;
         const peer = meeting?.status === 'talking' || meeting?.status === 'completed' ? projection?.residents.find(({ residentId, position, movement }) => residentId !== id && movement?.status !== 'walking' && Math.hypot(position[0]-x, position[2]-z) < 3) : undefined;
-        if (peer) observedFacing.set(...peer.position);
+        if (surveying) observedFacing.set(x + (id === '01' ? 0.3 : -0.4), y, z + 1.6);
+        else if (peer) observedFacing.set(...peer.position);
         else observedFacing.set(previous ? 2 * x - previous[0] : x, y, previous ? 2 * z - previous[2] : z - 1);
         const line = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
-        patrol.observe(poseDt, observedPosition, observedFacing, false, line?.residentId === id ? (line.line === 'greet' ? 'wave' : 'nod') : undefined);
+        patrol.observe(poseDt, observedPosition, observedFacing, false, inspecting ? 'nod' : line?.residentId === id ? (line.line === 'greet' ? 'wave' : 'nod') : undefined);
       }
     }
     if (speech && speechCanvas && speechTexture) {
       const meeting = projection?.social?.meeting;
-      const line = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
+      const dialogue = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
+      const task = projection?.survey?.task;
+      const observation = task?.status === 'surveying' ? projection?.survey.events.filter((event) => event.taskId === task.id && (event.kind === 'SURVEY_INSPECTING' || event.kind === 'SURVEY_RECORDED') && event.residentId).at(-1) : undefined;
+      const line = dialogue ? { ...dialogue, key: `${meeting!.id}:${dialogue.line}` } : observation?.residentId ? { residentId: observation.residentId, text: observation.text, key: observation.id } : undefined;
       const speaker = line && selectableActor(line.residentId)?.patrol.root;
       speech.visible = Boolean(line && speaker?.visible && mode === 'follow');
       if (line && speaker && speech.visible) {
-        const key = `${meeting!.id}:${line.line}`;
+        const key = line.key;
         if (key !== speechKey) {
           speechKey = key;
           const ctx = speechCanvas.getContext('2d');
@@ -1280,18 +1287,19 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         aim.z = THREE.MathUtils.lerp(aim.z, guest.z, greetingFraming * 0.5);
       }
       const sharedPhase = sharedSnapshot?.social?.meeting?.status;
-      const sharedPeer = sharedMode && (sharedPhase === 'talking' || sharedPhase === 'completed') && followed !== WORKS_MANAGER
+      const surveyPair = sharedMode && (sharedSnapshot?.survey?.task?.status === 'surveying' || sharedSnapshot?.survey?.task?.status === 'completed') && sharedSnapshot.survey.arrived.length === 2;
+      const sharedPeer = sharedMode && (surveyPair || sharedPhase === 'talking' || sharedPhase === 'completed') && followed !== WORKS_MANAGER
         ? selectableActor(followed === '01' ? '02' : '01')?.patrol.root : undefined;
-      const sharedPair = Boolean(sharedPeer?.visible && sharedPeer.position.distanceTo(feet) < 3);
+      const sharedPair = Boolean(sharedPeer?.visible && sharedPeer.position.distanceTo(feet) < (surveyPair ? 9 : 3));
       if (sharedPair && sharedPeer) {
         aim.x = (feet.x + sharedPeer.position.x) / 2;
-        aim.y = (feet.y + sharedPeer.position.y) / 2 + 1.25;
+        aim.y = (feet.y + sharedPeer.position.y) / 2 + (surveyPair ? 1.65 : 1.25);
         aim.z = (feet.z + sharedPeer.position.z) / 2;
       }
       const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
       const streetDistance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming)
         + 2.2 * entranceFrame + 1.8 * forumFrame + 3.3 * centerFrame + 3.3 * residenceFrame + 8.8 * hallFrame;
-      const distance = sharedPair ? Math.max(6.2, followDistance) : THREE.MathUtils.lerp(streetDistance, Math.min(followDistance, 4.8), shoreFrame);
+      const distance = sharedPair ? Math.max(surveyPair ? 11.8 : 6.2, followDistance) : THREE.MathUtils.lerp(streetDistance, Math.min(followDistance, 4.8), shoreFrame);
       // Frame the shop from the street side as the Agent passes the entrance tree.
       const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
       const northSide = 1 - THREE.MathUtils.smoothstep(feet.z, -22, 18);
@@ -1305,13 +1313,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const usualYaw = followed === '01' && byPier && !travelling ? observer ? 0.10 : 0.49
         : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
       const entranceYaw = THREE.MathUtils.lerp(usualYaw, 0.20, Math.max(hallFrame, noticeFrame));
-      const yaw = followYaw + (sharedPair ? -2.65 : THREE.MathUtils.lerp(entranceYaw, followed === '02' ? 1.17 : 0.85, shoreFrame));
+      const yaw = followYaw + (sharedPair ? (surveyPair ? -1.85 : -2.65) : THREE.MathUtils.lerp(entranceYaw, followed === '02' ? 1.17 : 0.85, shoreFrame));
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
       const northCrossing = THREE.MathUtils.smoothstep(feet.z, -82, -74)
         * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
-      const pitch = sharedPair ? Math.min(.65, followPitch) : Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
+      const pitch = sharedPair ? (surveyPair ? .53 : Math.min(.65, followPitch)) : Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
         - 0.12 * greetingFraming - 0.07 * residenceFrame - 0.20 * hallFrame - 0.11 * shoreFrame);
       camera.position.set(
         aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
