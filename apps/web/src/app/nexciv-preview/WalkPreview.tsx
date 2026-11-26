@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CafeShift, shiftLabel } from './CafeShift';
+import { CityExplorer } from './CityExplorer';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
 import { COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
 import { THEATRE_CLOCK } from '../../lib/theatre-layout';
 import type { TheatreView } from '../../lib/theatre-trial';
-import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController } from './walk';
+import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController, type WalkSelection } from './walk';
 import type { Place } from './navigation';
 import styles from './preview.module.css';
 
@@ -21,6 +22,7 @@ const DISTRICTS = {
   residential: { button: '住宅区', title: '东北住宅区', places: '花园住宅与邻里庭院' },
 };
 const STARTING: AgentReport = { status: 'loading', progress: 0 };
+const PREVIEW_RESIDENTS: readonly FollowId[] = ['01', '02', '03'];
 const THEATRE_STATUS: Record<TheatreView['phase'], string> = {
   available: '待选时段', negotiating: '协商时段中', cancelled: '本轮未排期',
   scheduled: '候场中', open: '已开放入场', finished: '试演结束',
@@ -63,6 +65,22 @@ function activity(id: AgentId, report: AgentReport) {
 export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?: boolean; requestedActivity?: string }) {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
+  const explorerTrigger = useRef<HTMLButtonElement>(null);
+  const explorerHeading = useRef<HTMLHeadingElement>(null);
+  const explorerFocus = useRef<'trigger' | 'heading' | null>(null);
+  const [explorerOpen, setExplorerOpen] = useState(false);
+  const [selection, setSelection] = useState<WalkSelection | null>(null);
+  const [inspectionCamera, setInspectionCamera] = useState<WalkSelection | null>(null);
+  const inspect = useCallback((item: WalkSelection | null) => {
+    world.current?.select(item);
+    setSelection(item);
+    if (item) setExplorerOpen(true);
+  }, []);
+  const closeExplorer = useCallback(() => {
+    inspect(null);
+    explorerFocus.current = 'trigger';
+    setExplorerOpen(false);
+  }, [inspect]);
   const latest = useRef<CafeSnapshot | null>(null);
   const latestCity = useRef<CityObservation | null>(null);
   const seenCityJob = useRef<string | undefined>(undefined);
@@ -111,14 +129,14 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
       ? data?.run.events.at(-1)?.text ?? '' : '');
   }, []);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
-  const [view, setView] = useState<View>('follow');
+  const [view, setView] = useState<View>(cafeMode ? 'follow' : 'overview');
   const [overview, setOverview] = useState<DistrictStatus>('idle');
   const [districts, setDistricts] = useState<Record<District, DistrictStatus>>({
     east: 'idle', west: 'idle', shore: 'idle', research: 'idle', residential: 'idle',
   });
   const [selected, setSelected] = useState<AgentId>('01');
   const [playing, setPlaying] = useState(true);
-  const [reports, setReports] = useState<Record<AgentId, AgentReport>>({ '01': STARTING, '03': STARTING });
+  const [reports, setReports] = useState<Record<FollowId, AgentReport>>({ '01': STARTING, '02': STARTING, '03': STARTING });
   const [fps, setFps] = useState(0);
   const [readyTime, setReadyTime] = useState(0);
 
@@ -126,7 +144,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     const host = viewport.current;
     if (!host) return;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const initialView = reduceMotion && !cafeMode ? 'overview' : 'follow';
+    const initialView = cafeMode ? 'follow' : 'overview';
     setView(initialView);
     setPlaying(!reduceMotion);
     try {
@@ -137,6 +155,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         district: (side, status) => setDistricts((previous) => ({ ...previous, [side]: status })),
         overview: setOverview,
         fps: setFps,
+        onSelect: cafeMode ? undefined : inspect,
       }, cafeMode);
       world.current = controller;
       if (cafeMode) {
@@ -148,7 +167,23 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     } catch {
       setState('fallback');
     }
-  }, [cafeMode]);
+  }, [cafeMode, inspect]);
+
+  useEffect(() => {
+    const target = explorerFocus.current;
+    explorerFocus.current = null;
+    if (target === 'trigger') explorerTrigger.current?.focus({ preventScroll: true });
+    if (target === 'heading') explorerHeading.current?.focus({ preventScroll: true });
+  }, [explorerOpen, selection]);
+
+  useEffect(() => {
+    if (!explorerOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) closeExplorer();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [closeExplorer, explorerOpen]);
 
   useEffect(() => {
     if (!cafeMode || !['127.0.0.1', 'localhost'].includes(window.location.hostname)) return;
@@ -188,11 +223,33 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
+    setInspectionCamera(null);
     setView(next);
     setSelected(id);
   }
 
+  function openDirectory() {
+    explorerFocus.current = 'heading';
+    inspect(null);
+    setExplorerOpen(true);
+  }
+
+  function focusSelection(item: WalkSelection) {
+    if (item.kind === 'resident' && item.id !== '02') {
+      select('follow', item.id);
+      return;
+    }
+    world.current?.focus(item);
+    setInspectionCamera(item);
+  }
+
   const sceneReady = state === 'ready';
+  const selectedResident = selection?.kind === 'resident' ? reports[selection.id] : undefined;
+  const availableResidents = PREVIEW_RESIDENTS.filter((id) => id !== '02' || reports[id].status === 'arrived');
+  const focusActive = Boolean(selection && (inspectionCamera
+    ? inspectionCamera.kind === selection.kind && inspectionCamera.id === selection.id
+    : selection.kind === 'resident' && view === 'follow' && selection.id === selected));
+  const cameraLandmark = inspectionCamera?.kind === 'building' ? PLACES[inspectionCamera.id] : undefined;
   const watchingTheatre = cafeMode && view === 'west' && Boolean(theatre?.booking);
   const theatreResident = cafeFollow !== '02' ? theatre?.residents[cafeFollow] : undefined;
   const followingAttendee = Boolean(theatreResident?.walk?.requestId && theatreResident.walk.requestId === cityWalk?.requestId);
@@ -228,9 +285,9 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     <div className={styles.page} lang="zh-CN" data-preview="nexciv-walk">
       <a className={styles.skip} href="#walk-controls">跳到操作</a>
       <header className={styles.header}>
-        <span className={styles.brand}>NEXCIV</span>
+        <Link className={styles.brand} href="/" prefetch={false} aria-label="返回 NEXCIV 首页">NEXCIV</Link>
         <span className={styles.divider} />
-        <h1>{cafeMode ? '咖啡街的一个班次' : '街区观察'}</h1>
+        <h1>{cafeMode ? '咖啡街的一个班次' : '城市试玩'}</h1>
         <Link className={styles.cafeLink} href={cafeMode ? '/nexciv-preview' : '/nexciv-preview/cafe'} prefetch={false}>{cafeMode ? '返回街区' : '观察咖啡街'}</Link>
         <span className={styles.status} role="status">
           {state === 'ready' ? '实时 3D · DEMO' : state === 'loading' ? '正在载入街区' : '静态预览 · DEMO'}
@@ -240,9 +297,11 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{watchingTheatre ? '社区剧场 · DEMO' : cafeMode ? `AGENT ${cafeFollow} · AI SIMULATED · DEMO` : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
+          <small>{watchingTheatre ? '社区剧场 · DEMO' : cafeMode ? `AGENT ${cafeFollow} · AI SIMULATED · DEMO`
+            : inspectionCamera ? (cameraLandmark ? '地标镜头' : '居民镜头') : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
           <strong role="status">{cafeMode ? cafeTitle
-            : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
+            : inspectionCamera ? cameraLandmark ?? '跟随 02 号居民'
+              : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
           {sceneCaption && <p className={styles.greeting}>
             {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
           </p>}
@@ -253,7 +312,11 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
           </p>}
           {!cityWalk && !sceneCaption && greeting && <p className={styles.greeting}>{greeting}</p>}
         </div>
-        {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。下方可查看路线的两处实景。'}</p>}
+        {!cafeMode && <CityExplorer selection={selection} open={explorerOpen} sceneState={state}
+          focusActive={focusActive} residentReport={selectedResident} residentIds={availableResidents}
+          trigger={explorerTrigger} heading={explorerHeading} onOpen={openDirectory} onClose={closeExplorer}
+          onSelect={(item) => { explorerFocus.current = 'heading'; inspect(item); }} onFocus={focusSelection} />}
+        {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。可打开「地点与居民」查看详情。'}</p>}
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         {cafeMode ? <>
@@ -300,14 +363,14 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         </> : <>
         <div className={styles.controls}>
           <div className={styles.switcher} role="group" aria-label="视角">
-            <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>全城</button>
+            <button disabled={!sceneReady} aria-pressed={!inspectionCamera && view === 'overview'} onClick={() => select('overview')}>全城</button>
             {(Object.keys(DISTRICTS) as District[]).map((side) => (
-              <button key={side} disabled={!sceneReady} aria-pressed={view === side} onClick={() => select(side)}>
+              <button key={side} disabled={!sceneReady} aria-pressed={!inspectionCamera && view === side} onClick={() => select(side)}>
                 {DISTRICTS[side].button}
               </button>
             ))}
-            <button disabled={!sceneReady || reports['01'].status === 'unavailable'} aria-label="跟随 Agent 01" aria-pressed={view === 'follow' && selected === '01'} onClick={() => select('follow', '01')}>跟随 01</button>
-            <button disabled={!sceneReady || reports['03'].status === 'unavailable'} aria-label="跟随 Agent 03" aria-pressed={view === 'follow' && selected === '03'} onClick={() => select('follow', '03')}>跟随 03</button>
+            <button disabled={!sceneReady || reports['01'].status === 'unavailable'} aria-label="跟随 Agent 01" aria-pressed={!inspectionCamera && view === 'follow' && selected === '01'} onClick={() => select('follow', '01')}>跟随 01</button>
+            <button disabled={!sceneReady || reports['03'].status === 'unavailable'} aria-label="跟随 Agent 03" aria-pressed={!inspectionCamera && view === 'follow' && selected === '03'} onClick={() => select('follow', '03')}>跟随 03</button>
           </div>
           <div className={styles.switcher} aria-label="缩放">
             <button disabled={!sceneReady} onClick={() => world.current?.zoom(1.25)} aria-label="缩小">−</button>
@@ -319,7 +382,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
             setPlaying(!playing);
           }}>{playing ? '暂停动画' : '播放动画'}</button>
           <span className={styles.hint}>
-            <span className={styles.desktopHint}>拖动旋转 · 滚轮缩放</span>
+            <span className={styles.desktopHint}>点选地标或居民 · 拖动旋转 · 滚轮缩放</span>
             <span className={styles.touchHint}>拖动旋转 · 双指缩放</span>
           </span>
         </div>

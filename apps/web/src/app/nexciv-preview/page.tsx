@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import { WalkPreview } from './WalkPreview';
 
 export const metadata: Metadata = {
-  title: 'NEXCIV · 街区观察',
-  description: '观察 NEXCIV 的 Agent 从 Nexus 中央广场前往 Corner Market 和议会大厅。',
+  title: 'NEXCIV · 城市试玩',
+  description: '进入 NEXCIV，查看城市地标与居民，跟随 Agent 在街区中活动。',
   icons: { icon: '/nexciv-walk/icon.png' },
 };
 

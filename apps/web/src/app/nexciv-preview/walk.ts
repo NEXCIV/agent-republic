@@ -21,6 +21,8 @@ export type View = 'overview' | 'follow' | District;
 export type DistrictStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 export type AgentId = ResidentId;
 export type FollowId = AgentId | '02';
+export type WalkLandmarkId = 'registry' | 'works' | 'center' | 'governance' | 'market';
+export type WalkSelection = { kind: 'building'; id: WalkLandmarkId } | { kind: 'resident'; id: FollowId };
 type Activity = 'outbound' | 'arrived' | 'greeting';
 export type AgentStatus = Activity | 'loading' | 'unavailable';
 export type AgentReport = { status: AgentStatus; progress: number; from?: Place; destination?: Place };
@@ -38,16 +40,19 @@ type ActiveAgent = {
 type Callbacks = {
   ready: (elapsedMs: number) => void;
   fallback: () => void;
-  agent: (id: AgentId, report: AgentReport) => void;
+  agent: (id: FollowId, report: AgentReport) => void;
   district: (side: District, status: DistrictStatus) => void;
   overview: (status: DistrictStatus) => void;
   fps: (value: number) => void;
+  onSelect?: (selection: WalkSelection | null) => void;
 };
 
 export type WalkController = {
   syncCafe: (snapshot: CafeSnapshot | null) => void;
   syncCity: (observation: CityObservation | null) => void;
   view: (mode: View, id?: FollowId) => void;
+  select: (selection: WalkSelection | null) => void;
+  focus: (selection: WalkSelection) => void;
   zoom: (factor: number) => void;
   play: (enabled: boolean) => void;
   reset: () => void;
@@ -92,6 +97,49 @@ const DETAIL_FILES = {
 };
 type Detail = keyof typeof DETAIL_FILES;
 const LANDMARK_DETAILS = ['registry', 'works', 'center', 'hall'] as const;
+const LANDMARK_FRAMING: Record<WalkLandmarkId, { center: CityPoint; yaw: number; distance: number }> = {
+  registry: { center: [80, 4, -23.5], yaw: -0.45, distance: 27 },
+  works: { center: [95, 6, 82], yaw: -2.76, distance: 33 },
+  center: { center: [-98.6, 6, -64.6], yaw: 1.05, distance: 31 },
+  governance: { center: [0, 7, -95], yaw: 0.20, distance: 36 },
+  market: { center: [18.5, 6, 51], yaw: -0.35, distance: 30 },
+};
+const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
+  ['HERO_01_Governance_Hall', 'governance'],
+  ['HERO_02_Agent_Center', 'center'],
+  ['HERO_03_Citizen_Registration', 'registry'],
+  ['HERO_04_Public_Construction', 'works'],
+  ['Market', 'market'],
+];
+const SELECTABLE_RESIDENTS = ['01', '02', '03'] as const;
+
+function isRendered(object: THREE.Object3D) {
+  for (let node: THREE.Object3D | null = object; node; node = node.parent) {
+    if (!node.visible) return false;
+  }
+  return true;
+}
+
+function createResidentMarkerMaterial() {
+  const icon = document.createElement('canvas');
+  icon.width = icon.height = 48;
+  const context = icon.getContext('2d');
+  if (!context) return undefined;
+  context.beginPath();
+  context.arc(24, 24, 19, 0, Math.PI * 2);
+  context.fillStyle = '#141619';
+  context.fill();
+  context.lineWidth = 5;
+  context.strokeStyle = '#f0b90b';
+  context.stroke();
+  context.beginPath();
+  context.arc(24, 24, 5, 0, Math.PI * 2);
+  context.fillStyle = '#f0b90b';
+  context.fill();
+  const map = new THREE.CanvasTexture(icon);
+  map.colorSpace = THREE.SRGBColorSpace;
+  return new THREE.SpriteMaterial({ map, sizeAttenuation: false, depthWrite: false, fog: false, toneMapped: false });
+}
 
 function disposeModel(asset: THREE.Object3D) {
   const materials = new Set<THREE.Material>();
@@ -339,6 +387,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const scene = new THREE.Scene();
   const street = new THREE.Group();
   scene.add(street);
+  const actorLayer = callbacks.onSelect ? new THREE.Group() : street;
+  if (actorLayer !== street) scene.add(actorLayer);
   const citySky = new THREE.Color('#837574');
   const horizon = new THREE.Color('#aa8e7b');
   const streetSky = createStreetSky(horizon);
@@ -440,9 +490,42 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const streetFrustum = new THREE.Frustum();
   const worksBounds = new THREE.Box3();
   const viewProjection = new THREE.Matrix4();
+  const landmarkModels = new Map<WalkLandmarkId, { root: THREE.Object3D; bounds: THREE.Box3; meshes: THREE.Mesh[] }[]>();
+  const markerMaterial = callbacks.onSelect ? createResidentMarkerMaterial() : undefined;
+  const residentMarkers = new Map<FollowId, THREE.Sprite>();
+  if (markerMaterial) {
+    for (const id of SELECTABLE_RESIDENTS) {
+      const marker = new THREE.Sprite(markerMaterial);
+      marker.visible = false;
+      scene.add(marker);
+      residentMarkers.set(id, marker);
+    }
+  }
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const blockingGeometries: THREE.Mesh[] = [];
+  const selectionBounds = new THREE.Box3();
+  const selectionCenter = new THREE.Vector3();
+  const selectionSize = new THREE.Vector3();
+  const landmarkTarget = new THREE.Vector3();
+  const selectionMaterial = new THREE.LineBasicMaterial({ color: '#f0b90b', fog: false, toneMapped: false });
+  const buildingOutline = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 0, -0.5),
+    new THREE.Vector3(0.5, 0, 0.5), new THREE.Vector3(-0.5, 0, 0.5),
+  ]), selectionMaterial);
+  const residentOutline = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(
+    Array.from({ length: 32 }, (_, index) => {
+      const angle = index / 32 * Math.PI * 2;
+      return new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+    }),
+  ), selectionMaterial);
+  buildingOutline.visible = residentOutline.visible = false;
+  scene.add(buildingOutline, residentOutline);
+  let selection: WalkSelection | null = null;
+  let framedLandmark: WalkLandmarkId | undefined;
   const retailPlacements: { mid: THREE.Object3D; bounds: THREE.Sphere; close?: THREE.Object3D }[] = [];
   const tween = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const pointers = new Map<number, { x: number; y: number }>();
+  const pointers = new Map<number, { x: number; y: number; startX: number; startY: number; dragging: boolean }>();
   const aborter = new AbortController();
   let ended = false;
   let contextLost = false;
@@ -519,14 +602,69 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     renderer.setSize(width, height, false);
   }
 
+  function residentActor(id: FollowId) {
+    if (id === '02') return cafeMode ? siteHost : marketGuest;
+    if (id === '03' && cafeMode) return pierRegular;
+    return agents.get(id);
+  }
+
   function followedPatrol() {
-    if (followed === '02') return siteHost?.patrol;
-    if (followed === '03' && cafeMode) return pierRegular?.patrol;
-    return agents.get(followed)?.patrol;
+    return residentActor(followed)?.patrol;
+  }
+
+  function registerLandmark(id: WalkLandmarkId, root: THREE.Object3D) {
+    if (!callbacks.onSelect) return;
+    const meshes: THREE.Mesh[] = [];
+    root.traverse((node) => {
+      if (node instanceof THREE.Mesh) meshes.push(node);
+    });
+    if (!meshes.length) return;
+    root.updateWorldMatrix(true, true);
+    const bounds = new THREE.Box3().setFromObject(root);
+    const models = landmarkModels.get(id) ?? [];
+    models.push({ root, bounds, meshes });
+    landmarkModels.set(id, models);
+  }
+
+  function updateSelectionOutline() {
+    buildingOutline.visible = residentOutline.visible = false;
+    if (selection?.kind === 'building') {
+      selectionBounds.makeEmpty();
+      for (const model of landmarkModels.get(selection.id) ?? []) {
+        if (isRendered(model.root)) selectionBounds.union(model.bounds);
+      }
+      if (selectionBounds.isEmpty()) return;
+      selectionBounds.getCenter(selectionCenter);
+      selectionBounds.getSize(selectionSize);
+      buildingOutline.position.set(selectionCenter.x, Math.max(0.26, selectionBounds.min.y + 0.12), selectionCenter.z);
+      buildingOutline.scale.set(selectionSize.x + 1, 1, selectionSize.z + 1);
+      buildingOutline.visible = true;
+    } else if (selection?.kind === 'resident') {
+      const root = residentActor(selection.id)?.patrol.root;
+      if (!root || !isRendered(root)) return;
+      const radius = THREE.MathUtils.clamp(camera.position.distanceTo(root.position) * 0.012, 0.57, 4.8);
+      residentOutline.position.copy(root.position);
+      residentOutline.position.y += 0.045;
+      residentOutline.scale.set(radius, 1, radius);
+      residentOutline.visible = true;
+    }
+  }
+
+  function updateResidentMarkers() {
+    const markerScale = 2 * 16 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
+    for (const [id, marker] of residentMarkers) {
+      const feet = residentActor(id)?.patrol.root.position;
+      marker.visible = Boolean(feet && camera.position.distanceTo(feet) > 62);
+      if (!marker.visible || !feet) continue;
+      marker.position.copy(feet);
+      marker.position.y += 2.15;
+      marker.scale.setScalar(markerScale);
+    }
   }
 
   function zoom(factor: number) {
-    if (mode === 'follow' && followedPatrol()) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
+    if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 16, 94);
+    else if (mode === 'follow' && followedPatrol()) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
     else if (mode === 'overview' && citywide) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 155, 465);
     else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north || sideDistrictLoaded() ? 176 : 139);
   }
@@ -542,6 +680,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function sideDistrictLoaded() { return Boolean(districts.east.asset || districts.west.asset || districts.research.asset || districts.residential.asset); }
 
   function resetOrbit() {
+    if (framedLandmark) {
+      const { yaw, distance } = LANDMARK_FRAMING[framedLandmark];
+      [orbitYaw, orbitPitch, desiredDistance] = [yaw, 0.53, distance];
+      return;
+    }
     if (mode !== 'overview' && mode !== 'follow') {
       if (mode === 'west' && cafeMode && cityObservation?.theatre?.booking) {
         [orbitYaw, orbitPitch, desiredDistance] = [Math.PI + 0.12, 0.64, 27];
@@ -556,7 +699,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function setView(next: View, id = followed) {
-    const viewChanged = mode !== next;
+    const viewChanged = mode !== next || Boolean(framedLandmark);
+    framedLandmark = undefined;
     if (id !== followed) {
       followed = id;
       resetFollowCamera();
@@ -567,6 +711,25 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (next === 'follow' && id === '03' && !cafeMode) loadNorth(true);
     if (next === 'overview') loadCitywide();
     if (next !== 'overview' && next !== 'follow') loadDistrict(next, true);
+  }
+
+  function focusSelection(target: WalkSelection) {
+    if (target.kind === 'resident') {
+      if (residentActor(target.id)) setView('follow', target.id);
+      return;
+    }
+    if (mode === 'follow' && followedPatrol()) {
+      viewFocus.copy(aim);
+      orbitDistance = camera.position.distanceTo(aim);
+    }
+    mode = 'overview';
+    framedLandmark = target.id;
+    landmarkTarget.set(...LANDMARK_FRAMING[target.id].center);
+    resetOrbit();
+    if (target.id === 'works' || target.id === 'registry') loadDistrict('east', true);
+    else if (target.id === 'governance') loadNorth(true);
+    else if (target.id === 'center') loadDistrict('research', true);
+    else loadDetail('market');
   }
 
   function attachAgent(id: AgentId, asset: GLTF, junction: AgentStart) {
@@ -580,7 +743,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (!choice) throw new Error('No reachable observation destination');
       const [x, z] = DESTINATION_FACING[choice.destination];
       const patrol = createAgentPatrol(asset, choice.path.points, [x, z]);
-      street.add(patrol.root);
+      actorLayer.add(patrol.root);
       agents.set(id, { asset, patrol, from, destination: choice.destination, visits, lookAt: new THREE.Vector3(x, 0, z) });
     } catch {
       disposeModel(asset.scene);
@@ -624,6 +787,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           || (kind === 'hall' && object.name.startsWith('HERO_01_Governance_Hall'))) members.push(object);
       });
       proxies.set(kind, members);
+      if (kind !== 'street') {
+        for (const member of members) registerLandmark(kind === 'hall' ? 'governance' : kind, member);
+      }
       if (kind === 'works') {
         worksBounds.makeEmpty();
         for (const member of members) worksBounds.expandByObject(member);
@@ -881,7 +1047,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const patrol = followedPatrol();
     const following = mode === 'follow' && patrol;
     const district = mode !== 'overview' && mode !== 'follow' ? districts[mode] : undefined;
-    const wide = Boolean(citywide && (mode === 'overview'
+    const framedLandmarkLoaded = framedLandmark === 'works' || framedLandmark === 'registry' ? districts.east.asset
+      : framedLandmark === 'center' ? districts.research.asset : framedLandmark === 'governance' ? north : model;
+    const wide = Boolean(citywide && (mode === 'overview' && (!framedLandmark || !framedLandmarkLoaded)
       || (citywide.visible && (mode === 'follow' && !patrol
         || district && (district.status === 'loading' || orbitDistance > 192)))));
     if (citywide && citywide.visible !== wide) {
@@ -982,7 +1150,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       fog.near = wide ? 395 : seeingLake ? 177 : north || sideDistrictLoaded() ? 165 : 110;
       fog.far = wide ? 770 : seeingLake ? 510 : north || sideDistrictLoaded() ? 275 : 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
-      const target = wide && !district ? citywideFocus
+      const target = framedLandmark ? landmarkTarget : wide && !district ? citywideFocus
         : mode === 'west' && cafeMode && theatre?.booking && districts.west.asset ? theatreFocus
           : mode !== 'overview' && mode !== 'follow' && (districts[mode].asset || wide) ? districtFocus[mode] : focus;
       if (tween) viewFocus.lerp(target, 1 - Math.exp(-8 * dt));
@@ -1014,6 +1182,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         for (const proxy of proxies.get(kind) ?? []) proxy.visible = !show;
         renderer.shadowMap.needsUpdate = true;
       }
+    }
+    if (callbacks.onSelect) {
+      updateResidentMarkers();
+      updateSelectionOutline();
     }
     renderer.render(scene, camera);
     const showStreetDetails = mode === 'east' || mode === 'west' || mode === 'research'
@@ -1052,13 +1224,19 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function onPointerDown(event: PointerEvent) {
     if (event.pointerType === 'mouse' && event.button !== 0) return;
     canvas.setPointerCapture(event.pointerId);
-    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const { clientX: x, clientY: y } = event;
+    pointers.set(event.pointerId, { x, y, startX: x, startY: y, dragging: false });
+    if (pointers.size > 1) for (const pointer of pointers.values()) pointer.dragging = true;
   }
 
   function onPointerMove(event: PointerEvent) {
     const previous = pointers.get(event.pointerId);
     if (!previous) return;
-    const next = { x: event.clientX, y: event.clientY };
+    const next = { ...previous, x: event.clientX, y: event.clientY };
+    if (!previous.dragging && callbacks.onSelect) {
+      if (Math.hypot(next.x - previous.startX, next.y - previous.startY) < 5) return;
+      next.dragging = true;
+    }
     pointers.set(event.pointerId, next);
     if (pointers.size > 1) {
       const other = [...pointers.entries()].find(([id]) => id !== event.pointerId)?.[1];
@@ -1080,12 +1258,73 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
   }
 
-  function onPointerEnd(event: PointerEvent) {
+  function pickSelection(clientX: number, clientY: number) {
+    const bounds = canvas.getBoundingClientRect();
+    const x = (clientX - bounds.left) / bounds.width;
+    const y = (clientY - bounds.top) / bounds.height;
+    if (!bounds.width || !bounds.height || x < 0 || x > 1 || y < 0 || y > 1) return;
+    pointer.set(x * 2 - 1, 1 - y * 2);
+    raycaster.setFromCamera(pointer, camera);
+    raycaster.near = camera.near;
+    raycaster.far = camera.far;
+    let target: WalkSelection | null = null;
+    let nearest = Infinity;
+
+    for (const [id, options] of landmarkModels) {
+      for (const option of options) {
+        if (!isRendered(option.root) || !raycaster.ray.intersectsBox(option.bounds)) continue;
+        const hit = raycaster.intersectObjects(option.meshes.filter(isRendered), false)[0];
+        if (hit && hit.distance < nearest) {
+          nearest = hit.distance;
+          target = { kind: 'building', id };
+        }
+      }
+    }
+    for (const id of SELECTABLE_RESIDENTS) {
+      const actor = residentActor(id);
+      if (!actor || !isRendered(actor.patrol.root)) continue;
+      const marker = residentMarkers.get(id);
+      const hits = marker?.visible ? raycaster.intersectObject(marker, false) : [];
+      actor.asset.scene.traverseVisible((node) => {
+        if (node instanceof THREE.Mesh) node.raycast(raycaster, hits);
+      });
+      for (const hit of hits) {
+        if (hit.distance < nearest) {
+          nearest = hit.distance;
+          target = { kind: 'resident', id };
+        }
+      }
+    }
+
+    if (target) {
+      // The selectable mesh can sit behind an unselectable asset such as a tree or a roof.
+      const city = citywide?.visible ? citywide : street;
+      blockingGeometries.length = 0;
+      city.traverseVisible((node) => {
+        if (node instanceof THREE.Mesh) blockingGeometries.push(node);
+      });
+      raycaster.far = nearest - 0.025;
+      if (raycaster.intersectObjects(blockingGeometries, false).length) target = null;
+      blockingGeometries.length = 0;
+    }
+    selection = target;
+    callbacks.onSelect?.(target);
+  }
+
+  function onPointerUp(event: PointerEvent) {
+    const press = pointers.get(event.pointerId);
+    pointers.delete(event.pointerId);
+    if (!callbacks.onSelect || !press || press.dragging || !model || contextLost) return;
+    if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) < 5) pickSelection(event.clientX, event.clientY);
+  }
+
+  function cancelPointer(event: PointerEvent) {
     pointers.delete(event.pointerId);
   }
 
   function onWheel(event: WheelEvent) {
     event.preventDefault();
+    for (const pointer of pointers.values()) pointer.dragging = true;
     zoom(Math.exp(THREE.MathUtils.clamp(event.deltaY * 0.0012, -0.24, 0.24)));
   }
 
@@ -1101,7 +1340,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   sizeObserver.observe(host);
   canvas.addEventListener('pointerdown', onPointerDown, { signal });
   canvas.addEventListener('pointermove', onPointerMove, { signal });
-  canvas.addEventListener('lostpointercapture', onPointerEnd, { signal });
+  canvas.addEventListener('pointerup', onPointerUp, { signal });
+  canvas.addEventListener('pointercancel', cancelPointer, { signal });
+  canvas.addEventListener('lostpointercapture', cancelPointer, { signal });
   canvas.addEventListener('wheel', onWheel, { passive: false, signal });
   canvas.addEventListener('webglcontextlost', onContextLost, { signal });
   resize();
@@ -1127,6 +1368,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       prepareEnvironment(asset);
       softenRetailWindows(asset);
       addLakeRipples(asset, lakeTime);
+      asset.traverse((node) => {
+        const match = LANDMARK_NAMES.find(([prefix]) => node.name.startsWith(prefix));
+        if (match) registerLandmark(match[1], node);
+      });
       scene.add(asset);
       if (mode === 'overview') resetOrbit();
       overviewStatus = 'ready';
@@ -1165,6 +1410,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       // A failed request leaves the original silhouette visible.
       details.set(kind, asset);
       street.add(asset);
+      if (kind !== 'street') registerLandmark(kind === 'hall' ? 'governance' : kind, asset);
       if (kind !== 'street' && kind !== 'market') {
         asset.visible = false;
         return;
@@ -1311,7 +1557,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       try {
         const patrol = createAgentPatrol(asset, layout.points, [marketEntrance.x, marketEntrance.z]);
         marketGuest = { asset, patrol };
-        street.add(patrol.root);
+        actorLayer.add(patrol.root);
+        if (callbacks.onSelect) callbacks.agent('02', { status: 'arrived', progress: 100, destination: 'market' });
       } catch {
         disposeModel(asset.scene);
       }
@@ -1418,6 +1665,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       updateCouncilReceipt();
     },
     view: setView,
+    select(target) { selection = target; },
+    focus: focusSelection,
     zoom,
     play(enabled) { playing = enabled; },
     reset() {
@@ -1457,6 +1706,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       if (retailSource) disposeModel(retailSource);
       for (const detail of details.values()) disposeModel(detail);
+      buildingOutline.geometry.dispose();
+      residentOutline.geometry.dispose();
+      selectionMaterial.dispose();
+      markerMaterial?.map?.dispose();
+      markerMaterial?.dispose();
       sun.shadow.dispose();
       sunset.shadow.dispose();
       streetSky.dispose();

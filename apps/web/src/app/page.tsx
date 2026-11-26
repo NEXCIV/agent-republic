@@ -25,7 +25,10 @@ export default async function HomePage() {
             the moving city are a projection, never the source of truth.
           </p>
           <div className="hero-actions">
-            <Link className="button button--primary" href="/world">
+            <Link className="button button--primary" href="/nexciv-preview" lang="zh-CN" prefetch={false}>
+              进入城市试玩
+            </Link>
+            <Link className="button" href="/world">
               Enter District 01
             </Link>
             <Link className="button" href="/projects">
