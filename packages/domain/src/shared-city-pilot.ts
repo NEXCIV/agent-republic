@@ -24,3 +24,12 @@ export const sharedPilotMoveRequestSchema = z.object({
 }).strict();
 
 export type SharedPilotMoveRequest = z.infer<typeof sharedPilotMoveRequestSchema>;
+
+const actionId = z.string().regex(uuidV4).transform((id) => id.toLowerCase());
+export const SHARED_PILOT_LINES = ['greet', 'reply', 'suggest', 'farewell'] as const;
+export const sharedPilotSocialRequestSchema = z.discriminatedUnion('action', [
+  z.object({ requestId: actionId, action: z.literal('invite'), target: z.enum(SHARED_PILOT_RESIDENT_IDS), venue: z.literal('cafe') }).strict(),
+  z.object({ requestId: actionId, action: z.literal('respond'), meetingId: actionId, decision: z.enum(['accept', 'decline']) }).strict(),
+  z.object({ requestId: actionId, action: z.literal('say'), meetingId: actionId, line: z.enum(SHARED_PILOT_LINES) }).strict(),
+]);
+export type SharedPilotSocialRequest = z.infer<typeof sharedPilotSocialRequestSchema>;

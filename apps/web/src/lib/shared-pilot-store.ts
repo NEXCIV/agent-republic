@@ -3,26 +3,28 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
-  SHARED_PILOT_PLACE_IDS, SHARED_PILOT_PROVENANCE, SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema,
+  SHARED_PILOT_PLACE_IDS, SHARED_PILOT_PROVENANCE, SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema,
   type SharedPilotPlaceId, type SharedPilotResidentId,
 } from '@agent-republic/domain';
 import type { CityPoint } from './cafe-geometry';
 import { positionOnWalk, type CityRoute, type CityWalk } from './city-movement';
 import { CITY_MAP, planCityWalk } from './city-navigation';
+import { advanceSocial, emptySocialState, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
 const APPLICATION_ID = 0x4e585350; // NXSP
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const CREDENTIAL_LIFETIME = 3600000;
 const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
 const MAX_MOVES_PER_RESIDENT = 300;
 const PUBLIC_EVENT_LIMIT = 40;
 const TOKEN_PATTERN = /^nxc_shared_[A-Za-z0-9_-]{43}$/;
-const EXPECTED_TABLES = [
+const V1_TABLES = [
   'shared_pilot_credentials', 'shared_pilot_events', 'shared_pilot_meta', 'shared_pilot_moves', 'shared_pilot_residents',
 ];
+const EXPECTED_TABLES = [...V1_TABLES, 'shared_pilot_social'];
 const INITIAL_PLACES: Record<SharedPilotResidentId, SharedPilotPlaceId> = { '01': 'plaza', '02': 'cafe' };
 
 export type SharedPilotErrorCode = 'INVALID_CONFIG' | 'INCOMPATIBLE_DB' | 'INVALID_CLOCK' | 'INVALID_REQUEST'
@@ -168,16 +170,19 @@ export class SharedPilotStore {
     this.db = new sqlite.DatabaseSync(file);
     try {
       // Reject unrelated DBs before setting WAL or running any schema changes.
+      let migrateV1 = false;
       if (existing) {
         const application = Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
         const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(({ name }) => name);
-        if (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES)) {
+        migrateV1 = application === APPLICATION_ID && version === 1 && JSON.stringify(tables) === JSON.stringify(V1_TABLES);
+        if (!migrateV1 && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
           throw new SharedPilotError('INCOMPATIBLE_DB', 'Refusing to open a non-pilot database.');
         }
       }
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL;');
       if (initialAt !== null) this.initialize(initialAt);
+      else if (migrateV1) this.migrateSocial();
     } catch (error) {
       this.db.close();
       throw error;
@@ -212,8 +217,10 @@ export class SharedPilotStore {
           kind TEXT NOT NULL CHECK(kind IN ('MOVE_STARTED','MOVE_ARRIVED')), happened_at INTEGER NOT NULL,
           UNIQUE(movement_seq,kind)
         );
+        CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);
       `);
       this.db.prepare('INSERT INTO shared_pilot_meta (id,logical_now) VALUES (1,?)').run(at);
+      this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
       const insert = this.db.prepare('INSERT INTO shared_pilot_residents (id,place) VALUES (?,?)');
       for (const id of SHARED_PILOT_RESIDENT_IDS) insert.run(id, INITIAL_PLACES[id]);
       this.db.exec('COMMIT');
@@ -221,6 +228,37 @@ export class SharedPilotStore {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  private migrateSocial() {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.exec('CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
+      this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
+      this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+
+  private readSocial(): SocialState {
+    return JSON.parse(String(this.db.prepare('SELECT state FROM shared_pilot_social WHERE id=1').get()?.state)) as SocialState;
+  }
+
+  private saveSocial(state: SocialState) {
+    this.db.prepare('UPDATE shared_pilot_social SET state=? WHERE id=1').run(JSON.stringify(state));
+  }
+
+  private lastMove(id: SharedPilotResidentId) {
+    return this.db.prepare('SELECT * FROM shared_pilot_moves WHERE resident_id=? ORDER BY seq DESC LIMIT 1').get(id) as unknown as MovementRow | undefined;
+  }
+
+  private residentPosition(id: SharedPilotResidentId, place: SharedPilotPlaceId, at: number): CityPoint {
+    const movement = this.lastMove(id);
+    return movement ? positionOnWalk(toWalk(movement), at) : point(place);
+  }
+
+  private socialResidents(at: number): SocialResident[] {
+    const rows = this.db.prepare('SELECT id,place FROM shared_pilot_residents ORDER BY id').all() as unknown as ResidentRow[];
+    return rows.map(({ id, place }) => ({ residentId: id, position: this.residentPosition(id, place, at), moving: this.lastMove(id)?.completed_at === null }));
   }
 
   private transaction<T>(work: (at: number) => T): T {
@@ -279,6 +317,8 @@ export class SharedPilotStore {
       place.run(movement.destination, movement.resident_id);
       event.run(movement.seq, movement.arrives_at);
     }
+    const social = this.readSocial();
+    if (advanceSocial(social, at, this.socialResidents(at))) this.saveSocial(social);
   }
 
   /** Server operator only. Issues a new secret and immediately invalidates the old one. */
@@ -318,6 +358,8 @@ export class SharedPilotStore {
       if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', 'Only a named pilot place can be requested.');
       const { requestId, destination } = parsed.data;
       this.settle(at);
+      const social = this.readSocial();
+      if (social.requests[actor][requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a social action.');
       const previous = this.findReceipt(actor, requestId);
       if (previous) {
         if (previous.destination !== destination.place) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different movement.');
@@ -329,14 +371,41 @@ export class SharedPilotStore {
       const count = Number(this.db.prepare('SELECT count(*) AS count FROM shared_pilot_moves WHERE resident_id=?').get(actor)?.count);
       if (count >= MAX_MOVES_PER_RESIDENT) throw new SharedPilotError('LIMIT_REACHED', 'This resident has reached the local pilot journal limit.');
       const resident = this.db.prepare('SELECT id,place FROM shared_pilot_residents WHERE id=?').get(actor) as unknown as ResidentRow;
-      const route = planCityWalk(point(resident.place), destination);
+      if (social.meeting?.status === 'talking' || (social.meeting?.status === 'accepted' && destination.place !== 'cafe')) {
+        throw new SharedPilotError('BUSY', 'Resident is attending a café meeting.');
+      }
+      const origin = this.residentPosition(actor, resident.place, at);
+      const anchor = social.meeting?.status === 'accepted' ? meetingPoint(actor) : undefined;
+      const route = planCityWalk(origin, anchor ? { x: anchor[0], z: anchor[2] } : destination);
       if (!route) throw new SharedPilotError('UNREACHABLE', 'No surveyed route to this pilot place.');
+      if (anchor) route.name = '咖啡街会面';
       const arrivesAt = at + Math.ceil(route.metres / SPEED * 1000);
       const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
         VALUES (?,?,?,?,?,?)`).run(actor, requestId, destination.place, JSON.stringify(route), at, arrivesAt);
       this.db.prepare("INSERT INTO shared_pilot_events (movement_seq,kind,happened_at) VALUES (?,'MOVE_STARTED',?)").run(result.lastInsertRowid, at);
       this.settle(at); // A zero-distance route completes immediately, once.
       return toReceipt(this.findReceipt(actor, requestId)!);
+    });
+  }
+
+  socialAction(token: unknown, input: unknown): SocialReceipt {
+    return this.transaction((at) => {
+      const actor = this.authenticate(token, at);
+      const parsed = sharedPilotSocialRequestSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', 'Invalid shared social action.');
+      if (this.findReceipt(actor, parsed.data.requestId)) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a movement.');
+      this.settle(at);
+      const social = this.readSocial();
+      try {
+        const residents = this.socialResidents(at);
+        const receipt = performSocial(social, actor, parsed.data, at, residents);
+        advanceSocial(social, at, residents);
+        this.saveSocial(social);
+        return receipt;
+      } catch (error) {
+        if (error instanceof SocialActionError) throw new SharedPilotError(error.code, error.message);
+        throw error;
+      }
     });
   }
 
@@ -372,9 +441,12 @@ export class SharedPilotStore {
           id: String(event.seq), residentId: event.resident_id, place: event.destination, kind: event.kind, happenedAt: event.happened_at,
           provenance: SHARED_PILOT_PROVENANCE,
         }));
+      const social = this.readSocial();
       return {
         mode: 'DEMO' as const, provenance: SHARED_PILOT_PROVENANCE, viewerResidentId, serverTime: at,
         revision: events.at(-1)?.id ?? '0', residents, events,
+        social: publicSocial(social, this.socialResidents(at)),
+        privateSocial: { memories: social.memories[viewerResidentId], encounters: social.encounters[viewerResidentId] },
       };
     });
   }

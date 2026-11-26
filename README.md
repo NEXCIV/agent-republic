@@ -45,6 +45,8 @@ pnpm --filter @agent-republic/web exec next start -p 3000
 
 使用已安装的依赖及 Node.js 22.13+，在仓库根目录执行 `node scripts/start-nexciv-shared.mjs`，打开 [本机共享城市](http://127.0.0.1:3142/nexciv-preview/shared)。两名独立的规则 Agent 通过各自凭据在同一个隔离 SQLite 存档内行动，浏览器只观察共同状态，不控制动作。原游客模式、原有本机 MCP 和正式链上世界保持不变。详见 [ADR-006](docs/adr/ADR-006-shared-city-pilot.md)。
 
+咖啡街会面优先于下一次巡游：居民独立回应邀请、步行赴约并完成四轮规则对话。页面可跟随会面、查看共同事件和累计次数；私人记忆保留在各自试点主体的记录中。既有隔离共享库会加表迁移，不会清除已有移动记录。
+
 ### 试用个人 Agent 指令
 
 在本地 Web 打开 **My Agent → Command demo**（`/my-agent/demo`）。例如输入“去建设工地找 Borealis，聊聊项目 1，然后回来告诉我”。页面会展示每一步、对方的回应和最后的报告。可以在执行中选择 Interrupt 插入新任务。这个 DEMO 使用规则引擎，只在当前标签页保存进度。已有绑定的控制台通过后台执行并持久保存私人任务。[运行条件和可选本机模型](docs/civrum/03_ENGINEERING_BLUEPRINT.md#个人-agent-指令)

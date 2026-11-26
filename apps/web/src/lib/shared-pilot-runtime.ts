@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { SHARED_PILOT_RESIDENT_IDS, type SharedPilotPlaceId, type SharedPilotResidentId } from '@agent-republic/domain';
+import { SHARED_PILOT_LINES, SHARED_PILOT_RESIDENT_IDS, type SharedPilotPlaceId, type SharedPilotResidentId } from '@agent-republic/domain';
 import { SharedPilotStore } from './shared-pilot-store';
+import { meetingActive, nextSpeaker } from './shared-pilot-social';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
@@ -19,7 +20,7 @@ export class SharedPilotRuntime {
   private timer?: ReturnType<typeof setInterval>;
   private failure = false;
 
-  constructor(file: string, clock: () => number = Date.now) {
+  constructor(file: string, clock: () => number = Date.now, private readonly socialEnabled = true) {
     this.store = new SharedPilotStore(file, clock);
     try {
       this.connections = SHARED_PILOT_RESIDENT_IDS.map((residentId) => ({
@@ -30,6 +31,42 @@ export class SharedPilotRuntime {
       this.store.close();
       throw error;
     }
+  }
+
+  private socialTick(connection: RuleConnection, observation: Observation): boolean {
+    if (!this.socialEnabled) return false;
+    const { meeting, arrived } = observation.social;
+    const at = observation.serverTime;
+    const own = observation.residents.find(({ residentId }) => residentId === connection.residentId)!;
+    const actor = connection.residentId;
+    if (meetingActive(meeting) && meeting) {
+      if (meeting.status === 'invited' && actor === meeting.invitee) {
+        // Familiar residents respond a little faster. Long ongoing journeys can cause refusal.
+        const delay = observation.privateSocial.encounters > 0 ? 1200 : 2500;
+        if (at >= meeting.createdAt + delay) {
+          const busy = own.movement?.status === 'walking' && own.movement.arrivesAt - at > 20000;
+          this.store.socialAction(connection.token, { requestId: randomUUID(), action: 'respond', meetingId: meeting.id, decision: busy ? 'decline' : 'accept' });
+        }
+      } else if (meeting.status === 'accepted' && !arrived.includes(actor) && own.movement?.status !== 'walking') {
+        this.store.moveTo(connection.token, { requestId: randomUUID(), action: 'moveTo', destination: { place: 'cafe' } });
+        connection.decisions++;
+      } else if (meeting.status === 'talking' && nextSpeaker(meeting) === actor && at >= meeting.nextTurnAt) {
+        const line = SHARED_PILOT_LINES[meeting.lines.length];
+        if (line) this.store.socialAction(connection.token, { requestId: randomUUID(), action: 'say', meetingId: meeting.id, line });
+      }
+      return true;
+    }
+    if (at < this.notBefore) return true;
+    if (meeting?.endedAt && at < meeting.endedAt + 12000) return true;
+    const due = !meeting || at >= (meeting.endedAt ?? at) + 45000;
+    if (due && this.connections.every(({ decisions }) => decisions < MAX_DECISIONS)) {
+      // Leave the next free moment for the invitation instead of repeatedly departing.
+      if (actor === '01' && observation.residents.every(({ movement }) => movement?.status !== 'walking')) {
+        this.store.socialAction(connection.token, { requestId: randomUUID(), action: 'invite', target: '02', venue: 'cafe' });
+      }
+      return true;
+    }
+    return false;
   }
 
   private choose(connection: RuleConnection, observation: Observation): SharedPilotPlaceId | null {
@@ -49,8 +86,9 @@ export class SharedPilotRuntime {
   tick() {
     if (this.failure) return;
     for (const connection of this.connections) {
-      if (connection.decisions >= MAX_DECISIONS) continue;
       const observation = this.store.observe(connection.token);
+      if (this.socialTick(connection, observation)) continue;
+      if (connection.decisions >= MAX_DECISIONS) continue;
       const destination = this.choose(connection, observation);
       if (!destination) continue;
       this.store.moveTo(connection.token, { requestId: randomUUID(), action: 'moveTo', destination: { place: destination } });
@@ -61,19 +99,21 @@ export class SharedPilotRuntime {
   start() {
     if (this.timer) return;
     this.timer = setInterval(() => {
-      if (this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS)) {
-        clearInterval(this.timer); this.timer = undefined; return;
-      }
-      try { this.tick(); } catch { this.failure = true; clearInterval(this.timer); this.timer = undefined; }
+      try {
+        this.tick();
+        if (this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS) && !meetingActive(this.snapshot().social.meeting)) {
+          clearInterval(this.timer); this.timer = undefined;
+        }
+      } catch { this.failure = true; clearInterval(this.timer); this.timer = undefined; }
     }, 1000);
     this.timer.unref();
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events } = this.store.observe(this.connections[0]!.token);
-    return { mode, provenance, serverTime, revision, residents, events,
+    const { mode, provenance, serverTime, revision, residents, events, social } = this.store.observe(this.connections[0]!.token);
+    return { mode, provenance, serverTime, revision, residents, events, social,
       engines: this.connections.map(({ residentId }) => ({ residentId, driver: 'RULES' as const })),
-      running: !this.failure && this.connections.some(({ decisions }) => decisions < MAX_DECISIONS),
+      running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting)),
     };
   }
 

@@ -79,4 +79,14 @@ node node_modules/vitest/vitest.mjs run packages/domain/test/shared-city-pilot.t
 
 专项回归命令：`node node_modules/vitest/vitest.mjs run apps/web/test/shared-pilot-runtime.test.ts apps/web/test/shared-pilot-store.test.ts packages/domain/test/shared-city-pilot.test.ts`。实际浏览器验收分别跟随 01/02、观察位置变化，并打开新的浏览器上下文核对共同事件 ID。生产环境仍拒绝该本机试点入口。
 
+## F. 咖啡街会面闭环（E3-05）
+
+同一隔离 SQLite 试验库增加独立生活会面记录（从 v1 以事务性加表方式迁移，不替换既有移动数据）。规则 Agent 可邀请另一位测试居民在咖啡街会面；邀请、接受/婉拒、发言都由各自的既有试点凭据确定主体。请求仅可包含固定动作、受邀方/会面 ID、白名单回应/台词键和幂等 UUID；不接受自由文本、伪造说话者、坐标或完成结果。同一请求重放不产生重复事件，相同 ID 改内容拒绝。邀请有到期时间，已接受会面有旅行期限，交流有轮次期限。每轮仅允许指定说话者在服务端允许时间发言。
+
+双方接受后仍各自提交移动请求；咖啡街会面使用柜台至长椅前步道的两个不同站位。只有两人均实际到达各自站位才开始交流，不能用动画、到达自述或页面操作替代。会面中不允许其他目的地的移动。四轮固定白名单台词分别由受限规则客户端提交，公开内容只引用已发生的会面或未来意愿，不冒充链上事项。最后一轮结束并经过停留时间后记录完成事件，两人的私有记忆和各自对对方的累计会面次数在同一事务写入；拒绝或过期不增加关系记录，重试/重启不重复计算。只有共同会面状态、公开对话和已完成次数可在本机只读网页展示，个人记忆内容和请求键不进入共同投影。
+
+本切片验证初次邀请、拒绝、接受、行走会合、轮流发言、完成与记忆、超时、重启恢复、主体与幂等边界。沿用现有 3D 人物、咖啡街路网和 `DEMO / AI_SIMULATED` 标记；面向真实外部 Harness 的登录、授权、自由文本审核与正式 WorldFrame 投影仍未开放。正式链上身份、经济与 60s tick 不改变。
+
+复现：`node node_modules/vitest/vitest.mjs run apps/web/test/shared-pilot-social.test.ts apps/web/test/shared-pilot-store.test.ts apps/web/test/shared-pilot-runtime.test.ts packages/domain/test/shared-city-pilot.test.ts`；在本机 3142 共享页面观察真实赴约过程、两个模型站位、发言和回执。公开事件保留最近 60 条社交记录，个人记忆保留最近 16 条，累计已完成次数持久保存；每名居民最多 300 个社交请求回执，与移动记录的限额独立。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。

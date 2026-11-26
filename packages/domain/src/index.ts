@@ -6,8 +6,8 @@
 
 export { evmAddressSchema } from './address.js';
 export type { EvmAddress } from './address.js';
-export { SHARED_PILOT_RESIDENT_IDS, SHARED_PILOT_PLACE_IDS, SHARED_PILOT_PROVENANCE, sharedPilotMoveRequestSchema } from './shared-city-pilot.js';
-export type { SharedPilotResidentId, SharedPilotPlaceId, SharedPilotMoveRequest } from './shared-city-pilot.js';
+export { SHARED_PILOT_RESIDENT_IDS, SHARED_PILOT_PLACE_IDS, SHARED_PILOT_PROVENANCE, sharedPilotMoveRequestSchema, SHARED_PILOT_LINES, sharedPilotSocialRequestSchema } from './shared-city-pilot.js';
+export type { SharedPilotResidentId, SharedPilotPlaceId, SharedPilotMoveRequest, SharedPilotSocialRequest } from './shared-city-pilot.js';
 export { COMMAND_MODES, COMMAND_STATUSES, commandModelPlanSchema, commandModelReplySchema, commandRecordSchema, commandRequestSchema, commandStepSchema } from './command-v1.js';
 export type { CommandMode, CommandStatus, CommandRecord, CommandRequest, CommandStep } from './command-v1.js';
 export {

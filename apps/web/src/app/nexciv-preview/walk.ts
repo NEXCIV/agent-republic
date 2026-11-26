@@ -583,6 +583,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let sharedReceivedAt = performance.now();
   const sharedJourneys = new Map<string, string>();
   const sharedRegions = new Set<CityRegion>();
+  const speechCanvas = sharedMode ? document.createElement('canvas') : undefined;
+  if (speechCanvas) { speechCanvas.width = 576; speechCanvas.height = 176; }
+  const speechTexture = speechCanvas ? new THREE.CanvasTexture(speechCanvas) : undefined;
+  if (speechTexture) speechTexture.colorSpace = THREE.SRGBColorSpace;
+  const speechMaterial = speechTexture ? new THREE.SpriteMaterial({ map: speechTexture, transparent: true,
+    depthTest: false, depthWrite: false, fog: false, sizeAttenuation: false, toneMapped: false }) : undefined;
+  const speech = speechMaterial ? new THREE.Sprite(speechMaterial) : undefined;
+  if (speech) { speech.visible = false; speech.center.set(.5, 0); speech.renderOrder = 101; scene.add(speech); }
+  let speechKey = '';
   let marketGuestRequested = false;
   let greetingFraming = 0;
   let followed: ActorId = '01';
@@ -983,8 +992,40 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const [x, y, z] = resident.position;
         const previous = move?.points.at(-2);
         observedPosition.set(x, y, z);
-        observedFacing.set(previous ? 2 * x - previous[0] : x, y, previous ? 2 * z - previous[2] : z - 1);
-        patrol.observe(poseDt, observedPosition, observedFacing);
+        const meeting = projection?.social?.meeting;
+        const peer = meeting?.status === 'talking' || meeting?.status === 'completed' ? projection?.residents.find(({ residentId, position, movement }) => residentId !== id && movement?.status !== 'walking' && Math.hypot(position[0]-x, position[2]-z) < 3) : undefined;
+        if (peer) observedFacing.set(...peer.position);
+        else observedFacing.set(previous ? 2 * x - previous[0] : x, y, previous ? 2 * z - previous[2] : z - 1);
+        const line = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
+        patrol.observe(poseDt, observedPosition, observedFacing, false, line?.residentId === id ? (line.line === 'greet' ? 'wave' : 'nod') : undefined);
+      }
+    }
+    if (speech && speechCanvas && speechTexture) {
+      const meeting = projection?.social?.meeting;
+      const line = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
+      const speaker = line && selectableActor(line.residentId)?.patrol.root;
+      speech.visible = Boolean(line && speaker?.visible && mode === 'follow');
+      if (line && speaker && speech.visible) {
+        const key = `${meeting!.id}:${line.line}`;
+        if (key !== speechKey) {
+          speechKey = key;
+          const ctx = speechCanvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, 576, 176);
+            ctx.fillStyle = '#17191bf5'; ctx.strokeStyle = line.residentId === '01' ? '#f0b90b' : '#79bab7'; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.roundRect(5, 5, 566, 148, 18); ctx.fill(); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(269, 150); ctx.lineTo(288, 173); ctx.lineTo(307, 150); ctx.fill();
+            ctx.font = 'bold 25px Microsoft YaHei, sans-serif'; ctx.fillStyle = ctx.strokeStyle;
+            ctx.fillText(`${line.residentId} 号`, 25, 40);
+            ctx.font = '28px Microsoft YaHei, sans-serif'; ctx.fillStyle = '#f3ead6';
+            const characters = Array.from(line.text);
+            for (let i = 0; i < characters.length; i += 19) ctx.fillText(characters.slice(i, i + 19).join(''), 25, 80 + (i / 19) * 38);
+            speechTexture.needsUpdate = true;
+          }
+        }
+        speech.position.copy(speaker.position); speech.position.y += 2.05;
+        const factor = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
+        speech.scale.set(252 * factor, 77 * factor, 1);
       }
     }
   }
@@ -1238,10 +1279,19 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         aim.x = THREE.MathUtils.lerp(aim.x, guest.x, greetingFraming * 0.5);
         aim.z = THREE.MathUtils.lerp(aim.z, guest.z, greetingFraming * 0.5);
       }
+      const sharedPhase = sharedSnapshot?.social?.meeting?.status;
+      const sharedPeer = sharedMode && (sharedPhase === 'talking' || sharedPhase === 'completed') && followed !== WORKS_MANAGER
+        ? selectableActor(followed === '01' ? '02' : '01')?.patrol.root : undefined;
+      const sharedPair = Boolean(sharedPeer?.visible && sharedPeer.position.distanceTo(feet) < 3);
+      if (sharedPair && sharedPeer) {
+        aim.x = (feet.x + sharedPeer.position.x) / 2;
+        aim.y = (feet.y + sharedPeer.position.y) / 2 + 1.25;
+        aim.z = (feet.z + sharedPeer.position.z) / 2;
+      }
       const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
       const streetDistance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming)
         + 2.2 * entranceFrame + 1.8 * forumFrame + 3.3 * centerFrame + 3.3 * residenceFrame + 8.8 * hallFrame;
-      const distance = THREE.MathUtils.lerp(streetDistance, Math.min(followDistance, 4.8), shoreFrame);
+      const distance = sharedPair ? Math.max(6.2, followDistance) : THREE.MathUtils.lerp(streetDistance, Math.min(followDistance, 4.8), shoreFrame);
       // Frame the shop from the street side as the Agent passes the entrance tree.
       const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
       const northSide = 1 - THREE.MathUtils.smoothstep(feet.z, -22, 18);
@@ -1255,13 +1305,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const usualYaw = followed === '01' && byPier && !travelling ? observer ? 0.10 : 0.49
         : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
       const entranceYaw = THREE.MathUtils.lerp(usualYaw, 0.20, Math.max(hallFrame, noticeFrame));
-      const yaw = followYaw + THREE.MathUtils.lerp(entranceYaw, followed === '02' ? 1.17 : 0.85, shoreFrame);
+      const yaw = followYaw + (sharedPair ? -2.65 : THREE.MathUtils.lerp(entranceYaw, followed === '02' ? 1.17 : 0.85, shoreFrame));
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
       const northCrossing = THREE.MathUtils.smoothstep(feet.z, -82, -74)
         * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
-      const pitch = Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
+      const pitch = sharedPair ? Math.min(.65, followPitch) : Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
         - 0.12 * greetingFraming - 0.07 * residenceFrame - 0.20 * hallFrame - 0.11 * shoreFrame);
       camera.position.set(
         aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
@@ -1858,6 +1908,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       markerMaterial?.map?.dispose();
       markerMaterial?.dispose();
       for (const material of sharedMarkerMaterials) { material.map?.dispose(); material.dispose(); }
+      speechTexture?.dispose(); speechMaterial?.dispose();
       sun.shadow.dispose();
       sunset.shadow.dispose();
       streetSky.dispose();

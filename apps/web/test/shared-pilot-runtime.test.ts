@@ -39,7 +39,7 @@ describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('two connected rule 
   it('lets both independently observe and act, and projects only their shared activity', () => {
     const folder = mkdtempSync(join(tmpdir(), 'nexciv-shared-runtime-'));
     let at = 1_800_000_000_000;
-    const runtime = new SharedPilotRuntime(join(folder, 'shared.sqlite'), () => at);
+    const runtime = new SharedPilotRuntime(join(folder, 'shared.sqlite'), () => at, false);
     try {
       const initial = runtime.snapshot();
       expect(initial.mode).toBe('DEMO');

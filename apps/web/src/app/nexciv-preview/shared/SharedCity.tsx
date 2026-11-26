@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CityMark } from '@/components/CityMark';
 import type { SharedPilotView } from '../../../lib/shared-pilot-runtime';
@@ -10,6 +10,7 @@ import base from '../preview.module.css';
 import styles from './shared.module.css';
 
 type ResidentId = '01' | '02';
+type CameraView = 'overview' | 'meeting' | ResidentId;
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
 const endpoint = '/api/nexciv-preview/shared';
 
@@ -20,7 +21,8 @@ export function SharedCity() {
   const [snapshot, setSnapshot] = useState<SharedPilotView | null>(null);
   const [status, setStatus] = useState<'connecting' | 'live' | 'stale'>('connecting');
   const [message, setMessage] = useState('');
-  const [view, setView] = useState<'overview' | ResidentId>('overview');
+  const [view, setView] = useState<CameraView>('overview');
+  const watchedMeeting = useRef<string | undefined>(undefined);
   const [staticMode, setStaticMode] = useState(false);
   const [scene, setScene] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [overview, setOverview] = useState<DistrictStatus>('idle');
@@ -28,11 +30,11 @@ export function SharedCity() {
   const [fps, setFps] = useState(0);
   const [failedAgents, setFailedAgents] = useState<ResidentId[]>([]);
 
-  function focus(id: 'overview' | ResidentId) {
+  const focus = useCallback((id: CameraView) => {
     setView(id);
-    world.current?.view(id === 'overview' ? 'overview' : 'follow', id === 'overview' ? undefined : id);
-    world.current?.select(id === 'overview' ? null : { kind: 'resident', id });
-  }
+    world.current?.view(id === 'overview' ? 'overview' : 'follow', id === 'overview' ? undefined : id === 'meeting' ? '01' : id);
+    world.current?.select(id === 'overview' || id === 'meeting' ? null : { kind: 'resident', id });
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -91,7 +93,17 @@ export function SharedCity() {
   }, [staticMode, renderAttempt]);
 
   const live3d = scene === 'ready' && !staticMode;
-  const events = snapshot?.events.slice(-8).reverse() ?? [];
+  const social = snapshot?.social;
+  const meeting = social?.meeting;
+  const lastLine = meeting?.lines.at(-1);
+  const meetingTitle = meeting ? ({ invited: '等待回应', accepted: '双方赴约中', talking: '正在交流', completed: '会面已结束', declined: '邀请被婉拒', expired: '会面超时' })[meeting.status] : '暂未发起会面';
+  const events = (snapshot ? [...snapshot.events.map((event) => ({ ...event, text: `${event.residentId} 号 ${event.kind === 'MOVE_STARTED' ? '出发前往' : '已到达'} ${CITY_PLACES[event.place]}` })),
+    ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text }))] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
+  useEffect(() => {
+    if (!live3d || meeting?.status !== 'talking' || watchedMeeting.current === meeting.id) return;
+    watchedMeeting.current = meeting.id;
+    if (view === 'overview') focus('meeting');
+  }, [focus, live3d, meeting?.id, meeting?.status, view]);
   return <main className={base.page}>
     <section className={`${base.viewer} ${styles.viewer}`} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
@@ -114,10 +126,12 @@ export function SharedCity() {
           const progress = movement && snapshot ? Math.round(100 * Math.min(1, Math.max(0,
             (snapshot.serverTime - movement.startedAt) / Math.max(1, movement.arrivesAt - movement.startedAt)))) : 0;
           const destination = movement?.destination.place;
+          const speaking = meeting?.status === 'talking';
+          const waiting = meeting?.status === 'accepted' && social?.arrived.includes(id);
           return <article key={id} className={styles.resident} data-resident={id}>
             <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{names[id]}</b><small>{resident ? '规则 Agent 已接入' : '连接中'}</small></div>
               <button type="button" disabled={!live3d || failedAgents.includes(id)} aria-pressed={view === id} onClick={() => focus(id)}>跟随</button></div>
-            <strong role="status" data-resident-status={id}>{resident ? moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
+            <strong role="status" data-resident-status={id}>{resident ? speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
             {movement && <div className={styles.progress}><progress aria-label={`${id} 号行程进度`} max={100} value={progress} /><span>{progress}%</span></div>}
             {resident && <small className={styles.position}>X {resident.position[0].toFixed(1)} · Z {resident.position[2].toFixed(1)}</small>}
             {failedAgents.includes(id) && <small>角色模型未载入，行动记录仍可查看。</small>}
@@ -128,9 +142,17 @@ export function SharedCity() {
         {!live3d && <p className={styles.explain}>{staticMode || scene === 'fallback' ? '2D 状态观察 · 地图为静态背景' : '正在载入实时城市模型...'}</p>}
       </aside>
       <aside className={styles.journal} aria-label="实时城市动态">
-        <div className={styles.panelHead}><h2>城市动态</h2><small>{snapshot ? `事件 #${snapshot.revision}` : '等待连接'}</small></div>
+        <section className={styles.meeting} aria-label="咖啡街会面">
+          <div className={styles.panelHead}><h2>咖啡街会面</h2><small>{social?.completedMeetings ?? 0} 次交流</small></div>
+          <p className={styles.meetingState} data-meeting-status={meeting?.status ?? 'none'}><i />{meetingTitle}{meeting?.status === 'accepted' && ` · ${social?.arrived.length ?? 0}/2 已到场`}{meeting?.status === 'talking' && ` · ${meeting.lines.length}/4 轮`}</p>
+          {meeting?.status === 'invited' && <p>{meeting.inviter} 号邀请 {meeting.invitee} 号到咖啡街，等待对方自行回应。</p>}
+          {lastLine && <blockquote data-speaker={lastLine.residentId}><b>{lastLine.residentId} 号</b>{lastLine.text}</blockquote>}
+          {meeting?.status === 'completed' && <p className={styles.memory}>✓ 双方已各自留下私人记忆。{(social?.completedMeetings ?? 0) > 1 ? '关系：逐渐熟悉' : '关系：初次认识'}</p>}
+          {meeting && ['accepted', 'talking'].includes(meeting.status) && <button type="button" className={styles.meetingButton} disabled={!live3d} aria-pressed={view === 'meeting'} onClick={() => focus('meeting')}>查看会面现场</button>}
+        </section>
+        <div className={styles.panelHead}><h2>城市动态</h2><small>{snapshot ? `事件 #${Number(snapshot.revision) + (social?.revision ?? 0)}` : '等待连接'}</small></div>
         {events.length ? <ol>{events.map((event) => <li key={event.id}><i data-resident={event.residentId} />
-          <div><b>{event.residentId} 号</b> {event.kind === 'MOVE_STARTED' ? '出发前往' : '已到达'} {CITY_PLACES[event.place]}</div>
+          <div>{event.text}</div>
           <time dateTime={new Date(event.happenedAt).toISOString()}>{new Date(event.happenedAt).toLocaleTimeString('zh-CN', { hour12: false })}</time>
         </li>)}</ol> : <p>等待居民首次行动。所有位置和事件都来自同一个服务端存档。</p>}
         <div className={styles.journalFooter}>{snapshot?.running === false ? '本轮规则活动暂未继续' : '链下规则模拟 · 非链上交易'} {live3d && fps > 0 && <span>{fps} FPS</span>}</div>
