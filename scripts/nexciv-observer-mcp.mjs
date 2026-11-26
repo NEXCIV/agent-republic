@@ -99,20 +99,29 @@ serveStdio(() => {
     await request('', { action: 'moveTo', destination, requestId }),
   ));
 
-  tool('observe_city', '读取 01 号位置、附近设施和可选动作。湖畔路灯试点会返回审批、02 号行程、施工记录和亮灯状态。可等待活动进度最多 20 秒。', z.strictObject({
+  tool('observe_city', '读取城市活动和 03 号的 eveningWalk。傍晚散步时，请根据其中的照明、精力和路线，自行挑选可用的选项和理由。可等待活动最多 20 秒。', z.strictObject({
     waitSeconds: z.number().int().min(0).max(20).default(0),
   }), true, async ({ waitSeconds }) => {
     const until = Date.now() + waitSeconds * 1000;
     let state = await request('?control=city');
     while ((state?.movement?.status === 'walking' || state?.recentActivities?.[0]?.status === 'running'
-      || state?.lightingPilot?.stage === 'review' || state?.lightingPilot?.worker?.activity?.status === 'running') && Date.now() < until) {
+      || state?.lightingPilot?.stage === 'review' || state?.lightingPilot?.worker?.activity?.status === 'running'
+      || state?.eveningWalk?.recent?.[0]?.status === 'running') && Date.now() < until) {
       await delay(Math.min(2500, Math.max(0, until - Date.now())));
       state = await request('?control=city');
     }
     const worker = state?.lightingPilot?.worker;
     if (worker) worker.movement = movementSummary(worker.movement);
+    if (state?.eveningWalk) state.eveningWalk.recent = state.eveningWalk.recent.map(eveningSummary);
     return state?.movement ? { ...state, movement: movementSummary(state.movement) } : state;
   });
+
+  tool('choose_evening_walk', '由 03 号选择当前观察里的散步路线或回家休息。提交 eveningWalk 的 observationId、任一可用选项 ID 和该选项的一个理由 ID。服务器校验现场，网页显示实际行程。', z.strictObject({
+    observationId: z.string().regex(/^[a-f0-9]{64}$/),
+    optionId: z.enum(['waterfront', 'main-path', 'home']),
+    reasonId: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
+    requestId: z.uuidv4().optional(),
+  }), false, async ({ requestId = randomUUID(), ...choice }) => eveningSummary(await request('', { action: 'chooseEveningWalk', choice, requestId })));
 
   tool('interact_city', '执行最近一次 observe_city 返回的可用动作。议会试玩中，01 号调研后可交报告，试点获批后可让 02 号领取路灯施工。用 observe_city 查看现场结果。', z.strictObject({
     actionId: z.string().regex(/^[a-z][a-z0-9_-]{0,23}\.[a-z][a-z0-9_-]{0,23}$/),
@@ -156,4 +165,8 @@ serveStdio(() => {
 
 function movementSummary({ points, ...movement }) {
   return { ...movement, from: points[0], target: points.at(-1) };
+}
+
+function eveningSummary(result) {
+  return { ...result, movement: movementSummary(result.movement) };
 }

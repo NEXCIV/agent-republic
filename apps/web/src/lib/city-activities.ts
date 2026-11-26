@@ -5,7 +5,7 @@ import { positionOnWalk, routeDistance, type CityMovement, type CityRegion, type
 
 export type CityPerson = { id: string; name: string; position: CityPoint };
 export type CitySite = { place: string; name: string; people: CityPerson[]; facilities: Array<{ id: string; name: string }> };
-type CityActionKind = 'talk' | 'rest' | 'work' | 'read' | 'survey' | 'report' | 'install';
+type CityActionKind = 'talk' | 'rest' | 'work' | 'read' | 'survey' | 'report' | 'install' | 'stroll';
 export type CityActionOption = { id: string; label: string; kind: CityActionKind; target: string; agentId?: '02' };
 type Checkpoint = { name: string; x: number; z: number };
 type Action = CityActionOption & (
@@ -26,7 +26,7 @@ type CityActivityEvent = {
 export type CityActivity = {
   requestId: string;
   actionId: string;
-  agentId?: '02';
+  agentId?: '02' | '03';
   kind: CityActionKind;
   label: string;
   place: string;

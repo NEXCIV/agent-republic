@@ -6,7 +6,7 @@ import { CafeShift, shiftLabel } from './CafeShift';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
 import { COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
-import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type View, type WalkController } from './walk';
+import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController } from './walk';
 import type { Place } from './navigation';
 import styles from './preview.module.css';
 
@@ -36,27 +36,30 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const world = useRef<WalkController | null>(null);
   const latest = useRef<CafeSnapshot | null>(null);
   const latestCity = useRef<CityObservation | null>(null);
-  const seenWorkerJob = useRef<string | undefined>(undefined);
-  const watchingWorker = useRef(false);
-  const [watchWorker, setWatchWorker] = useState(false);
-  const followWorker = useCallback((enabled: boolean) => {
-    watchingWorker.current = enabled;
-    setWatchWorker(enabled);
-    world.current?.view('follow', enabled ? '02' : '01');
+  const seenCityJob = useRef<string | undefined>(undefined);
+  const followedCafeId = useRef<FollowId>('01');
+  const [cafeFollow, setCafeFollow] = useState<FollowId>('01');
+  const followCityAgent = useCallback((id: FollowId) => {
+    followedCafeId.current = id;
+    setCafeFollow(id);
+    world.current?.view('follow', id);
   }, []);
   const [city, setCity] = useState<CityObservation | null>(null);
   const pilot = city?.lightingPilot;
   const worker = pilot?.worker;
-  const showWorker = watchWorker && Boolean(worker);
-  const cityWalk = showWorker ? worker?.movement : city?.movement;
+  const evening = city?.eveningWalk;
+  const strolls = evening?.recent ?? [];
+  const stroll = strolls[0];
+  const cityWalk = cafeFollow === '03' ? stroll?.movement : cafeFollow === '02' ? worker?.movement : city?.movement;
   const cityMoving = cityWalk?.status === 'walking';
   const primaryHistory = city?.recentActivities ?? [];
-  const recent = worker ? [...primaryHistory, worker.activity].sort((a, b) => b.startedAt - a.startedAt) : primaryHistory;
-  const active = showWorker ? worker?.activity : primaryHistory[0];
+  const recent = [...primaryHistory, ...strolls.map(({ activity }) => activity), ...(worker ? [worker.activity] : [])]
+    .sort((a, b) => b.startedAt - a.startedAt);
+  const active = recent.find(({ agentId }) => (agentId ?? '01') === cafeFollow);
   const currentActivity = active?.status === 'running' ? active : undefined;
-  const movementActivity = showWorker ? worker?.activity : primaryHistory.find(({ requestId }) => requestId === cityWalk?.requestId);
+  const movementActivity = recent.find(({ requestId }) => requestId === cityWalk?.requestId);
   const cityBusy = city?.movement?.status === 'walking' || primaryHistory[0]?.status === 'running'
-    || pilot?.stage === 'review' || worker?.activity.status === 'running';
+    || pilot?.stage === 'review' || worker?.activity.status === 'running' || stroll?.status === 'running';
   const pilotStatus = pilot ? LIGHTING_PILOT_STATUS[pilot.stage] : '';
   const [shift, setShift] = useState('等待开班');
   const [greeting, setGreeting] = useState('');
@@ -100,7 +103,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
       if (cafeMode) {
         controller.syncCafe(latest.current);
         controller.syncCity(latestCity.current);
-        if (watchingWorker.current) controller.view('follow', '02');
+        controller.view('follow', followedCafeId.current);
       }
       return () => { controller.dispose(); world.current = null; };
     } catch {
@@ -121,10 +124,12 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
         latestCity.current = observation;
         world.current?.syncCity(observation);
         setCity(observation);
-        const job = observation.lightingPilot?.worker?.activity.requestId;
-        if (job && seenWorkerJob.current !== job) {
-          seenWorkerJob.current = job;
-          followWorker(true);
+        const construction = observation.lightingPilot?.worker?.activity;
+        const outing = observation.eveningWalk?.recent[0]?.activity;
+        const job = outing && (!construction || outing.startedAt >= construction.startedAt) ? outing : construction;
+        if (job?.agentId && seenCityJob.current !== job.requestId) {
+          seenCityJob.current = job.requestId;
+          followCityAgent(job.agentId);
         }
       } catch {
         // Retry on the next poll, retaining the last position during a brief disconnect.
@@ -134,7 +139,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [cafeMode, cityBusy, followWorker]);
+  }, [cafeMode, cityBusy, followCityAgent]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
@@ -146,7 +151,8 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const agent = reports[selected];
   const cityLabel = cityWalk && (cityMoving ? `前往 ${cityWalk.name}`
     : movementActivity?.kind === 'survey' ? '已返回 议事公告栏' : `已到达 ${cityWalk.name}`);
-  const sceneCaption = currentActivity?.events.at(-1);
+  const cafeTitle = cafeFollow === '02' ? pilotStatus : (cafeFollow === '03' ? cityLabel : currentActivity?.label || cityLabel) || shift;
+  const sceneCaption = (cafeFollow === '03' ? active : currentActivity)?.events.at(-1);
   const travelProgress = city && cityWalk && cityMoving
     ? Math.round(100 * cityWalkTiming(cityWalk, city.serverTime).progress)
     : 100;
@@ -184,8 +190,8 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{cafeMode ? `AGENT ${showWorker ? '02' : '01'} · AI SIMULATED · DEMO` : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
-          <strong role="status">{cafeMode ? showWorker ? pilotStatus : currentActivity?.label || cityLabel || shift
+          <small>{cafeMode ? `AGENT ${cafeFollow} · AI SIMULATED · DEMO` : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
+          <strong role="status">{cafeMode ? cafeTitle
             : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
           {sceneCaption && <p className={styles.greeting}>
             {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
@@ -197,13 +203,13 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         {cafeMode ? <>
           {cityWalk && <div className={styles.route}>
-            <span>{showWorker ? '施工路线' : movementActivity?.kind === 'survey' ? '调研路线'
+            <span>{cafeFollow === '03' ? '傍晚行程' : cafeFollow === '02' ? '施工路线' : movementActivity?.kind === 'survey' ? '调研路线'
               : movementActivity?.kind === 'work' ? '巡查路线' : movementActivity?.kind === 'read' ? '公告栏路线' : '全城试走'}</span>
-            <progress aria-label={currentActivity?.label || cityLabel || 'Agent 01 行程'} max={100} value={travelProgress} />
+            <progress aria-label={currentActivity?.label || cityLabel || `Agent ${cafeFollow} 行程`} max={100} value={travelProgress} />
             <span>{cityWalk.name} · {Math.round(cityWalk.metres)} 米</span>
           </div>}
           {city?.nearby && <div className={styles.cityNearby}>
-            <span>附近 · {[...city.nearby.people.map(({ name }) => name), ...city.nearby.facilities.map(({ name }) => name)].join('、')}</span>
+            <span>01 号附近 · {[...city.nearby.people.map(({ name }) => name), ...city.nearby.facilities.map(({ name }) => name)].join('、')}</span>
             <span>01 号精力 <b>{city.energy}</b> / 100</span>
             {city.nearby.place === 'governance' && city.lightingSurvey === 'submitted'
               && <span>公告栏 · {pilotStatus || COUNCIL_SURVEY_RECEIPT}</span>}
@@ -211,17 +217,25 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
           {!!city?.availableActions.length && <span className={styles.cityOptions}>
             可选 · {city.availableActions.map(({ label }) => label).join('、')}
           </span>}
-          {worker && <div className={styles.controls} role="group" aria-label="路灯试点跟拍">
-            <button disabled={!sceneReady} aria-pressed={!showWorker} onClick={() => followWorker(false)}>跟随 01</button>
-            <button disabled={!sceneReady} aria-pressed={showWorker} onClick={() => followWorker(true)}>跟随 02</button>
+          {evening && (stroll || pilot) && <div className={styles.cityNearby}>
+            <span>03 号精力 <b>{evening.energy}</b> / 100</span>
+            <span>湖畔 · {evening.lighting.detail}</span>
+          </div>}
+          {(worker || stroll) && <div className={styles.controls} role="group" aria-label="跟拍居民">
+            <button disabled={!sceneReady} aria-pressed={cafeFollow === '01'} onClick={() => followCityAgent('01')}>跟随 01</button>
+            {worker && <button disabled={!sceneReady} aria-pressed={cafeFollow === '02'} onClick={() => followCityAgent('02')}>跟随 02</button>}
+            {stroll && <button disabled={!sceneReady} aria-pressed={cafeFollow === '03'} onClick={() => followCityAgent('03')}>跟随 03</button>}
           </div>}
           {recent.length > 0 && <details className={styles.cityActivity}>
             <summary>现场活动记录 · {recent.length} 条{recent[0]?.status === 'completed' ? ` · 已完成${recent[0].label}` : ''}</summary>
             {recent.map((entry) => <section key={entry.requestId}>
-              <strong>{entry.label} · {entry.status === 'running' ? '进行中' : '已完成'}</strong>
+              <strong>{entry.agentId && `${entry.agentId} 号 · `}{entry.label} · {entry.status === 'running' ? '进行中' : '已完成'}</strong>
               <ol>{entry.events.map((event) => <li key={`${event.at}:${event.type}`}>
                 {event.speaker && `${event.speaker} · `}{event.text}
               </li>)}</ol>
+              {entry.agentId === '03' && <p className={styles.cityNearby}>
+                出发时 · {strolls.find(({ activity }) => activity.requestId === entry.requestId)?.observation.lighting.detail}
+              </p>}
             </section>)}
           </details>}
           <CafeShift onUpdate={updateCafe} />

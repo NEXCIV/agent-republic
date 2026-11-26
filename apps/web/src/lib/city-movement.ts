@@ -1,5 +1,6 @@
 import type { CityPoint } from './cafe-geometry';
 import type { CityActionOption, CityActivityView, CitySite, LightingPilot, LightingSurveyStage } from './city-activities';
+import type { EveningWalk } from './evening-stroll';
 
 export const CITY_PLACES = {
   cafe: '咖啡摊', plaza: '中央广场', market: 'Corner Market', governance: '议会大厅',
@@ -41,6 +42,7 @@ export type CityObservation = {
   nearby: CitySite | null;
   lightingSurvey?: LightingSurveyStage;
   lightingPilot?: LightingPilot;
+  eveningWalk: EveningWalk;
   availableActions: CityActionOption[];
   recentActivities: CityActivityView[];
 };

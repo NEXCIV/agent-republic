@@ -13,6 +13,7 @@ import {
   COUNCIL_LIGHTING_ACTIONS, INSTALL_LIGHT, lightingPilotView, nearbyCitySite,
   type CityActivity, type CityActivityView,
 } from './city-activities';
+import { beginEveningWalk, eveningResult, EVENING_STROLL_ACTION, observeEveningWalk, type EveningChoice, type EveningRecord } from './evening-stroll';
 
 type Response = Omit<CafeSnapshot, 'run'> & { run: CafeRun };
 type Row = { state: string };
@@ -217,9 +218,9 @@ export class CafeDemoStore {
 
   private cityActivityHistory(resident: string): CityActivity[] {
     return this.db.prepare(`
-      SELECT activity FROM city_activities WHERE resident=? AND json_extract(activity, '$.actionId')<>?
+      SELECT activity FROM city_activities WHERE resident=? AND json_extract(activity, '$.actionId') NOT IN (?,?)
       ORDER BY started DESC, rowid DESC LIMIT 6
-    `).all(resident, INSTALL_LIGHT.id).map(({ activity }) => JSON.parse(String(activity)));
+    `).all(resident, INSTALL_LIGHT.id, EVENING_STROLL_ACTION).map(({ activity }) => JSON.parse(String(activity)));
   }
 
   private lightingSurvey(resident: string, at: number) {
@@ -233,8 +234,8 @@ export class CafeDemoStore {
 
   private activityInProgress(resident: string, at: number) {
     return Boolean(this.db.prepare(`
-      SELECT 1 FROM city_activities WHERE resident=? AND ends>? AND json_extract(activity, '$.actionId')<>? LIMIT 1
-    `).get(resident, at, INSTALL_LIGHT.id));
+      SELECT 1 FROM city_activities WHERE resident=? AND ends>? AND json_extract(activity, '$.actionId') NOT IN (?,?) LIMIT 1
+    `).get(resident, at, INSTALL_LIGHT.id, EVENING_STROLL_ACTION));
   }
 
   private lightingPilot(resident: string, at: number, submittedAt?: number) {
@@ -249,8 +250,15 @@ export class CafeDemoStore {
     this.db.prepare('INSERT INTO city_activities(resident,id,started,ends,activity) VALUES (?,?,?,?,?)')
       .run(resident, activity.requestId, activity.startedAt, activity.endsAt, JSON.stringify(activity));
     this.db.prepare(`
-      DELETE FROM city_activities WHERE resident=? AND ends<? AND json_extract(activity, '$.actionId') NOT IN (?,?)
-    `).run(resident, activity.startedAt - CAFE_RETENTION_DAYS * 86400000, COUNCIL_LIGHTING_ACTIONS[2], INSTALL_LIGHT.id);
+      DELETE FROM city_activities WHERE resident=? AND ends<? AND json_extract(activity, '$.actionId') NOT IN (?,?,?)
+    `).run(resident, activity.startedAt - CAFE_RETENTION_DAYS * 86400000, COUNCIL_LIGHTING_ACTIONS[2], INSTALL_LIGHT.id, EVENING_STROLL_ACTION);
+  }
+
+  private eveningRecords(resident: string): EveningRecord[] {
+    return this.db.prepare(`
+      SELECT activity FROM city_activities WHERE resident=? AND json_extract(activity, '$.actionId')=?
+      ORDER BY started DESC, rowid DESC
+    `).all(resident, EVENING_STROLL_ACTION).map(({ activity }) => JSON.parse(String(activity)));
   }
 
   private energyFromActivities(history: CityActivity[], run: CafeRun | null, at: number) {
@@ -287,9 +295,39 @@ export class CafeDemoStore {
         nearby: nearby?.site ?? null,
         ...(survey ? { lightingSurvey: survey.stage } : {}),
         ...(lightingPilot ? { lightingPilot } : {}),
+        eveningWalk: observeEveningWalk(resident, this.eveningRecords(resident), lightingPilot, serverTime, activeShift && Boolean(run.observer)),
         availableActions,
         recentActivities: history.map((activity) => cityActivityView(activity, serverTime)),
       };
+    });
+  }
+
+  chooseEveningWalk(actor: CafeActor, requestId: string, choice: EveningChoice) {
+    return this.transaction(() => {
+      const resident = this.authorizedResident(actor);
+      const at = this.clock();
+      const records = this.eveningRecords(resident);
+      const existing = records.find((record) => record.requestId === requestId);
+      if (existing) {
+        const saved = existing.selection;
+        return saved.observationId === choice.observationId && saved.optionId === choice.optionId && saved.reasonId === choice.reasonId
+          ? eveningResult(existing, at) : { error: '请求编号已用于另一项散步决定。', code: 409 };
+      }
+      if (this.db.prepare('SELECT 1 FROM city_activities WHERE resident=? AND id=?').get(resident, requestId)
+        || this.db.prepare('SELECT 1 FROM city_walks WHERE resident=? AND id=?').get(resident, requestId)) {
+        return { error: '请求编号已用于另一次活动。', code: 409 };
+      }
+      const run = this.activeRun(resident, at);
+      const survey = this.lightingSurvey(resident, at);
+      const pilot = this.lightingPilot(resident, at, survey?.submittedAt);
+      const view = observeEveningWalk(resident, records, pilot, at, Boolean(run?.observer && run.phase !== 'done'));
+      if (choice.observationId !== view.observationId || !view.options.length) {
+        return { error: '散步选项已更新或 03 号正在忙，请重新查看城市。', code: 409 };
+      }
+      const activity = beginEveningWalk(view, choice, requestId, at);
+      if (!activity) return { error: '这条路线或理由不在 03 号当前可选范围内。', code: 422 };
+      this.saveCityActivity(resident, activity);
+      return eveningResult(activity, at);
     });
   }
 
@@ -384,6 +422,9 @@ export class CafeDemoStore {
       }
       const run = this.activeRun(resident, at);
       if (run && run.phase !== 'done') return { error: '已有进行中的班次。' };
+      if (kind === 'observer' && this.eveningRecords(resident).some(({ endsAt }) => endsAt > at)) {
+        return { error: '03 号正在散步或休息，请完成后再开启观察员班次。' };
+      }
       if (this.activityInProgress(resident, at)) return { error: '01 号正在执行现场活动。' };
       const walk = this.currentWalk(resident);
       if (walk && (walk.arrivesAt > at || routeDistance(walk.points.at(-1)!, CAFE_COUNTER) > 1e-5)) {

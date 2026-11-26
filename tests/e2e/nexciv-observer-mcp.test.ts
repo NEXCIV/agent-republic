@@ -12,6 +12,7 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
   const sessionFile = join(folder, 'session');
   const token = `nxc_mcp_${'a'.repeat(43)}`;
   const code = 'A'.repeat(24);
+  const eveningChoice = { observationId: '3'.repeat(64), optionId: 'waterfront', reasonId: 'pilot-light' };
   let writes = 0;
   let initializations = 0;
   let redeemed = false;
@@ -44,11 +45,19 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
       }
       if (input?.action === 'moveTo' || request.url?.endsWith('control=city')) {
         const movement = { points: [[0, 0, 0], [1, 0, 0]], status: 'arrived' };
-        response.end(JSON.stringify(input ? movement : { movement }));
+        response.end(JSON.stringify(input ? movement : {
+          movement, eveningWalk: { observationId: eveningChoice.observationId, lighting: { state: 'lit' },
+            recent: [{ status: 'completed', movement }] },
+        }));
         return;
       }
       if (input?.action === 'interactCity') {
         response.end(JSON.stringify({ requestId: input.requestId, actionId: input.actionId, status: 'running' }));
+        return;
+      }
+      if (input?.action === 'chooseEveningWalk') {
+        expect(input.choice).toEqual(eveningChoice);
+        response.end(JSON.stringify({ selection: input.choice, movement: { points: [[0, 0, 0], [1, 0, 0]], status: 'walking' } }));
         return;
       }
       response.end(JSON.stringify({ run: { phase: 'briefing' } }));
@@ -90,7 +99,7 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
   try {
     client = await connect();
     expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
-      'pair_browser', 'list_city_places', 'move_to', 'observe_city', 'interact_city',
+      'pair_browser', 'list_city_places', 'move_to', 'observe_city', 'choose_evening_walk', 'interact_city',
       'start_observer', 'observe_observer', 'choose_interview', 'read_shift', 'read_newspaper',
     ]);
     const observation = await client.callTool({ name: 'observe_observer', arguments: {} });
@@ -117,7 +126,14 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
     const moved = await client.callTool({ name: 'move_to', arguments: { destination: { place: 'works' } } });
     expect(JSON.stringify(moved)).toContain('arrived');
     expect(JSON.stringify(moved)).not.toContain('points');
-    expect(JSON.stringify(await client.callTool({ name: 'observe_city', arguments: {} }))).toContain('arrived');
+    const city = JSON.stringify(await client.callTool({ name: 'observe_city', arguments: {} }));
+    expect(city).toContain('arrived');
+    expect(city).toContain(eveningChoice.observationId);
+    expect(city).not.toContain('points');
+    const choice = await client.callTool({ name: 'choose_evening_walk', arguments: eveningChoice });
+    expect(choice.isError).toBeFalsy();
+    expect(JSON.stringify(choice)).toContain('pilot-light');
+    expect(JSON.stringify(choice)).not.toContain('points');
     const activity = await client.callTool({ name: 'interact_city', arguments: { actionId: 'works.patrol' } });
     expect(JSON.stringify(activity)).toContain('works.patrol');
     expect(JSON.stringify(activity)).toContain('running');

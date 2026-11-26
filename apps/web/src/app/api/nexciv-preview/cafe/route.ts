@@ -5,6 +5,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { CAFE_RETENTION_DAYS, CafeDemoStore, InvalidCafeMcpConnection, type CafeActor } from '../../../../lib/cafe-demo-store';
 import { OBSERVER_ACTIONS, type ObserverAction } from '../../../../lib/cafe-observer';
 import type { CityDestination } from '../../../../lib/city-movement';
+import { eveningChoiceSchema } from '../../../../lib/evening-stroll';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -131,6 +132,7 @@ export async function POST(request: NextRequest) {
     return mcpAction(request, (actor) => {
       if (input.action === 'moveTo') return move(actor, input.requestId, input.destination);
       if (input.action === 'interactCity') return interact(actor, input.requestId, input.actionId);
+      if (input.action === 'chooseEveningWalk') return chooseEveningWalk(actor, input.requestId, input.choice);
       if (input.action === 'start' && input.kind === 'observer' && input.driver === 'external' && typeof input.busy === 'boolean') {
         const result = store().start(input.requestId, input.busy, actor, 'observer', 'external');
         return 'error' in result ? json(result, 409) : json(snapshot(result));
@@ -147,6 +149,10 @@ export async function POST(request: NextRequest) {
   }
   const resident = request.cookies.get(residentCookie)?.value;
   if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
+  if (input.action === 'chooseEveningWalk') {
+    if (!loopback(request)) return json({ error: '城市行动仅用于本机试玩。' }, 403);
+    return chooseEveningWalk(resident, input.requestId, input.choice);
+  }
   if (input.action === 'moveTo' || input.action === 'interactCity') {
     if (!loopback(request)) return json({ error: '城市行动仅用于本机试玩。' }, 403);
     return input.action === 'moveTo' ? move(resident, input.requestId, input.destination)
@@ -190,6 +196,13 @@ function interact(actor: CafeActor, requestId: string, actionId: unknown) {
     return json({ error: '请选择现场观测返回的动作 ID。' }, 400);
   }
   const result = store().interactCity(actor, requestId, actionId);
+  return 'error' in result ? json({ error: result.error }, result.code) : json(result);
+}
+
+function chooseEveningWalk(actor: CafeActor, requestId: string, input: unknown) {
+  const choice = eveningChoiceSchema.safeParse(input);
+  if (!choice.success) return json({ error: '请提交 03 号当前观察提供的选项和理由。' }, 400);
+  const result = store().chooseEveningWalk(actor, requestId, choice.data);
   return 'error' in result ? json({ error: result.error }, result.code) : json(result);
 }
 

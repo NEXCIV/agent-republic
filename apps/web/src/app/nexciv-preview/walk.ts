@@ -411,6 +411,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const regularPosition = pierEntrance.clone().add(new THREE.Vector3(1.25, 0, 0.65));
   let pierRegular: { asset: GLTF; patrol: Patrol } | undefined;
   let regularRequested = false;
+  let strollAssetsFor: string | undefined;
+  let strollJourney: string | undefined;
   let pierRoute: RoutePoint[] | undefined;
   let pierJourney: { traveller: Patrol; startedAt: number } | undefined;
   let receivedAt = 0;
@@ -504,7 +506,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function followedPatrol() {
-    return followed === '02' ? siteHost?.patrol : agents.get(followed)?.patrol;
+    if (followed === '02') return siteHost?.patrol;
+    if (followed === '03' && cafeMode) return pierRegular?.patrol;
+    return agents.get(followed)?.patrol;
   }
 
   function zoom(factor: number) {
@@ -515,8 +519,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function resetFollowCamera() {
     followYaw = 0;
-    followPitch = followed === '03' ? 0.28 : FOLLOW_PITCH;
-    followDistance = followed === '03' ? 7.4 : FOLLOW_DISTANCE;
+    followPitch = followed === '03' && !cafeMode ? 0.28 : FOLLOW_PITCH;
+    followDistance = followed === '03' && !cafeMode ? 7.4 : FOLLOW_DISTANCE;
     followHeight = undefined;
     greetingFraming = 0;
   }
@@ -542,7 +546,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     mode = next;
     if (viewChanged && next !== 'follow') resetOrbit();
     followHeight = undefined;
-    if (next === 'follow' && id === '03') loadNorth(true);
+    if (next === 'follow' && id === '03' && !cafeMode) loadNorth(true);
     if (next === 'overview') loadCitywide();
     if (next !== 'overview' && next !== 'follow') loadDistrict(next, true);
   }
@@ -664,12 +668,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const worker = pilot?.worker;
     const byPier = cafeMode && !cityWalk && shift?.place === 'pier';
     const observer = cityWalk ? undefined : shift?.observer;
+    const outing = observer && shift?.phase !== 'done' ? undefined : cityObservation?.eveningWalk?.recent[0];
     const interviewing = !cityWalk && shift?.phase === 'interviewing';
     const travelling = !cityWalk && (shift?.phase === 'toPier' || shift?.phase === 'toCounter');
     const social = !cityWalk && (shift?.phase === 'inviting' || shift?.phase === 'chatting' || shift?.phase === 'reconnecting'
       || (interviewing && !byPier));
     if (cafeMode) {
       const poseDt = playing ? dt : 0;
+      const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
       const host = cityObservation?.nearby?.people[0];
       const hostPosition = worker?.movement.points[0] ?? host?.position;
@@ -697,8 +703,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       if (siteHost && worker) {
         if (pilot.stage === 'dispatch') {
-          const time = cityObservation!.serverTime + (playing ? now - cityReceivedAt : 0);
-          const { progress, walkingMs } = cityWalkTiming(worker.movement, time);
+          const { progress, walkingMs } = cityWalkTiming(worker.movement, cityTime);
           siteHost.patrol.observeJourney(poseDt, progress, walkingMs / 1000);
         } else {
           observedPosition.set(...worker.position);
@@ -714,7 +719,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const duration = shift?.until ? shift.until - shift.since : 0;
       const progress = shift && duration > 0 ? THREE.MathUtils.clamp((time - shift.since) / duration, 0, 1) : 0;
       if ((!cityWalk && shift?.requestedActivity === 'fish' || observer) && districts.shore.status === 'idle') loadDistrict('shore', true);
-      if (observer && districts.shore.status === 'ready' && !regularRequested) {
+      if (outing && strollAssetsFor !== outing.movement.requestId) {
+        strollAssetsFor = outing.movement.requestId;
+        loadRouteRegions(outing.movement.regions);
+      }
+      if ((outing || (observer && districts.shore.status === 'ready')) && !regularRequested) {
         regularRequested = true;
         request('agent-03.glb').then((response) => response.arrayBuffer())
           .then((bytes) => loader.parseAsync(bytes, ASSET_PATH)).then((asset) => {
@@ -730,8 +739,26 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           }).catch(() => { if (!ended && !contextLost) callbacks.fallback(); });
       }
       if (pierRegular) {
-        pierRegular.patrol.root.visible = Boolean(observer);
-        if (observer) pierRegular.patrol.observe(poseDt, regularPosition, interviewSpot, false, interviewing && byPier ? 'nod' : undefined);
+        pierRegular.patrol.root.visible = Boolean(outing || observer);
+        if (outing) {
+          const movement = outing.movement;
+          const target = movement.points.at(-1)!;
+          const [x, z] = movement.facing!;
+          if (cityTime < movement.arrivesAt && movement.metres > 0) {
+            if (strollJourney !== movement.requestId) {
+              pierRegular.patrol.plan(movement.points, [x, z]);
+              strollJourney = movement.requestId;
+            }
+            const { progress, walkingMs } = cityWalkTiming(movement, cityTime);
+            pierRegular.patrol.observeJourney(poseDt, progress, walkingMs / 1000);
+          } else {
+            observedPosition.set(...target);
+            observedFacing.set(x, target[1], z);
+            pierRegular.patrol.observe(poseDt, observedPosition, observedFacing);
+          }
+        } else if (observer) {
+          pierRegular.patrol.observe(poseDt, regularPosition, interviewSpot, false, interviewing && byPier ? 'nod' : undefined);
+        }
       }
       const phase = shift?.phase;
       const fishing = !cityWalk && (phase === 'casting' || phase === 'fishing' || phase === 'reeling');
@@ -743,7 +770,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         }
         if (primary) {
           const target = cityWalk.points.at(-1)!;
-          const cityTime = cityObservation!.serverTime + (playing ? now - cityReceivedAt : 0);
           const { walkingMs, progress, stop } = cityWalkTiming(cityWalk, cityTime);
           if (conversation?.person) {
             observedPosition.set(...target);
@@ -845,7 +871,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const noticeFrame = followed === '01' && cityWalk?.facing ? 1 - THREE.MathUtils.smoothstep(feet.distanceTo(councilNotice), 2, 7) : 0;
       const workFrame = followed === '02' && worker ? THREE.MathUtils.smoothstep(-feet.z, 154, 168) : 0;
       const surveyFrame = followed === '01' && surveying ? THREE.MathUtils.smoothstep(-feet.z, 150, 164) : 0;
-      const shoreFrame = Math.max(workFrame, surveyFrame);
+      const strollFrame = followed === '03' && outing ? THREE.MathUtils.smoothstep(-feet.z, 150, 164) : 0;
+      const shoreFrame = Math.max(workFrame, surveyFrame, strollFrame);
       const hallFrame = (1 - THREE.MathUtils.smoothstep(feet.distanceTo(landmarkEntrances.hall), 7, 41)) * (1 - noticeFrame);
       const forumFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(forumEntrance), 3, 20);
       const pierFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(pierEntrance), 4, 23);
@@ -853,10 +880,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const residenceFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(residenceEntrance), 4, 21);
       const entranceFrame = Math.max(registryFrame, worksFrame, hallFrame, forumFrame, pierFrame, centerFrame, residenceFrame);
       aim.y += 0.58 * entranceFrame;
-      aim.y += 3.15 * hallFrame + 1.45 * centerFrame + 1.08 * residenceFrame + 0.48 * noticeFrame + 0.41 * surveyFrame - 0.12 * workFrame;
+      aim.y += 3.15 * hallFrame + 1.45 * centerFrame + 1.08 * residenceFrame + 0.48 * noticeFrame
+        + 0.41 * surveyFrame - 0.12 * workFrame + 0.21 * strollFrame;
       aim.x -= 1.1 * centerFrame;
       aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame
-        - 1.2 * residenceFrame - 3.7 * hallFrame - 0.48 * noticeFrame - 0.8 * surveyFrame - 0.52 * workFrame;
+        - 1.2 * residenceFrame - 3.7 * hallFrame - 0.48 * noticeFrame - 0.8 * surveyFrame - 0.52 * workFrame - 0.86 * strollFrame;
       if (followed === '01' && byPier && !observer) {
         aim.x += 1.42;
         aim.y -= 1.20;
