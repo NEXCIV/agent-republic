@@ -743,15 +743,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       // Keep the Agent and front doors in view without looking through the sidewalk signs.
       const registryFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.registry), 3, 17);
       const worksFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.works), 3, 17);
+      const hallFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(landmarkEntrances.hall), 7, 41);
       const forumFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(forumEntrance), 3, 20);
       const pierFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(pierEntrance), 4, 23);
       const centerFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(centerEntrance), 4, 17);
       const residenceFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(residenceEntrance), 4, 21);
-      const entranceFrame = Math.max(registryFrame, worksFrame, forumFrame, pierFrame, centerFrame, residenceFrame);
+      const entranceFrame = Math.max(registryFrame, worksFrame, hallFrame, forumFrame, pierFrame, centerFrame, residenceFrame);
       aim.y += 0.58 * entranceFrame;
-      aim.y += 1.45 * centerFrame + 1.08 * residenceFrame;
+      aim.y += 3.15 * hallFrame + 1.45 * centerFrame + 1.08 * residenceFrame;
       aim.x -= 1.1 * centerFrame;
-      aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame - 1.2 * residenceFrame;
+      aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame
+        - 1.2 * residenceFrame - 3.7 * hallFrame;
       if (byPier && !observer) {
         aim.x += 1.42;
         aim.y -= 1.20;
@@ -770,7 +772,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       const greetingDistance = camera.aspect < 0.8 ? Math.max(5.6, followDistance) : Math.max(3.9, followDistance * 0.76);
       const distance = THREE.MathUtils.lerp(followDistance, greetingDistance, greetingFraming)
-        + 2.2 * entranceFrame + 1.8 * forumFrame + 3.3 * centerFrame + 3.3 * residenceFrame;
+        + 2.2 * entranceFrame + 1.8 * forumFrame + 3.3 * centerFrame + 3.3 * residenceFrame + 8.8 * hallFrame;
       // Frame the shop from the street side as the Agent passes the entrance tree.
       const streetSide = THREE.MathUtils.smoothstep(feet.z, 47, 56);
       const northSide = 1 - THREE.MathUtils.smoothstep(feet.z, -22, 18);
@@ -781,14 +783,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const pierYaw = THREE.MathUtils.lerp(forumYaw, 0.64, pierFrame);
       const centerYaw = THREE.MathUtils.lerp(pierYaw, 1.13, centerFrame);
       const closeCafe = cafeMode && !travelling && !byPier;
-      const yaw = followYaw + (byPier && !travelling ? observer ? 0.10 : 0.49 : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame));
+      const usualYaw = byPier && !travelling ? observer ? 0.10 : 0.49
+        : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
+      const yaw = followYaw + THREE.MathUtils.lerp(usualYaw, 0.20, hallFrame);
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
       const northCrossing = THREE.MathUtils.smoothstep(feet.z, -82, -74)
         * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
       const pitch = Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
-        - 0.12 * greetingFraming - 0.07 * residenceFrame);
+        - 0.12 * greetingFraming - 0.07 * residenceFrame - 0.20 * hallFrame);
       camera.position.set(
         aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
         aim.y + distance * Math.sin(pitch),
