@@ -4,6 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
 import { createMarketGreeting } from './marketGreeting';
+import type { CafeSnapshot } from '../../lib/cafe-life';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
 export type District = 'east' | 'west' | 'shore' | 'research' | 'residential';
@@ -34,6 +35,7 @@ type Callbacks = {
 };
 
 export type WalkController = {
+  syncCafe: (snapshot: CafeSnapshot | null) => void;
   view: (mode: View, id?: AgentId) => void;
   zoom: (factor: number) => void;
   play: (enabled: boolean) => void;
@@ -255,7 +257,7 @@ function addCenterNameplate(asset: THREE.Object3D) {
   asset.attach(frame);
 }
 
-export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks): WalkController {
+export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks, cafeMode = false): WalkController {
   const started = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   const canvas = renderer.domElement;
@@ -327,6 +329,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const viewFocus = focus.clone();
   const aim = new THREE.Vector3();
   const marketEntrance = new THREE.Vector3();
+  const counter = new THREE.Vector3(11.45, 0.184, 58.15);
+  const coworker = new THREE.Vector3(11.45, 0.18, 59.65);
+  const seat = new THREE.Vector3(7.2, 0.18, 59.65);
+  const seatedHips = seat.clone().add(new THREE.Vector3(0, 0, 0.16));
+  const seatFront = seat.clone().add(new THREE.Vector3(0, 0, 0.65));
+  const counterFacing = counter.clone().add(new THREE.Vector3(1, 0, 0));
+  const seatFacing = seatFront.clone().add(new THREE.Vector3(0, 0, 1));
+  const observedPosition = new THREE.Vector3();
+  const cafeProps = new THREE.Group();
+  let cafeSnapshot: CafeSnapshot | null = null;
+  let receivedAt = 0;
   const eastEntrances = {
     registry: new THREE.Vector3(80, 1, -14),
     works: new THREE.Vector3(95, 1, 72),
@@ -561,12 +574,28 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
     const primaryAgent = agents.get('01');
     const primary = primaryAgent?.patrol;
-    const greeting = marketGreeting(playing ? dt : 0, primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
-    if (playing) marketGuest?.patrol.advance(dt, greeting.visitor);
+    const greeting = marketGreeting(!cafeMode && playing ? dt : 0, !cafeMode && primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
+    const shift = cafeSnapshot?.run;
+    const social = shift?.phase === 'inviting' || shift?.phase === 'chatting';
+    if (cafeMode) {
+      const poseDt = playing ? dt : 0;
+      marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
+      if (shift?.phase === 'walking' && shift.until && cafeSnapshot) {
+        const time = cafeSnapshot.serverTime + (playing ? now - receivedAt : 0);
+        const progress = THREE.MathUtils.clamp((time - shift.since) / (shift.until - shift.since), 0, 1);
+        observedPosition.lerpVectors(counter, seatFront, progress);
+        primary?.observe(poseDt, observedPosition, seatFront, true);
+      } else if (shift?.phase === 'resting' || shift?.phase === 'done') {
+        const sitting = shift.phase === 'resting';
+        primary?.observe(poseDt, sitting ? seatedHips : seatFront, seatFacing, false, undefined, sitting);
+      } else {
+        primary?.observe(poseDt, counter, social ? coworker : counterFacing, false, shift?.phase === 'inviting' ? 'wave' : undefined);
+      }
+    } else if (playing) marketGuest?.patrol.advance(dt, greeting.visitor);
     for (const [id, agent] of agents) {
       const { patrol } = agent;
       const greetingHere = id === '01' && greeting.active;
-      if (playing) {
+      if (playing && !cafeMode) {
         const cue = greetingHere ? greeting.resident : { hold: 'end' as const, face: patrol.phase === 'arrived' ? agent.lookAt : undefined };
         patrol.advance(dt, cue);
         if (patrol.phase === 'arrived' && patrol.dwelledSeconds >= 4 && !greetingHere) chooseNext(id, agent);
@@ -624,7 +653,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       aim.y += 1.45 * centerFrame + 1.08 * residenceFrame;
       aim.x -= 1.1 * centerFrame;
       aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame - 1.2 * residenceFrame;
-      const frameGuest = followed === '01' && greeting.active ? 1 : 0;
+      const frameGuest = followed === '01' && (cafeMode ? social : greeting.active) ? 1 : 0;
       greetingFraming = tween ? THREE.MathUtils.damp(greetingFraming, frameGuest, 7, dt) : frameGuest;
       if (followed === '01' && marketGuest) {
         const guest = marketGuest.patrol.root.position;
@@ -643,7 +672,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const forumYaw = THREE.MathUtils.lerp(landmarkYaw, -2.85, forumFrame);
       const pierYaw = THREE.MathUtils.lerp(forumYaw, 0.64, pierFrame);
       const centerYaw = THREE.MathUtils.lerp(pierYaw, 1.13, centerFrame);
-      const yaw = followYaw + THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
+      const yaw = followYaw + (cafeMode ? -0.64 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame));
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
@@ -696,7 +725,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     renderer.render(scene, camera);
     const showStreetDetails = mode === 'east' || mode === 'west' || mode === 'research'
       || (mode === 'follow' && patrol && patrol.root.position.z > -44) || orbitDistance < 59;
-    const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (!playing || !primary || primary.progress > 0);
+    const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (cafeMode || !playing || !primary || primary.progress > 0);
     if (!document.hidden && readyForDetails) {
       const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (primary && marketEntrance.distanceTo(primary.root.position) < 29);
       if (nearMarket) {
@@ -704,8 +733,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         loadMarketGuest();
       }
       if (!wide && showStreetDetails) loadDetail('street');
-      if (playing && (!primary || primary.progress >= 10)) loadNorth();
-      if (playing && (!primary || primary.progress >= 30) && districts.east.status === 'idle') loadDistrict('east', false);
+      if (!cafeMode && playing && (!primary || primary.progress >= 10)) loadNorth();
+      if (!cafeMode && playing && (!primary || primary.progress >= 30) && districts.east.status === 'idle') loadDistrict('east', false);
       if (playing && (!primary || primary.progress >= 55) && districts.east.status !== 'loading' && districts.west.status === 'idle') loadDistrict('west', false);
       const researcher = agents.get('03');
       if (playing && researcher?.destination === 'governance' && researcher.patrol.progress >= 34 && districts.research.status === 'idle') {
@@ -1013,6 +1042,24 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     prepareEnvironment(model, streetAnisotropy);
     softenRetailWindows(model);
     street.add(model);
+    if (cafeMode) {
+      street.add(cafeProps);
+      for (const file of ['cafe-bench.glb', 'coffee-stall.glb']) {
+        request(file).then((response) => response.arrayBuffer())
+        .then((bytes) => loader.parseAsync(bytes, ASSET_PATH)).then(({ scene: prop }) => {
+          if (ended || contextLost) { disposeModel(prop); return; }
+          if (file === 'cafe-bench.glb') prop.position.copy(seat);
+          else {
+            prop.scale.setScalar(2.75 / 97.84);
+            prop.rotation.y = -Math.PI / 2;
+            prop.position.set(13.1, counter.y, counter.z);
+            prepareEnvironment(prop, streetAnisotropy);
+          }
+          cafeProps.add(prop);
+          renderer.shadowMap.needsUpdate = true;
+        }).catch(() => { if (!ended && !contextLost) callbacks.fallback(); });
+      }
+    }
     connectPrimary();
     renderer.shadowMap.needsUpdate = true;
     firstCityFrame = lastFrame = measuredAt = performance.now();
@@ -1024,6 +1071,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   });
 
   return {
+    syncCafe(snapshot) { cafeSnapshot = snapshot; receivedAt = performance.now(); },
     view: setView,
     zoom,
     play(enabled) { playing = enabled; },
@@ -1048,6 +1096,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (actor) disposeModel(actor.scene);
       if (model) disposeModel(model);
       if (north) disposeModel(north);
+      disposeModel(cafeProps);
       if (citywide) disposeModel(citywide);
       for (const { asset } of Object.values(districts)) {
         if (asset) disposeModel(asset);

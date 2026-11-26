@@ -27,6 +27,21 @@ function createNod(asset: GLTF, mixer: THREE.AnimationMixer) {
   return mixer.clipAction(clip).setLoop(THREE.LoopOnce, 1);
 }
 
+function benchIdle(idle: THREE.AnimationClip) {
+  const clip = idle.clone();
+  clip.name = 'Bench rest';
+  const delta = new THREE.Quaternion();
+  const rotation = new THREE.Quaternion();
+  for (const track of clip.tracks) {
+    if (!/^(Thigh|Shin)[LR]\.quaternion$/.test(track.name)) continue;
+    delta.setFromAxisAngle(PITCH_AXIS, track.name.startsWith('Thigh') ? -1.45 : 1.48);
+    for (let offset = 0; offset < track.values.length; offset += 4) {
+      rotation.fromArray(track.values, offset).multiply(delta).toArray(track.values, offset);
+    }
+  }
+  return clip;
+}
+
 function measuredRoute(points: RoutePoint[]) {
   let length = 0;
   let previous: THREE.Vector3 | undefined;
@@ -89,8 +104,11 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
     return target.lerpVectors(from.position, to.position, (distance - from.distance) / (to.distance - from.distance));
   }
 
-  function updatePose(dt: number, cue?: PatrolCue, heldAtStart = false) {
-    positionAt(distance, root.position);
+  let seatedPose: THREE.AnimationAction | undefined;
+  const standingY = asset.scene.position.y;
+  function updatePose(dt: number, cue?: PatrolCue, heldAtStart = false, observed?: THREE.Vector3, walking?: boolean, seated = false) {
+    if (observed) root.position.copy(observed);
+    else positionAt(distance, root.position);
     const tangent = positionAt(distance + 0.45, ahead).sub(positionAt(distance - 0.45, behind));
     const alongRoute = Math.atan2(tangent.x * direction, tangent.z * direction);
     let yaw = alongRoute;
@@ -101,11 +119,13 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
     if (dt > 0) root.quaternion.rotateTowards(heading, dt * 3.2);
     else root.quaternion.copy(heading);
 
-    const moving = !heldAtStart && (phase === 'outbound' || phase === 'inbound');
-    const next = moving ? walk : (cue?.gesture === 'wave' && wave) || idle;
-    if (dt > 0 && next !== action) {
+    const moving = walking ?? (!heldAtStart && (phase === 'outbound' || phase === 'inbound'));
+    if (seated) seatedPose ??= mixer.clipAction(benchIdle(idleClip!));
+    const next = seated && seatedPose ? seatedPose : moving ? walk : (cue?.gesture === 'wave' && wave) || idle;
+    if ((dt > 0 || observed) && next !== action) {
       next.reset().setEffectiveWeight(1).play();
-      next.crossFadeFrom(action, 0.18, false);
+      if (dt > 0) next.crossFadeFrom(action, 0.18, false);
+      else action.stop();
       action = next;
     }
     const shouldNod = cue?.gesture === 'nod';
@@ -114,12 +134,16 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
       nod?.reset().play();
     }
     nodding = shouldNod;
+    asset.scene.position.y = standingY - (seated ? 0.24 : 0);
     mixer.update(dt);
   }
 
   updatePose(0);
   return {
     root,
+    observe(dt: number, position: THREE.Vector3, face: THREE.Vector3, moving = false, gesture?: PatrolCue['gesture'], seated = false) {
+      updatePose(dt, { face, gesture }, false, position, moving, seated);
+    },
     get phase() { return phase; },
     get progress() { return Math.round(100 * distance / length); },
     get metresRemaining() { return length - distance; },

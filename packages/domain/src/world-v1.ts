@@ -210,6 +210,16 @@ export const agentObservationV1Schema = z
     epochId: z.number().int().min(0),
     facts: worldFactsSchema,
     self: agentSelfSchema,
+    /** Private perception for the isolated café playtest. Never projected into WorldFrameV1. */
+    cafeDemo: z.object({
+      place: z.enum(['counter', 'bench']),
+      energy: z.number().int().min(0).max(100),
+      nearbyFriend: z.boolean(),
+      available: z.array(z.enum(['work', 'rest', 'invite'])),
+      finishedWork: z.boolean(),
+      lastMeeting: z.enum(['none', 'declined', 'chatted']),
+      preference: z.enum(['social', 'quiet']),
+    }).strict().optional(),
     approvedPublicMessages: z.array(publicMessageSchema).max(MAX_PUBLIC_MESSAGES),
     /** Public names for addressing an invitation. These carry no location or wallet authority. */
     publicContacts: z.array(agentSummarySchema.pick({ agentId: true, displayName: true })).max(MAX_VISIBLE_AGENTS).optional(),

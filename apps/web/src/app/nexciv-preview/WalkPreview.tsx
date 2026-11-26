@@ -1,6 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
+import { CafeShift, phaseLabel } from './CafeShift';
+import type { CafeSnapshot } from '../../lib/cafe-life';
 import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type View, type WalkController } from './walk';
 import type { Place } from './navigation';
 import styles from './preview.module.css';
@@ -36,9 +39,16 @@ function activity(id: AgentId, report: AgentReport) {
   }[report.status];
 }
 
-export function WalkPreview() {
+export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
+  const latest = useRef<CafeSnapshot | null>(null);
+  const [shift, setShift] = useState('等待开班');
+  const updateCafe = useCallback((data: CafeSnapshot | null) => {
+    latest.current = data;
+    world.current?.syncCafe(data);
+    setShift(data ? phaseLabel[data.run.phase] : '等待开班');
+  }, []);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');
   const [overview, setOverview] = useState<DistrictStatus>('idle');
@@ -55,7 +65,7 @@ export function WalkPreview() {
     const host = viewport.current;
     if (!host) return;
     const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const initialView = reduceMotion ? 'overview' : 'follow';
+    const initialView = reduceMotion && !cafeMode ? 'overview' : 'follow';
     setView(initialView);
     setPlaying(!reduceMotion);
     try {
@@ -66,13 +76,14 @@ export function WalkPreview() {
         district: (side, status) => setDistricts((previous) => ({ ...previous, [side]: status })),
         overview: setOverview,
         fps: setFps,
-      });
+      }, cafeMode);
       world.current = controller;
+      if (cafeMode) controller.syncCafe(latest.current);
       return () => { controller.dispose(); world.current = null; };
     } catch {
       setState('fallback');
     }
-  }, []);
+  }, [cafeMode]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
@@ -106,7 +117,8 @@ export function WalkPreview() {
       <header className={styles.header}>
         <span className={styles.brand}>NEXCIV</span>
         <span className={styles.divider} />
-        <h1>街区观察</h1>
+        <h1>{cafeMode ? '咖啡街的一个班次' : '街区观察'}</h1>
+        <Link className={styles.cafeLink} href={cafeMode ? '/nexciv-preview' : '/nexciv-preview/cafe'} prefetch={false}>{cafeMode ? '返回街区' : '观察咖啡街'}</Link>
         <span className={styles.status} role="status">
           {state === 'ready' ? '实时 3D · DEMO' : state === 'loading' ? '正在载入街区' : '静态预览 · DEMO'}
         </span>
@@ -115,12 +127,13 @@ export function WalkPreview() {
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
-          <strong role="status">{overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
+          <small>{cafeMode ? 'AGENT 01 · AI SIMULATED · DEMO' : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
+          <strong role="status">{cafeMode ? shift : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
         </div>
-        {state === 'fallback' && <p className={styles.fallback}>3D 场景暂时无法加载。下方可查看路线的两处实景。</p>}
+        {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。下方可查看路线的两处实景。'}</p>}
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
+        {cafeMode ? <CafeShift onUpdate={updateCafe} /> : <>
         <div className={styles.controls}>
           <div className={styles.switcher} role="group" aria-label="视角">
             <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>全城</button>
@@ -158,6 +171,7 @@ export function WalkPreview() {
             <a href="/nexciv-walk/market.webp">Corner Market 门前</a>
           </div>
         )}
+        </>}
       </footer>
     </div>
   );
