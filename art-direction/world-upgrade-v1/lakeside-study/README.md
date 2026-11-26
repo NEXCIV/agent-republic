@@ -115,7 +115,7 @@ blender -b --factory-startup --disable-autoexec --python-exit-code 2 -P scripts/
 
 可在命令末尾加 `-- --chunk governance` 仅导出议会大厅街区。东区底包和两份近景分别使用 `--chunk east`、`--chunk registry` 和 `--chunk works`。西区使用 `-- --chunk west`，北岸湖畔使用 `-- --chunk shore`，研究区底包和近景使用 `-- --chunk research` 和 `-- --chunk center`，住宅区使用 `-- --chunk residential`。全城使用 `-- --chunk citywide`，复用已生成的 `governance`、`research` 和 `east` 分块里的四座主地标。把角色库的 `CIVRUM_Builder_02.glb` 和 `CIVRUM_Researcher_03.glb` 分别复制到 `apps/web/public/nexciv-walk/agent-02.glb` 和 `apps/web/public/nexciv-walk/agent-03.glb`。[02 号角色库](../../tripo/builder-02-v1/motion/) · [03 号角色库](../../tripo/researcher-03-v1/motion/)。
 
-公共建设中心的网页近景使用[重建建筑库](../landmark-masters/buildings/Public_Construction_Rebuilt.blend)，保留青色雨棚、玻璃穹顶、帆形立面、吊机和入口雕塑。门窗、台阶、栏杆、绿化和玻璃门后的陈设使用实体几何。石材、金属与玻璃等使用独立材质和按米重复的贴图。近景载入后会隐藏东区中的旧入口构件。东区中远景继续使用[原建筑库](../landmark-masters/buildings/Public_Construction.blend)导出的模型。
+公共建设中心的网页街景使用[重建建筑库](../landmark-masters/buildings/Public_Construction_Rebuilt.blend)，保留青色雨棚、玻璃穹顶、帆形立面、吊机和入口雕塑。门窗、台阶、栏杆、绿化和玻璃门后的陈设使用实体几何。石材、金属与玻璃等使用独立材质和按米重复的贴图。东区中景保留同一栋建筑的外壳、栏杆、门厅和材质，降低贴图分辨率并简化倒角和招牌。镜头靠近后切换到完整近景。另有[原建筑库](../landmark-masters/buildings/Public_Construction.blend)可复查初版 Tripo 模型。
 
 在仓库根目录运行以下命令生成重建近景源文件与 GLB。中文招牌默认使用 Windows 的等线粗体，可用 `--font` 指定其他支持简体中文的本地字体。导出的招牌已转为网格。
 
@@ -125,7 +125,7 @@ blender --background --factory-startup --python scripts/build_nexciv_works_rebui
 
 将生成的 `public-construction-rebuilt.glb` 放入 `apps/web/public/nexciv-walk/`。东区网格由 `scripts/export_nexciv_walk_preview.py -- --chunk east` 导出。旧的 `--chunk works` 仍可用于复现使用原 Tripo 模型的近景版本。
 
-门外的机械臂展示台使用[独立资产库](assets/Works_Robotics_Demonstrator.blend)。它保留原始模型的构件和贴图，约 6.4 万三角面，使用 2048 × 2048 底色、金属粗糙度和法线图。资产库使用 `scripts/prepare_nexciv_works_demonstrator.py -- --source <原始 GLB> --output <输出 blend>` 生成，东区导出时按场景中原有展示台的位置插入。
+门外的机械臂展示台使用[独立资产库](assets/Works_Robotics_Demonstrator.blend)。它保留原始模型的构件和贴图，约 6.4 万三角面，使用 2048 × 2048 底色、金属粗糙度和法线图。资产库使用 `scripts/prepare_nexciv_works_demonstrator.py -- --source <原始 GLB> --output <输出 blend>` 生成，东区导出时按场景中原有展示台的位置插入。展台后的玫瑰在网页导出时直接使用原始底色图，并采用低反光的非金属材质。
 
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 

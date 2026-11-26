@@ -40,6 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "apps/web/public/nexciv-walk"
 WORKS_DEMONSTRATOR = "WORKS_Robotics_Demonstrator"
 WORKS_DEMONSTRATOR_LIBRARY = ROOT / "art-direction/world-upgrade-v1/lakeside-study/assets/Works_Robotics_Demonstrator.blend"
+WORKS_REBUILT_LIBRARY = ROOT / "art-direction/world-upgrade-v1/landmark-masters/buildings/Public_Construction_Rebuilt.blend"
 WEST, EAST, SOUTH, NORTH = -52, 53, -81, 46
 GOVERNANCE_NORTH = 116
 GOVERNANCE_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.002"
@@ -515,6 +516,32 @@ def group_overview_instances(root):
             obj.parent = holder
 
 
+def stage_works_proxy(root, origin, export_material):
+    with bpy.data.libraries.load(str(WORKS_REBUILT_LIBRARY), link=False) as (source, prepared):
+        prepared.objects = sorted(name for name in source.objects if name[:2].isdigit())
+    parts = prepared.objects
+    if not parts or any(obj is None or obj.type != "MESH" for obj in parts):
+        raise RuntimeError("Missing mesh parts in the rebuilt construction centre library")
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in parts:
+        root.objects.link(obj)
+        obj.location += origin
+        obj.select_set(True)
+        obj.modifiers.clear()  # Mouldings and railings remain in the shells, fine bevels are near only.
+        for index, original in enumerate(obj.data.materials):
+            obj.data.materials[index] = export_material(original, 192)
+        if obj.name.startswith(("07 ", "08 ")):
+            bpy.context.view_layer.objects.active = obj
+            modifier = obj.modifiers.new("Lettering at street distance", "DECIMATE")
+            modifier.ratio = 0.16
+            bpy.ops.object.modifier_apply(modifier=modifier.name)
+    proxy = parts[0]
+    bpy.context.view_layer.objects.active = proxy
+    bpy.ops.object.join()
+    proxy.name = WORKS
+    proxy["previewTier"] = "works_proxy"
+
+
 def stage_assets(scene, graph, chunk, library=DEST):
     root = bpy.data.collections.new("NEXCIV web export")
     scene.collection.children.link(root)
@@ -547,7 +574,23 @@ def stage_assets(scene, graph, chunk, library=DEST):
             finish.surface_render_method = "BLENDED"
             transparent.add(finish)
         base = surface.inputs["Base Color"]
-        if base.is_linked and base.links[0].from_node.type not in {"TEX_IMAGE", "VERTEX_COLOR"}:
+        rose_map = next(
+            (
+                node for node in finish.node_tree.nodes
+                if node.type == "TEX_IMAGE" and node.image and node.image.name == "rose_map_0"
+            ),
+            None,
+        ) if chunk == "east" else None
+        if rose_map is not None:
+            links = finish.node_tree.links
+            # The Blender RGB mix drops the rose atlas on export. Foliage is dielectric.
+            links.new(rose_map.outputs["Color"], base)
+            for channel, value in (("Metallic", 0.0), ("Roughness", 0.83)):
+                socket = surface.inputs[channel]
+                for link in list(socket.links):
+                    links.remove(link)
+                socket.default_value = value
+        elif base.is_linked and base.links[0].from_node.type not in {"TEX_IMAGE", "VERTEX_COLOR"}:
             links = finish.node_tree.links
             upstream = base.links[0].from_node
             atlas = upstream.inputs["Color"].links if upstream.type == "HUE_SAT" else ()
@@ -595,6 +638,14 @@ def stage_assets(scene, graph, chunk, library=DEST):
             continue
         if landmark and name != landmark:
             continue
+        if chunk == "east":
+            if name == WORKS:
+                stage_works_proxy(root, transform.translation, export_material)
+                continue
+            if name == RAILING or name.startswith("Vestibule | ") or (
+                name.startswith("Public works | ") and name != "Public works | entrance promenade"
+            ):
+                continue
         if chunk == "east" and name == WORKS_DEMONSTRATOR:
             with bpy.data.libraries.load(str(WORKS_DEMONSTRATOR_LIBRARY), link=False) as (_, prepared):
                 prepared.objects = [WORKS_DEMONSTRATOR]
@@ -673,13 +724,8 @@ def stage_assets(scene, graph, chunk, library=DEST):
             tier = "market_proxy"
         elif street_proxy:
             tier = "street_proxy"
-        if chunk == "east" and (
-            name.startswith("Vestibule | ")
-            or (name.startswith("Public works | ") and name != "Public works | entrance promenade")
-        ):
-            asset["previewTier"] = "works_proxy"
-        elif name == RAILING:
-            asset["previewTier"] = "works_proxy" if chunk == "east" else "works_railing"
+        if name == RAILING:
+            asset["previewTier"] = "works_railing"
         elif name == ROOF_DETAILS:
             asset["previewTier"] = "works_roof"
         elif name == ENTRANCE_DETAILS:
@@ -691,7 +737,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
         elif chunk == "center":
             parts.append((asset, 245000))
         elif chunk == "east" and len(mesh.polygons) > 10000:
-            face_limit = {"registry_proxy": 38000, "works_proxy": 120000}.get(tier, 9000)
+            face_limit = 38000 if tier == "registry_proxy" else 9000
             if len(mesh.polygons) > face_limit:
                 parts.append((asset, face_limit))
         elif chunk == "west" and len(mesh.polygons) > 55000:
