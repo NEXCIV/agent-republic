@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { CITY_PLACES, cityWalkTiming } from '../../lib/city-movement';
 import type { useCityVisit, VisitCommand } from './useCityVisit';
 import styles from './preview.module.css';
@@ -14,20 +15,21 @@ type VenueAction = keyof typeof ACTION_LABELS;
 const WORKS_ACTIONS = ['works.patrol', 'works.rest'] as const;
 const NOTICE_ACTIONS = ['governance.read'] as const;
 
-export function CityVisitPanel({ venue, session, talkingToManager, onMeet, onCommand }: {
+export function CityVisitPanel({ venue, session, talkingToManager, onMeet, onCommand, children }: {
   venue: Venue;
   session: ReturnType<typeof useCityVisit>;
   talkingToManager: boolean;
   onMeet: () => void;
   onCommand: (command: VisitCommand) => void;
+  children?: ReactNode;
 }) {
   const { observation, connection, message, commandError, pending } = session;
   const name = CITY_PLACES[venue];
   const visitCommand = `visit.${venue}` as const;
   const movement = observation?.movement;
   const records = observation?.recentActivities.filter(({ place, actionId }) => place === venue && Object.hasOwn(ACTION_LABELS, actionId)) ?? [];
-  const running = records.find(({ status }) => status === 'running');
-  const linkedActivity = movement && records.find(({ requestId }) => requestId === movement.requestId);
+  const linkedActivity = movement && observation?.recentActivities.find(({ requestId, place }) => requestId === movement.requestId && place === venue);
+  const running = linkedActivity?.status === 'running' ? linkedActivity : records.find(({ status }) => status === 'running');
   const enRoute = movement?.status === 'walking' && (Boolean(linkedActivity)
     || ('place' in movement.destination && movement.destination.place === venue));
   const onSite = observation?.nearby?.place === venue && movement?.status !== 'walking';
@@ -36,6 +38,7 @@ export function CityVisitPanel({ venue, session, talkingToManager, onMeet, onCom
   const progress = enRoute && observation ? Math.round(100 * cityWalkTiming(movement, observation.serverTime).progress) : 0;
   const actions: readonly VenueAction[] = talkingToManager ? ['works.chat', 'works.patrol']
     : venue === 'works' ? WORKS_ACTIONS : NOTICE_ACTIONS;
+  const readyAtNotice = venue === 'governance' && observation?.availableActions.some(({ id }) => id === 'governance.survey' || id === 'governance.submit');
   let status = `派 01 号前往${name}，到达后可以${venue === 'works' ? '询问管理员或巡查现场' : '查看议事公告'}。`;
   if (connection === 'unavailable' || connection === 'offline') status = message;
   else if (pending === visitCommand) status = '正在提交行程…';
@@ -59,7 +62,7 @@ export function CityVisitPanel({ venue, session, talkingToManager, onMeet, onCom
     {connection !== 'unavailable' && <div className={styles.visitControls}>
       {(onSite || talkingToManager) ? <>
         {!talkingToManager && managerPresent && <button type="button" onClick={onMeet}>查看现场管理员</button>}
-        {actions.map((action) => <button key={action} type="button"
+        {!readyAtNotice && actions.map((action) => <button key={action} type="button"
           disabled={!ready || !observation?.availableActions.some(({ id }) => id === action)} onClick={() => onCommand(action)}>
           {ACTION_LABELS[action]}
         </button>)}
@@ -68,6 +71,7 @@ export function CityVisitPanel({ venue, session, talkingToManager, onMeet, onCom
       </button>}
     </div>}
     {commandError && <p role="alert" className={styles.visitError}>{commandError}</p>}
+    {children}
     {records.length > 0 && <div className={styles.visitHistory} aria-label="现场活动记录">
       <h3>现场活动记录</h3>
       {records.map(({ requestId, label, events, status: activityStatus }) => <div key={requestId} className={styles.visitRecord}>

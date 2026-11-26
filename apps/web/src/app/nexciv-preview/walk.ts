@@ -9,6 +9,7 @@ import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING, COUN
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { cityWalkTiming, type CityMovement, type CityObservation, type CityRegion } from '../../lib/city-movement';
 import type { CityPoint } from '../../lib/cafe-geometry';
+import type { LightingPilot } from '../../lib/city-activities';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
 import { THEATRE_CLOCK, THEATRE_STAGE } from '../../lib/theatre-layout';
@@ -457,6 +458,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const observedPosition = new THREE.Vector3();
   const observedFacing = new THREE.Vector3();
   const cafeProps = new THREE.Group();
+  const lightingProps = new THREE.Group();
+  scene.add(lightingProps);
   let cafeSnapshot: CafeSnapshot | null = null;
   let cityObservation: CityObservation | null = null;
   let cityReceivedAt = 0;
@@ -464,6 +467,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let cityJourney: { traveller: Patrol; id: string } | undefined;
   let workerAssetsFor: string | undefined;
   let workerJourney: string | undefined;
+  let workerReport: AgentReport | undefined;
   let lightingLamp: THREE.Group | undefined;
   let installationKit: THREE.Group | undefined;
   let theatreLights: ReturnType<typeof createTheatreLighting> | undefined;
@@ -607,8 +611,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function selectableActor(id: ActorId) {
-    if (id === WORKS_MANAGER) return siteHost;
-    if (id === '02') return cafeMode ? siteHost : marketGuest;
+    const assignedWorker = cityObservation?.lightingPilot?.worker;
+    if (id === WORKS_MANAGER) return assignedWorker ? undefined : siteHost;
+    if (id === '02') return cafeMode || assignedWorker ? siteHost : marketGuest;
     if (id === '03' && cafeMode) return pierRegular;
     return agents.get(id);
   }
@@ -715,6 +720,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (viewChanged && next !== 'follow') resetOrbit();
     followHeight = undefined;
     if (next === 'follow' && id === '03' && !cafeMode) loadNorth(true);
+    if (next === 'follow' && id === '02' && cityObservation?.lightingPilot?.worker) {
+      loadRouteRegions(cityObservation.lightingPilot.worker.movement.regions);
+    }
     if (next === 'overview') loadCitywide();
     if (next !== 'overview' && next !== 'follow') loadDistrict(next, true);
   }
@@ -872,6 +880,58 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     return progress;
   }
 
+  function poseWorksSite(pilot: LightingPilot | undefined, cityTime: number, poseDt: number, talkTarget?: THREE.Vector3) {
+    const worker = pilot?.worker;
+    const host = cityObservation?.nearby?.people.find(({ id }) => id === WORKS_MANAGER);
+    const hostPosition = worker?.movement.points[0] ?? host?.position;
+    if (hostPosition && !siteHostRequested) loadSiteHost(hostPosition);
+    if (worker && workerAssetsFor !== worker.movement.requestId) {
+      workerAssetsFor = worker.movement.requestId;
+      loadRouteRegions(worker.movement.regions);
+    }
+    if (pilot?.stage === 'installing' && districts.shore.asset && !installationKit) {
+      installationKit = createInstallationKit(pilot.worker.position);
+      lightingProps.add(installationKit);
+      renderer.shadowMap.needsUpdate = true;
+    }
+    if (pilot?.stage === 'lit' && districts.shore.asset && !lightingLamp) {
+      lightingLamp = createPilotLamp(pilot.lamp.position);
+      lightingProps.add(lightingLamp);
+      renderer.shadowMap.needsUpdate = true;
+    }
+    if (installationKit) installationKit.visible = pilot?.stage === 'installing';
+    if (lightingLamp) lightingLamp.visible = pilot?.stage === 'lit';
+
+    if (!siteHost) return;
+    siteHost.patrol.root.visible = Boolean(cityObservation);
+    if (!worker) {
+      siteHost.patrol.observe(poseDt, siteHost.position, talkTarget ?? siteHost.facing, false, talkTarget ? 'nod' : undefined);
+      return;
+    }
+
+    const { movement } = worker;
+    const [x, z] = movement.facing!;
+    const { progress, walkingMs } = cityWalkTiming(movement, cityTime);
+    if (pilot.stage === 'dispatch') {
+      if (workerJourney !== movement.requestId) {
+        workerJourney = movement.requestId;
+        siteHost.patrol.plan(movement.points, [x, z]);
+      }
+      siteHost.patrol.observeJourney(poseDt, progress, walkingMs / 1000);
+    } else {
+      observedPosition.set(...worker.position);
+      observedFacing.set(x, worker.position[1], z);
+      siteHost.patrol.observe(poseDt, observedPosition, observedFacing, false, pilot.stage === 'installing' ? 'install' : undefined);
+    }
+
+    const status = pilot.stage === 'dispatch' ? 'outbound' : 'arrived';
+    const percentage = Math.round(progress * 100);
+    if (!cafeMode && (workerReport?.status !== status || workerReport.progress !== percentage)) {
+      workerReport = { status, progress: percentage, from: 'works' };
+      callbacks.agent('02', workerReport);
+    }
+  }
+
   function animate(now: number) {
     if (ended || contextLost || !model) return;
     const dt = document.hidden ? 0 : Math.min((now - lastFrame) / 1000, 0.075);
@@ -911,6 +971,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       || (interviewing && !byPier));
     const poseDt = playing ? dt : 0;
     const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
+    poseWorksSite(pilot, cityTime, poseDt, conversation?.person?.id === WORKS_MANAGER ? primary?.root.position : undefined);
     let observedProgress: number | undefined;
     if (cafeMode) {
       if (theatre?.booking && districts.west.asset) {
@@ -930,44 +991,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         stageInstallation?.update(cityTime - theatre.booking.opensAt, playing && tween);
       }
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
-      const host = cityObservation?.nearby?.people[0];
-      const hostPosition = worker?.movement.points[0] ?? host?.position;
-      if (hostPosition && !siteHostRequested) loadSiteHost(hostPosition);
-      if (worker && workerAssetsFor !== worker.movement.requestId) {
-        workerAssetsFor = worker.movement.requestId;
-        loadRouteRegions(worker.movement.regions);
-      }
-      if (worker && workerJourney !== worker.movement.requestId && siteHost) {
-        siteHost.patrol.plan(worker.movement.points, worker.movement.facing!);
-        workerJourney = worker.movement.requestId;
-      }
-      if (worker && districts.shore.asset) {
-        if (pilot.stage === 'installing' && !installationKit) {
-          installationKit = createInstallationKit(worker.position);
-          cafeProps.add(installationKit);
-          renderer.shadowMap.needsUpdate = true;
-        }
-        if (pilot.stage === 'lit' && !lightingLamp) {
-          lightingLamp = createPilotLamp(pilot.lamp.position);
-          cafeProps.add(lightingLamp);
-          if (installationKit) installationKit.visible = false;
-          renderer.shadowMap.needsUpdate = true;
-        }
-      }
-      if (siteHost && worker) {
-        if (pilot.stage === 'dispatch') {
-          const { progress, walkingMs } = cityWalkTiming(worker.movement, cityTime);
-          siteHost.patrol.observeJourney(poseDt, progress, walkingMs / 1000);
-        } else {
-          observedPosition.set(...worker.position);
-          const [x, z] = worker.movement.facing!;
-          observedFacing.set(x, worker.position[1], z);
-          siteHost.patrol.observe(poseDt, observedPosition, observedFacing, false, pilot.stage === 'installing' ? 'install' : undefined);
-        }
-      } else if (siteHost) {
-        const face = conversation && primary ? primary.root.position : siteHost.facing;
-        siteHost.patrol.observe(poseDt, siteHost.position, face, false, conversation ? 'nod' : undefined);
-      }
       const time = (cafeSnapshot?.serverTime ?? 0) + (playing ? now - receivedAt : 0);
       const duration = shift?.until ? shift.until - shift.since : 0;
       const progress = shift && duration > 0 ? THREE.MathUtils.clamp((time - shift.since) / duration, 0, 1) : 0;
@@ -1047,13 +1070,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         primary?.observe(poseDt, counter, social ? coworker : counterFacing, false, shift?.phase === 'inviting' ? 'wave' : undefined);
       }
     } else {
-      const host = cityObservation?.nearby?.people.find(({ id }) => id === WORKS_MANAGER);
-      if (host && !siteHostRequested) loadSiteHost(host.position);
-      if (siteHost) {
-        siteHost.patrol.root.visible = Boolean(cityObservation && !worker);
-        const talking = conversation?.person?.id === WORKS_MANAGER && primary;
-        siteHost.patrol.observe(poseDt, siteHost.position, talking ? primary.root.position : siteHost.facing, false, talking ? 'nod' : undefined);
-      }
       if (cityWalk) {
         const talkTarget = conversation?.person ? observedFacing.set(...conversation.person.position) : undefined;
         observedProgress = poseCityWalk(cityWalk, primary, cityTime, poseDt, talkTarget);
@@ -1061,7 +1077,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         observedPosition.set(...projectedPosition);
         primary.observe(poseDt, observedPosition, counterFacing);
       }
-      if (playing) marketGuest?.patrol.advance(dt, greeting.visitor);
+      if (marketGuest) {
+        marketGuest.patrol.root.visible = !worker;
+        if (playing && !worker) marketGuest.patrol.advance(dt, greeting.visitor);
+      }
     }
     for (const [id, agent] of agents) {
       const { patrol } = agent;
@@ -1602,7 +1621,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const patrol = createAgentPatrol(asset, layout.points, [marketEntrance.x, marketEntrance.z]);
         marketGuest = { asset, patrol };
         actorLayer.add(patrol.root);
-        if (callbacks.onSelect) callbacks.agent('02', { status: 'arrived', progress: 100, destination: 'market' });
+        if (callbacks.onSelect && !cityObservation?.lightingPilot?.worker) {
+          callbacks.agent('02', { status: 'arrived', progress: 100, destination: 'market' });
+        }
       } catch {
         disposeModel(asset.scene);
       }
@@ -1743,6 +1764,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (model) disposeModel(model);
       if (north) disposeModel(north);
       disposeModel(cafeProps);
+      disposeModel(lightingProps);
       fishingGear?.dispose();
       if (citywide) disposeModel(citywide);
       for (const { asset } of Object.values(districts)) {

@@ -9,6 +9,9 @@ const commands = {
   'works.patrol': { action: 'interactCity', actionId: 'works.patrol' },
   'works.rest': { action: 'interactCity', actionId: 'works.rest' },
   'governance.read': { action: 'interactCity', actionId: 'governance.read' },
+  'governance.survey': { action: 'interactCity', actionId: 'governance.survey' },
+  'governance.submit': { action: 'interactCity', actionId: 'governance.submit' },
+  'works.install-light': { action: 'interactCity', actionId: 'works.install-light' },
 } as const;
 
 export type VisitCommand = keyof typeof commands;
@@ -68,7 +71,8 @@ export function useCityVisit(enabled: boolean, applyObservation: (observation: C
         setObservation(data);
         setConnection('ready');
         setMessage('');
-        if (data.movement?.status === 'walking' || data.recentActivities[0]?.status === 'running') nextPoll = 900;
+        if (data.movement?.status === 'walking' || data.recentActivities[0]?.status === 'running'
+          || data.lightingPilot?.stage === 'review' || data.lightingPilot?.worker?.activity.status === 'running') nextPoll = 900;
       } catch {
         if (!controller.signal.aborted && version === commandVersion.current) {
           setConnection('offline');

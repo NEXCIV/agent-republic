@@ -346,14 +346,13 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(planCityWalk([7.35, 0.182, -76.3], { x: 5.5, z: -77.75 })?.points.at(-1)).toEqual(reading.position);
   });
 
-  it('unlocks the lakeside survey from the agenda and accepts a report only after both observations and return', async () => {
+  it('runs the lakeside lighting project from an unpaired browser and retains its records', async () => {
     const owner = browser();
     const other = browser();
-    const agent = await redeem(await codeFor(owner));
     const survey = { action: 'interactCity', actionId: 'governance.survey', requestId: randomUUID() };
     const submit = { action: 'interactCity', actionId: 'governance.submit', requestId: randomUUID() };
     const install = { action: 'interactCity', actionId: 'works.install-light', requestId: randomUUID() };
-    const eveningBefore = (await get('?control=city', agent).json()).eveningWalk;
+    const eveningBefore = (await get('?control=city', owner).json()).eveningWalk;
     expect(eveningBefore).toMatchObject({
       agentId: '03', goal: expect.any(String), energy: 64, lighting: { state: 'not-installed' },
     });
@@ -363,14 +362,14 @@ describe.skipIf(!supported)('café browser pairing', () => {
       choice: { observationId: eveningBefore.observationId, optionId: 'main-path', reasonId: 'existing-lamp' },
     };
     expect((await post(choose, other)).status).toBe(409);
-    expect((await post({ ...choose, choice: { ...choose.choice, reasonId: 'pilot-light' } }, agent)).status).toBe(422);
-    const walked = await post(choose, agent);
+    expect((await post({ ...choose, choice: { ...choose.choice, reasonId: 'pilot-light' } }, owner)).status).toBe(422);
+    const walked = await post(choose, owner);
     expect(walked.status).toBe(200);
     const firstWalk = await walked.json();
     expect(firstWalk).toMatchObject({ status: 'running', observation: { lighting: { state: 'not-installed' } }, selection: choose.choice });
     expect(firstWalk.activity.events.map(({ type }: { type: string }) => type)).toEqual(['started']);
-    expect((await (await post(choose, agent)).json()).activity.requestId).toBe(choose.requestId);
-    expect((await post({ ...choose, requestId: randomUUID() }, agent)).status).toBe(409);
+    expect((await (await post(choose, owner)).json()).activity.requestId).toBe(choose.requestId);
+    expect((await post({ ...choose, requestId: randomUUID() }, owner)).status).toBe(409);
     const inTransit = await get('?control=city', owner).json();
     expect(inTransit.canMove).toBe(true);
     expect(inTransit.eveningWalk.recent[0].movement.status).toBe('walking');
@@ -378,33 +377,38 @@ describe.skipIf(!supported)('café browser pairing', () => {
     const atLamp = (await get('?control=city', owner).json()).eveningWalk;
     expect(atLamp.position).toEqual([21, 0.19, -165.3]);
     expect(atLamp.recent[0].activity.events.map(({ type }: { type: string }) => type)).toEqual(['started', 'checkpoint', 'completed']);
-    expect((await post(install, agent)).status).toBe(422);
-    const trip = await (await post({ action: 'moveTo', destination: { place: 'governance' } }, agent)).json();
+    expect((await post(install, owner)).status).toBe(422);
+    const trip = await (await post({ action: 'moveTo', destination: { place: 'governance' } }, owner)).json();
     vi.setSystemTime(trip.arrivesAt);
-    expect((await post(survey, agent)).status).toBe(422);
-    expect((await post(submit, agent)).status).toBe(422);
-    const read = await (await post({ action: 'interactCity', actionId: 'governance.read' }, agent)).json();
+    expect((await post(survey, owner)).status).toBe(422);
+    expect((await post(submit, owner)).status).toBe(422);
+    const read = await (await post({ action: 'interactCity', actionId: 'governance.read' }, owner)).json();
     vi.setSystemTime(read.endsAt);
     const initial = await get('?control=city', owner).json();
     expect(initial.lightingSurvey).toBe('available');
     expect(initial.availableActions).toContainEqual(expect.objectContaining({ id: survey.actionId }));
-    const response = await post(survey, agent);
+    const response = await post(survey, owner);
     expect(response.status).toBe(200);
     const started = await response.json();
     expect(started.events.map(({ type }: { type: string }) => type)).toEqual(['started']);
-    expect((await post(submit, agent)).status).toBe(409);
+    expect((await post(submit, owner)).status).toBe(409);
     const walking = await get('?control=city', owner).json();
     expect(walking.lightingSurvey).toBe('surveying');
     expect(walking.movement.regions).toEqual(expect.arrayContaining(['north', 'shore']));
     const [first, second] = walking.movement.stops;
     vi.setSystemTime(first.startsAt + 1000);
-    const observing = await get('?control=city', agent).json();
+    const observing = await get('?control=city', owner).json();
     expect(observing.position).toEqual(first.position);
     expect(observing.recentActivities[0].events.map(({ type }: { type: string }) => type)).toEqual(['started', 'checkpoint']);
     vi.setSystemTime(second.startsAt + 1000);
     const halfway = await get('?control=city', owner).json();
     expect(halfway.position).toEqual(second.position);
     expect(halfway.recentActivities[0].events.filter(({ type }: { type: string }) => type === 'observation')).toHaveLength(1);
+    expect(halfway.lightingRecords).toContainEqual(expect.objectContaining({
+      requestId: survey.requestId,
+      status: 'running',
+      events: halfway.recentActivities[0].events,
+    }));
     expect((await get('?control=city', other).json()).lightingSurvey).toBeUndefined();
 
     local.nexcivCafeStore?.close();
@@ -414,36 +418,36 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(returned.position).toEqual(initial.position);
     expect(returned.lightingSurvey).toBe('ready');
     expect(returned.recentActivities[0].events.filter(({ type }: { type: string }) => type === 'observation')).toHaveLength(2);
-    const accepted = await post(submit, agent);
+    const accepted = await post(submit, owner);
     expect(accepted.status).toBe(200);
     const report = await accepted.json();
     expect(report.events.at(-1).text).toMatch(/^DEMO.*已收到调研报告.*16 米.*低位步道灯/);
-    expect((await (await post(submit, agent)).json()).requestId).toBe(submit.requestId);
-    expect((await post({ ...submit, requestId: randomUUID() }, agent)).status).toBe(422);
+    expect((await (await post(submit, owner)).json()).requestId).toBe(submit.requestId);
+    expect((await post({ ...submit, requestId: randomUUID() }, owner)).status).toBe(422);
     const displayed = await get('?control=city', owner).json();
     expect(displayed.lightingSurvey).toBe('submitted');
     expect(displayed.recentActivities[0]).toMatchObject({ status: 'completed', requestId: submit.requestId });
     expect((await get('?control=city', other).json()).recentActivities).toEqual([]);
 
     expect(displayed.lightingPilot).toMatchObject({ stage: 'review', approvedAt: expect.any(Number) });
-    expect((await post(install, agent)).status).toBe(422);
+    expect((await post(install, owner)).status).toBe(422);
     vi.setSystemTime(displayed.lightingPilot.approvedAt);
-    const approved = await get('?control=city', agent).json();
+    const approved = await get('?control=city', owner).json();
     expect(approved.lightingPilot.stage).toBe('approved');
     expect(approved.availableActions).toContainEqual(expect.objectContaining({ id: install.actionId, agentId: '02' }));
     expect((await post(install, other)).status).toBe(422);
-    const dispatch = await post(install, agent);
+    const dispatch = await post(install, owner);
     expect(dispatch.status).toBe(200);
     const job = await dispatch.json();
     expect(job).toMatchObject({ agentId: '02', status: 'running', requestId: install.requestId });
-    expect(await (await post(install, agent)).json()).toEqual(job);
-    expect((await post({ ...install, requestId: randomUUID() }, agent)).status).toBe(422);
+    expect(await (await post(install, owner)).json()).toEqual(job);
+    expect((await post({ ...install, requestId: randomUUID() }, owner)).status).toBe(422);
     const enRoute = await get('?control=city', owner).json();
     expect(enRoute.position).toEqual(returned.position);
     expect(enRoute.lightingPilot.stage).toBe('dispatch');
     expect(enRoute.lightingPilot.worker.position).toEqual(CITY_MAP.places.find(({ id }) => id === 'works')?.position);
     expect(enRoute.lightingPilot.worker.movement.regions).toEqual(expect.arrayContaining(['east', 'north', 'shore']));
-    expect((await post({ action: 'moveTo', destination: { place: 'plaza' } }, agent)).status).toBe(200);
+    expect((await post({ action: 'moveTo', destination: { place: 'plaza' } }, owner)).status).toBe(200);
 
     vi.setSystemTime(enRoute.lightingPilot.worker.movement.arrivesAt);
     const working = await get('?control=city', owner).json();
@@ -460,8 +464,8 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(lit.lightingPilot).toMatchObject({ stage: 'lit', lamp: { position: [13, 0.19, -169.24], litAt: job.endsAt } });
     expect(lit.lightingPilot.worker.activity.events.at(-1).text).toContain('低位灯已亮');
     expect((await get('?control=city', other).json()).lightingPilot).toBeUndefined();
-    expect((await (await post(install, agent)).json()).status).toBe('completed');
-    expect((await post({ ...install, requestId: randomUUID() }, agent)).status).toBe(422);
+    expect((await (await post(install, owner)).json()).status).toBe('completed');
+    expect((await post({ ...install, requestId: randomUUID() }, owner)).status).toBe(422);
     expect(await get('?newspaper=latest', owner).json()).toEqual({ issues: [], current: null });
 
     const eveningAfter = lit.eveningWalk;
@@ -469,6 +473,7 @@ describe.skipIf(!supported)('café browser pairing', () => {
       state: 'lit', source: { activityId: job.requestId, litAt: job.endsAt, position: [13, 0.19, -169.24] },
     });
     expect(eveningAfter.lighting.state).not.toEqual(eveningBefore.lighting.state);
+    const agent = await redeem(await codeFor(owner));
     expect((await post({ ...choose, requestId: randomUUID() }, agent)).status).toBe(409);
     const atWater = await post({
       ...choose, requestId: randomUUID(),
@@ -500,6 +505,26 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(await get(`?newspaper=${paper.current.issue.id}`, owner).json()).toEqual(paper);
     expect(get(`?newspaper=${paper.current.issue.id}`, other).status).toBe(404);
     expect(await get('?newspaper=latest', other).json()).toEqual({ issues: [], current: null });
+
+    const backToWorks = await (await post({ action: 'moveTo', destination: { place: 'works' } }, owner)).json();
+    vi.setSystemTime(backToWorks.arrivesAt);
+    for (let index = 0; index < 6; index++) {
+      const rest = await post({ action: 'interactCity', actionId: 'works.rest' }, owner);
+      expect(rest.status).toBe(200);
+      vi.setSystemTime((await rest.json()).endsAt);
+    }
+    local.nexcivCafeStore?.close();
+    local.nexcivCafeStore = undefined;
+    const afterRecentActivities = await get('?control=city', owner).json();
+    expect(afterRecentActivities.recentActivities).toHaveLength(6);
+    expect(afterRecentActivities.recentActivities.every(({ kind }: { kind: string }) => kind === 'rest')).toBe(true);
+    expect(afterRecentActivities.lightingRecords).toEqual([
+      expect.objectContaining({ requestId: read.requestId, status: 'completed' }),
+      expect.objectContaining({ requestId: survey.requestId, status: 'completed', events: returned.recentActivities[0].events }),
+      expect.objectContaining({ requestId: submit.requestId, status: 'completed', events: report.events }),
+    ]);
+    expect(afterRecentActivities.lightingPilot.lamp).toEqual(lit.lightingPilot.lamp);
+    expect((await get('?control=city', other).json()).lightingRecords).toBeUndefined();
   });
 
   it('persists a local conversation and restores a resident’s energy after resting', async () => {

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { CityMark } from '@/components/CityMark';
 import { CityGlyph } from './CityGlyph';
 import { CityLoading } from './CityLoading';
+import { LightingMission } from './LightingMission';
 import { CafeShift, shiftLabel } from './CafeShift';
 import { CityExplorer } from './CityExplorer';
 import { WORKS_MANAGER, CityVisitPanel } from './CityVisitPanel';
@@ -13,7 +14,7 @@ import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/cit
 import { COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
 import { THEATRE_CLOCK } from '../../lib/theatre-layout';
 import type { TheatreView } from '../../lib/theatre-trial';
-import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController, type WalkSelection } from './walk';
+import { createWalk, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController, type WalkSelection } from './walk';
 import type { Place } from './navigation';
 import { useCityVisit, type VisitCommand } from './useCityVisit';
 import styles from './preview.module.css';
@@ -56,7 +57,7 @@ function TheatreProgramme({ theatre }: { theatre: TheatreView }) {
   </details>;
 }
 
-function activity(id: AgentId, report: AgentReport) {
+function activity(id: FollowId, report: AgentReport) {
   const place = report.destination ? PLACES[report.destination] : undefined;
   return {
     loading: id === '03' ? '正在载入议会大厅街区' : '中央广场',
@@ -158,7 +159,8 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   const [districts, setDistricts] = useState<Record<District, DistrictStatus>>({
     east: 'idle', west: 'idle', shore: 'idle', research: 'idle', residential: 'idle',
   });
-  const [selected, setSelected] = useState<AgentId>('01');
+  const [selected, setSelected] = useState<FollowId>('01');
+  const followInstallation = useRef(false);
   const [playing, setPlaying] = useState(true);
   const [reports, setReports] = useState<Record<FollowId, AgentReport>>({ '01': STARTING, '02': STARTING, '03': STARTING });
   const [fps, setFps] = useState(0);
@@ -209,6 +211,24 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [closeExplorer, explorerOpen]);
+
+  const visitObservation = visitSession.observation;
+  const visitPilot = visitObservation?.lightingPilot;
+  const visitWorker = visitPilot?.worker;
+  const followWorker = useCallback(() => {
+    world.current?.view('follow', '02');
+    world.current?.reset();
+    setInspectionCamera(null);
+    setView('follow');
+    setSelected('02');
+  }, []);
+
+  useEffect(() => {
+    if (visitWorker && followInstallation.current && state !== 'loading') {
+      followInstallation.current = false;
+      followWorker();
+    }
+  }, [followWorker, state, visitWorker]);
 
   useEffect(() => {
     if (!cafeMode || !['127.0.0.1', 'localhost'].includes(window.location.hostname)) return;
@@ -265,11 +285,17 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
 
   async function visit(command: VisitCommand) {
     const accepted = await visitSession.send(command);
-    if (accepted && command !== 'works.chat' && command !== 'works.rest') select('follow', '01');
+    if (!accepted) return;
+    if (command === 'works.install-light') {
+      followInstallation.current = true;
+    } else if (command === 'visit.works' || command === 'visit.governance' || command === 'works.patrol'
+      || command === 'governance.read' || command === 'governance.survey') {
+      select('follow', '01');
+    }
   }
 
   function focusSelection(item: WalkSelection) {
-    if (item.kind === 'resident' && item.id !== '02') {
+    if (item.kind === 'resident' && (item.id !== '02' || visitWorker)) {
       select('follow', item.id);
       return;
     }
@@ -279,19 +305,21 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
 
   const sceneReady = state === 'ready';
   const selectedResident = selection?.kind === 'resident' ? reports[selection.id] : undefined;
-  const availableResidents = PREVIEW_RESIDENTS.filter((id) => id !== '02' || reports[id].status === 'arrived');
+  const availableResidents = PREVIEW_RESIDENTS.filter((id) => id !== '02' || visitWorker || reports[id].status === 'arrived');
   const focusActive = Boolean(selection && (inspectionCamera
     ? inspectionCamera.kind === selection.kind && inspectionCamera.id === selection.id
     : selection.kind === 'resident' && view === 'follow' && selection.id === selected));
   const cameraLandmark = inspectionCamera?.kind === 'building' ? PLACES[inspectionCamera.id] : undefined;
-  const visitObservation = visitSession.observation;
   const visitMovement = visitObservation?.movement;
   const visitActivity = visitObservation?.recentActivities.find(({ requestId }) => requestId === visitMovement?.requestId);
   const managerPresent = visitMovement?.status !== 'walking' && Boolean(visitObservation?.nearby?.people.some(({ id }) => id === WORKS_MANAGER.id));
   const followingVisit = !cafeMode && !inspectionCamera && view === 'follow' && selected === '01' && visitMovement;
   const visitLabel = followingVisit && (followingVisit.status === 'walking'
-    ? visitActivity?.kind === 'work' ? visitActivity.label : `前往 ${followingVisit.name}`
-    : visitActivity?.status === 'running' && visitActivity.kind === 'read' ? '正在阅读议事公告' : `已到达 ${followingVisit.name}`);
+    ? visitActivity?.kind === 'work' || visitActivity?.kind === 'survey' ? visitActivity.label : `前往 ${followingVisit.name}`
+    : visitActivity?.kind === 'survey' ? '已返回议事公告栏'
+      : visitActivity?.status === 'running' && visitActivity.kind === 'read' ? '正在阅读议事公告' : `已到达 ${followingVisit.name}`);
+  const workerStatus = visitWorker && visitPilot ? LIGHTING_PILOT_STATUS[visitPilot.stage] : undefined;
+  const followingWorker = !!workerStatus && !inspectionCamera && view === 'follow' && selected === '02';
   const showingCityResident = !cafeMode && selected === '01' && Boolean(visitObservation?.position);
   const visitVenue = selection?.kind === 'person' ? 'works'
     : selection?.kind === 'building' && (selection.id === 'works' || selection.id === 'governance') ? selection.id : null;
@@ -328,7 +356,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   const loadingStage = state === 'loading' ? 'scene'
     : sceneReady && view === 'overview' && !inspectionCamera && (overview === 'idle' || overview === 'loading') ? 'overview' : null;
   const energy = cafeMode ? shiftEnergy ?? city?.energy : visitObservation?.energy;
-  const updates = (cafeMode ? recent : visitObservation?.recentActivities ?? [])
+  const updates = (cafeMode ? recent : [...(visitObservation?.recentActivities ?? []), ...(visitWorker ? [visitWorker.activity] : [])])
     .flatMap(({ requestId, events }) => events.map((event) => ({ ...event, id: `${requestId}:${event.at}:${event.type}` })))
     .sort((a, b) => b.at - a.at).slice(0, 3);
 
@@ -378,7 +406,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
             : inspectionCamera ? (cameraLandmark ? '地标镜头' : '居民镜头') : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
           <strong role="status">{cafeMode ? cafeTitle
             : inspectionCamera ? cameraLandmark ?? (inspectionCamera.kind === 'person' ? '现场管理员' : '跟随 02 号居民')
-              : visitLabel ? visitLabel
+              : followingWorker ? workerStatus : visitLabel ? visitLabel
               : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
           {sceneCaption && <p className={styles.greeting}>
             {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
@@ -396,16 +424,21 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
           {updates.length ? <ul>{updates.map(({ id, text, speaker }) => <li key={id}>
             {speaker && <b>{speaker} · </b>}{text}
           </li>)}</ul> : <p>{visitMovement?.status === 'walking' ? `01 号正前往${visitMovement.name}。` : '本次试玩暂无现场活动。'}</p>}
+          {!cafeMode && visitSession.connection !== 'unavailable' && <button type="button" className={styles.missionShortcut}
+            onClick={() => openDetails({ kind: 'building', id: 'governance' })}>{visitPilot?.stage === 'lit' ? '湖畔加灯 · 已完成' : '湖畔加灯'}</button>}
           <Link href="/nexciv-preview/cafe/news" prefetch={false}>查看城邦早报</Link>
         </aside>}
         {!cafeMode && <CityExplorer selection={selection} open={explorerOpen} sceneState={state}
-          focusActive={focusActive} residentReport={selectedResident} residentIds={availableResidents}
+          focusActive={focusActive} residentReport={selectedResident} residentIds={availableResidents} workerStatus={workerStatus}
           managerPresent={managerPresent}
           heading={explorerHeading} onOpen={openDirectory} onClose={closeExplorer}
           onSelect={openDetails} onFocus={focusSelection}>
           {visitVenue && (
             <CityVisitPanel venue={visitVenue} session={visitSession} talkingToManager={selection?.kind === 'person'}
-              onMeet={() => openDetails(WORKS_MANAGER)} onCommand={visit} />
+              onMeet={() => openDetails(WORKS_MANAGER)} onCommand={visit}>
+              {visitVenue === 'governance' && <LightingMission session={visitSession} sceneReady={sceneReady}
+                onCommand={visit} onFollowWorker={followWorker} />}
+            </CityVisitPanel>
           )}
         </CityExplorer>}
         <nav id="walk-controls" tabIndex={-1} className={styles.dock} aria-label="城市快捷操作">
@@ -472,6 +505,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
               </button>
             ))}
             <button disabled={!sceneReady || reports['01'].status === 'unavailable'} aria-label="跟随 Agent 01" aria-pressed={!inspectionCamera && view === 'follow' && selected === '01'} onClick={() => select('follow', '01')}>跟随 01</button>
+            {visitWorker && <button disabled={!sceneReady} aria-label="跟随 Agent 02" aria-pressed={followingWorker} onClick={followWorker}>跟随 02</button>}
             <button disabled={!sceneReady || reports['03'].status === 'unavailable'} aria-label="跟随 Agent 03" aria-pressed={!inspectionCamera && view === 'follow' && selected === '03'} onClick={() => select('follow', '03')}>跟随 03</button>
           </div>
           <div className={styles.switcher} aria-label="缩放">
@@ -489,7 +523,10 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
           </span>
         </div>
         <div className={styles.route}>
-          {showingCityResident && !visitMovement ? <span>01 号 · 等待行动</span> : <>
+          {followingWorker && visitWorker && visitObservation ? <>
+            <progress max={1} value={cityWalkTiming(visitWorker.movement, visitObservation.serverTime).progress} aria-label="02 号前往湖畔的进度" />
+            <span>湖畔试点灯位</span>
+          </> : showingCityResident && !visitMovement ? <span>01 号 · 等待行动</span> : <>
             {!showingCityResident && <span>{origin}</span>}
             <progress aria-label={destination ? `Agent ${selected} 前往 ${destination} 的行程` : `Agent ${selected} 的行程`} max={100} value={agent.progress} />
             <span>{destination}</span>

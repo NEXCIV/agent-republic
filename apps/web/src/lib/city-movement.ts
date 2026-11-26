@@ -42,6 +42,7 @@ export type CityObservation = {
   energy: number;
   nearby: CitySite | null;
   lightingSurvey?: LightingSurveyStage;
+  lightingRecords?: CityActivityView[];
   lightingPilot?: LightingPilot;
   eveningWalk: EveningWalk;
   theatre?: TheatreView;

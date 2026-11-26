@@ -226,13 +226,16 @@ export class CafeDemoStore {
     `).all(resident, INSTALL_LIGHT.id, EVENING_STROLL_ACTION).map(({ activity }) => JSON.parse(String(activity)));
   }
 
-  private lightingSurvey(resident: string, at: number) {
-    const records = this.db.prepare(`
+  private lightingActivities(resident: string): CityActivity[] {
+    return this.db.prepare(`
       SELECT activity FROM city_activities
       WHERE resident=? AND json_extract(activity, '$.actionId') IN (?,?,?)
       ORDER BY started DESC, rowid DESC
-    `).all(resident, ...COUNCIL_LIGHTING_ACTIONS);
-    return councilLightingSurvey(records.map(({ activity }) => JSON.parse(String(activity))), at);
+    `).all(resident, ...COUNCIL_LIGHTING_ACTIONS).map(({ activity }) => JSON.parse(String(activity)));
+  }
+
+  private lightingSurvey(resident: string, at: number) {
+    return councilLightingSurvey(this.lightingActivities(resident), at);
   }
 
   private activityInProgress(resident: string, at: number) {
@@ -314,7 +317,12 @@ export class CafeDemoStore {
       const serverTime = this.clock();
       const primary = this.primaryResident(resident, serverTime);
       const { run, activeShift, movement, position, energy, reason, activeActivity, history } = primary;
-      const survey = this.lightingSurvey(resident, serverTime);
+      const lightingActivities = this.lightingActivities(resident);
+      const survey = councilLightingSurvey(lightingActivities, serverTime);
+      const lightingRecords = COUNCIL_LIGHTING_ACTIONS.flatMap((id) => {
+        const activity = lightingActivities.find(({ actionId }) => actionId === id);
+        return activity ? [cityActivityView(activity, serverTime)] : [];
+      });
       const lightingPilot = this.lightingPilot(resident, serverTime, survey?.submittedAt);
       const trial = this.theatreTrial(resident);
       const evening = this.eveningResident(resident, serverTime, lightingPilot, trial, activeShift && Boolean(run?.observer));
@@ -327,6 +335,7 @@ export class CafeDemoStore {
         movement, canMove: !reason, reason, energy,
         nearby: nearby?.site ?? null,
         ...(survey ? { lightingSurvey: survey.stage } : {}),
+        ...(lightingRecords.length > 0 ? { lightingRecords } : {}),
         ...(lightingPilot ? { lightingPilot } : {}),
         eveningWalk: evening.view,
         ...(theatre ? { theatre } : {}),

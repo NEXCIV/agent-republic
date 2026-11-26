@@ -33,6 +33,7 @@ type Props = {
   focusActive: boolean;
   residentReport?: AgentReport;
   residentIds: readonly FollowId[];
+  workerStatus?: string;
   managerPresent: boolean;
   children?: ReactNode;
   heading: RefObject<HTMLHeadingElement | null>;
@@ -42,7 +43,7 @@ type Props = {
   onFocus: (selection: WalkSelection) => void;
 };
 
-export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, managerPresent, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
+export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, workerStatus, managerPresent, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
   if (!open) return null;
 
   const landmark = selection?.kind === 'building' ? LANDMARKS[selection.id] : undefined;
@@ -50,10 +51,10 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
   const name = selection?.kind === 'building' ? CITY_PLACES[selection.id]
     : selection?.kind === 'resident' ? `${selection.id} 号居民` : manager ? '现场管理员' : '地点与居民';
   const marketGuest = selection?.kind === 'resident' && selection.id === '02';
-  const canFocus = sceneState === 'ready' && (selection?.kind === 'building' || (manager && managerPresent)
+  const canFocus = sceneState === 'ready' && (selection?.kind === 'building' || (manager && managerPresent) || (marketGuest && workerStatus)
     || (residentReport !== undefined && residentReport.status !== 'unavailable'));
   const residentStatus = sceneState === 'fallback' ? '静态预览中无法获取实时位置'
-    : marketGuest ? '在街角市集活动' : residentActivity(residentReport);
+    : marketGuest ? workerStatus ?? '在街角市集活动' : residentActivity(residentReport);
 
   return <aside id="city-explorer" className={styles.explorer} aria-labelledby="city-explorer-title">
     <header className={styles.explorerHeader}>

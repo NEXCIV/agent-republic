@@ -130,6 +130,16 @@
 .visitRecord + .visitRecord { margin-top: 10px; padding-top: 10px; border-top: 1px solid #41403d; }
 .visitRecord small { color: #cfbe98; font-size: 12px; }
 .visitRecord ol { display: grid; gap: 6px; margin: 6px 0 0; padding-left: 18px; color: #dfd6c6; font-size: 13px; line-height: 1.55; }
+.lightingMission { margin-top: 14px; padding-top: 12px; border-top: 1px solid #7b674955; }
+.lightingMission h3 { color: var(--hud-accent); font-size: 15px; }
+.missionSteps { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 8px 0 10px; padding: 0; list-style: none; }
+.missionSteps li { display: flex; gap: 5px; align-items: center; padding: 5px; border: 1px solid #796f5b59; border-radius: 5px; color: #c8bcaa; font-size: 11px; }
+.missionSteps li[aria-current="step"] { color: #ffe5a5; border-color: #c3a156; background: #3c321e; }
+.missionSteps li[data-done="true"] { color: #f3dfad; }
+.missionSteps li span { width: 16px; text-align: center; }
+.missionRecords { margin-top: 10px; }
+.missionRecords summary { min-height: 36px; align-content: center; cursor: pointer; color: var(--hud-accent); font-size: 13px; }
+.missionRecords .visitRecord { margin-top: 4px; }
 .controls, .switcher, .route { display: flex; align-items: center; gap: 8px;}
 .controls { flex-wrap: wrap; }
 .controls button {
@@ -298,6 +308,8 @@
 .pulse ul { list-style: none; padding: 0; max-height: 100px; overflow: auto; }
 .pulse li + li { margin-top: 4px; }
 .pulse a { color: var(--hud-accent); text-underline-offset: 2px; }
+.pulse .missionShortcut { display: block; width: 100%; margin: 0 0 8px; padding: 6px 8px; text-align: left; border: 1px solid #a9956b80; border-radius: 5px; background: #38301e; color: var(--hud-accent); font: inherit; font-weight: 650; }
+.pulse .missionShortcut:hover { background: #504121; }
 .explorer, .footer {
   position: absolute; z-index: 2; top: 73px; right: var(--edge); margin: 0;
   overflow-y: auto; max-height: calc(100% - 73px - var(--dock-height) - 22px);
