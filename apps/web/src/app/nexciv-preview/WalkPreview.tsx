@@ -40,6 +40,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const cityMoving = cityWalk?.status === 'walking';
   const recent = city?.recentActivities ?? [];
   const currentActivity = recent[0]?.status === 'running' ? recent[0] : undefined;
+  const movementActivity = recent.find(({ requestId }) => requestId === cityWalk?.requestId);
   const cityBusy = cityMoving || Boolean(currentActivity);
   const [shift, setShift] = useState('等待开班');
   const [greeting, setGreeting] = useState('');
@@ -172,7 +173,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         {cafeMode ? <>
           {cityWalk && <div className={styles.route}>
-            <span>{currentActivity?.kind === 'work' ? '巡查路线' : '全城试走'}</span>
+            <span>{movementActivity?.kind === 'work' ? '巡查路线' : movementActivity?.kind === 'read' ? '公告栏路线' : '全城试走'}</span>
             <progress aria-label={currentActivity?.label || cityLabel || 'Agent 01 行程'} max={100} value={travelProgress} />
             <span>{cityWalk.name} · {Math.round(cityWalk.metres)} 米</span>
           </div>}

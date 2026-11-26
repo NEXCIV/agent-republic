@@ -580,7 +580,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
                 if node.type == "TEX_IMAGE" and node.image and node.image.name == "rose_map_0"
             ),
             None,
-        ) if chunk == "east" else None
+        ) if chunk in {"east", "governance"} else None
         if rose_map is not None:
             links = finish.node_tree.links
             # The Blender RGB mix drops the rose atlas on export. Foliage is dielectric.

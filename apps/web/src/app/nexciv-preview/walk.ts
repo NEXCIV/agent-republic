@@ -5,6 +5,7 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
 import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
+import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD } from '../../lib/council-notice';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import type { CityObservation } from '../../lib/city-movement';
 import type { CityPerson } from '../../lib/city-activities';
@@ -262,6 +263,38 @@ function addCenterNameplate(asset: THREE.Object3D) {
   asset.attach(frame);
 }
 
+function addCouncilNotice(asset: THREE.Object3D) {
+  const face = document.createElement('canvas');
+  face.width = 384;
+  face.height = 432;
+  const brush = face.getContext('2d');
+  if (!brush) return;
+  brush.fillStyle = '#193640';
+  brush.fillRect(0, 0, face.width, face.height);
+  brush.fillStyle = '#edbe56';
+  brush.fillRect(24, 23, 104, 34);
+  brush.fillStyle = '#18252a';
+  brush.font = '700 19px system-ui, sans-serif';
+  brush.fillText('DEMO', 47, 46);
+  brush.fillStyle = '#f5e8c9';
+  brush.font = '700 53px "Microsoft YaHei", sans-serif';
+  brush.fillText('议事公告', 24, 134);
+  brush.fillRect(24, 172, 336, 2);
+  brush.font = '400 29px "Microsoft YaHei", sans-serif';
+  COUNCIL_DEMO_AGENDA.forEach((topic, index) => brush.fillText(topic, 24, 242 + 61 * index));
+  const texture = new THREE.CanvasTexture(face);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 4;
+  const notice = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.84, 0.96),
+    new THREE.MeshBasicMaterial({ map: texture }),
+  );
+  notice.name = 'NEXCIV_Council_Demo_Notice';
+  notice.position.set(...COUNCIL_NOTICE_BOARD);
+  notice.rotation.y = -Math.PI / 12;
+  asset.add(notice);
+}
+
 export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks, cafeMode = false): WalkController {
   const started = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -342,6 +375,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const counterFacing = new THREE.Vector3(...CAFE_STALL);
   const seatFacing = seatFront.clone().add(new THREE.Vector3(0, 0, -1));
   const observedPosition = new THREE.Vector3();
+  const observedFacing = new THREE.Vector3();
   const cafeProps = new THREE.Group();
   let cafeSnapshot: CafeSnapshot | null = null;
   let cityObservation: CityObservation | null = null;
@@ -366,6 +400,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   };
   const centerEntrance = new THREE.Vector3(-92.35, 1.6, -64.6);
   const landmarkEntrances = { ...eastEntrances, center: centerEntrance, hall: new THREE.Vector3(0, 1.8, -82) };
+  const councilNotice = new THREE.Vector3(...COUNCIL_NOTICE_BOARD);
   const streetFrustum = new THREE.Frustum();
   const worksBounds = new THREE.Box3();
   const viewProjection = new THREE.Matrix4();
@@ -651,15 +686,19 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (primary) {
           const target = cityWalk.points.at(-1)!;
           const duration = cityWalk.arrivesAt - cityWalk.startedAt;
+          const cityTime = cityObservation!.serverTime + (playing ? now - cityReceivedAt : 0);
           if (conversation?.person) {
             observedPosition.set(...target);
             primary.observe(poseDt, observedPosition, siteHost?.position ?? counterFacing, false, 'nod');
+          } else if (cityWalk.facing && cityTime >= cityWalk.arrivesAt) {
+            observedPosition.set(...target);
+            observedFacing.set(cityWalk.facing[0], target[1], cityWalk.facing[1]);
+            primary.observe(poseDt, observedPosition, observedFacing);
           } else if (duration > 0) {
             if (cityJourney?.id !== cityWalk.requestId || cityJourney.traveller !== primary) {
               primary.plan(cityWalk.points, [target[0], target[2]]);
               cityJourney = { traveller: primary, id: cityWalk.requestId };
             }
-            const cityTime = cityObservation!.serverTime + (playing ? now - cityReceivedAt : 0);
             primary.observeJourney(poseDt, THREE.MathUtils.clamp((cityTime - cityWalk.startedAt) / duration, 0, 1), duration / 1000);
           } else {
             observedPosition.set(...target);
@@ -743,17 +782,18 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       // Keep the Agent and front doors in view without looking through the sidewalk signs.
       const registryFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.registry), 3, 17);
       const worksFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(eastEntrances.works), 3, 17);
-      const hallFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(landmarkEntrances.hall), 7, 41);
+      const noticeFrame = cityWalk?.facing ? 1 - THREE.MathUtils.smoothstep(feet.distanceTo(councilNotice), 2, 7) : 0;
+      const hallFrame = (1 - THREE.MathUtils.smoothstep(feet.distanceTo(landmarkEntrances.hall), 7, 41)) * (1 - noticeFrame);
       const forumFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(forumEntrance), 3, 20);
       const pierFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(pierEntrance), 4, 23);
       const centerFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(centerEntrance), 4, 17);
       const residenceFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(residenceEntrance), 4, 21);
       const entranceFrame = Math.max(registryFrame, worksFrame, hallFrame, forumFrame, pierFrame, centerFrame, residenceFrame);
       aim.y += 0.58 * entranceFrame;
-      aim.y += 3.15 * hallFrame + 1.45 * centerFrame + 1.08 * residenceFrame;
+      aim.y += 3.15 * hallFrame + 1.45 * centerFrame + 1.08 * residenceFrame + 0.48 * noticeFrame;
       aim.x -= 1.1 * centerFrame;
       aim.z += 1.15 * worksFrame + 1.8 * forumFrame - 1.6 * pierFrame - 0.65 * registryFrame
-        - 1.2 * residenceFrame - 3.7 * hallFrame;
+        - 1.2 * residenceFrame - 3.7 * hallFrame - 0.48 * noticeFrame;
       if (byPier && !observer) {
         aim.x += 1.42;
         aim.y -= 1.20;
@@ -785,7 +825,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const closeCafe = cafeMode && !travelling && !byPier;
       const usualYaw = byPier && !travelling ? observer ? 0.10 : 0.49
         : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
-      const yaw = followYaw + THREE.MathUtils.lerp(usualYaw, 0.20, hallFrame);
+      const yaw = followYaw + THREE.MathUtils.lerp(usualYaw, 0.20, Math.max(hallFrame, noticeFrame));
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
@@ -1078,7 +1118,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     northLoading = Promise.all([
       request('governance-route.json', priority).then((response) => response.json() as Promise<RouteData>),
       request('nexus-connector.json', priority).then((response) => response.json() as Promise<Connection>),
-      request('governance-north.glb', priority).then((response) => response.arrayBuffer()),
+      request('governance-north.glb?v=2', priority).then((response) => response.arrayBuffer()),
       cafeMode ? undefined : request('agent-03.glb', priority).then((response) => response.arrayBuffer()).catch(() => undefined),
     ]).then(async ([layout, connector, cityBytes, agentBytes]) => {
       if (ended || contextLost) return;
@@ -1088,6 +1128,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       navigation.connect('plazaNorth', 'governance', layout);
       north = city.scene;
       prepareEnvironment(north, streetAnisotropy);
+      addCouncilNotice(north);
       street.add(north);
       softenRetailWindows(north);
       registerRetail(north);

@@ -253,6 +253,58 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(finished.canMove).toBe(true);
   });
 
+  it('unlocks the demo agenda at the council, records reading at the board and keeps the new position', async () => {
+    const owner = browser();
+    const other = browser();
+    const agent = await redeem(await codeFor(owner));
+    const read = { action: 'interactCity', actionId: 'governance.read', requestId: randomUUID() };
+    expect((await post(read, agent)).status).toBe(422);
+    const trip = await (await post({ action: 'moveTo', destination: { place: 'governance' } }, agent)).json();
+    expect((await post(read, agent)).status).toBe(409);
+    vi.setSystemTime(trip.arrivesAt);
+    const arrival = await get('?control=city', owner).json();
+    expect(arrival.nearby.place).toBe('governance');
+    expect(arrival.availableActions).toEqual([
+      { id: 'governance.read', label: '查看议事公告', kind: 'read', target: 'governance.notice' },
+    ]);
+    const response = await post(read, agent);
+    expect(response.status).toBe(200);
+    const activity = await response.json();
+    expect(activity).toMatchObject({ status: 'running', kind: 'read', place: 'governance' });
+    expect(activity.events.map(({ type }: { type: string }) => type)).toEqual(['started']);
+    expect((await (await post(read, agent)).json()).requestId).toBe(read.requestId);
+
+    const walking = await get('?control=city', owner).json();
+    expect(walking.movement).toMatchObject({
+      requestId: read.requestId, status: 'walking', name: '议事公告栏', regions: ['north'],
+    });
+    expect(walking.movement.metres).toBeGreaterThan(8);
+    expect((await post({ action: 'moveTo', requestId: read.requestId, destination: { x: 8, z: -77 } }, agent)).status).toBe(409);
+    expect((await get('?control=city', other).json()).recentActivities).toEqual([]);
+
+    local.nexcivCafeStore?.close();
+    local.nexcivCafeStore = undefined;
+    vi.setSystemTime(walking.movement.arrivesAt);
+    const reading = await get('?control=city', owner).json();
+    expect(reading.position).toEqual([8, 0.182, -77]);
+    expect(reading.movement.status).toBe('arrived');
+    expect(reading.recentActivities[0]).toMatchObject({
+      status: 'running', events: [expect.any(Object), { type: 'checkpoint', position: reading.position, at: expect.any(Number), text: '已到达议事公告栏。' }],
+    });
+    expect(reading.availableActions).toEqual([]);
+    expect((await post({ action: 'moveTo', destination: { place: 'plaza' } }, agent)).status).toBe(409);
+    vi.setSystemTime(activity.endsAt);
+    const done = await get('?control=city', owner).json();
+    expect(done.position).toEqual(reading.position);
+    expect(done.energy).toBe(arrival.energy);
+    expect(done.recentActivities[0]).toMatchObject({ status: 'completed', actionId: 'governance.read' });
+    expect(done.recentActivities[0].events.at(-1)).toMatchObject({
+      type: 'completed', text: expect.stringMatching(/^DEMO 议程.*湖畔步道.*社区剧场/),
+    });
+    const next = await (await post({ action: 'moveTo', destination: { place: 'plaza' } }, agent)).json();
+    expect(next.points[0]).toEqual(reading.position);
+  });
+
   it('persists a local conversation and restores a resident’s energy after resting', async () => {
     const owner = browser();
     const agent = await redeem(await codeFor(owner));

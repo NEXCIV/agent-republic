@@ -201,6 +201,12 @@ export class CafeDemoStore {
     return row ? JSON.parse(String(row.walk)) : null;
   }
 
+  private saveCityWalk(resident: string, walk: CityWalk) {
+    this.db.prepare('UPDATE city_walks SET shown=0 WHERE resident=? AND shown=1').run(resident);
+    this.db.prepare('DELETE FROM city_walks WHERE shown=0 AND started<?').run(walk.startedAt - CAFE_RETENTION_DAYS * 86400000);
+    this.db.prepare('INSERT INTO city_walks VALUES (?,?,?,?,1)').run(resident, walk.requestId, walk.startedAt, JSON.stringify(walk));
+  }
+
   private movement(walk: CityWalk, at: number): CityMovement {
     return { ...walk, status: at < walk.arrivesAt ? 'walking' : 'arrived' };
   }
@@ -274,9 +280,10 @@ export class CafeDemoStore {
       const energy = this.energyFromActivities(history, run, at) ?? run?.energy ?? CAFE_INITIAL_ENERGY;
       if (!availableCityActions([action], energy).length) return { error: '精力不足，请先休息。', code: 409 };
       const activity = beginCityActivity(action, nearby.site.place, position, energy, requestId, at);
-      if (!activity) return { error: '巡查点位目前无法沿步道到达。', code: 422 };
+      if (!activity) return { error: '活动点位目前无法沿步道到达。', code: 422 };
       this.db.prepare('INSERT INTO city_activities(resident,id,started,ends,activity) VALUES (?,?,?,?,?)')
         .run(resident, requestId, at, activity.endsAt, JSON.stringify(activity));
+      if (activity.kind === 'read' && activity.walk) this.saveCityWalk(resident, activity.walk);
       this.db.prepare('DELETE FROM city_activities WHERE resident=? AND ends<?')
         .run(resident, at - CAFE_RETENTION_DAYS * 86400000);
       return cityActivityView(activity, at);
@@ -287,6 +294,9 @@ export class CafeDemoStore {
     return this.transaction(() => {
       const resident = this.authorizedResident(actor);
       const at = this.clock();
+      if (this.db.prepare('SELECT 1 FROM city_activities WHERE resident=? AND id=?').get(resident, requestId)) {
+        return { error: '请求编号已用于一项现场行动。', code: 409 };
+      }
       const row = this.db.prepare('SELECT walk FROM city_walks WHERE resident=? AND id=?').get(resident, requestId);
       if (row) {
         const saved: CityWalk = JSON.parse(String(row.walk));
@@ -294,9 +304,6 @@ export class CafeDemoStore {
           return { error: '请求编号已用于另一个目的地。', code: 409 };
         }
         return this.movement(saved, at);
-      }
-      if (this.db.prepare('SELECT 1 FROM city_activities WHERE resident=? AND id=?').get(resident, requestId)) {
-        return { error: '请求编号已用于一项现场行动。', code: 409 };
       }
       if (this.activityInProgress(resident, at)) return { error: '01 号正在执行现场活动，结束后可以继续出发。', code: 409 };
       const run = this.activeRun(resident, at);
@@ -308,9 +315,7 @@ export class CafeDemoStore {
       if (!route) return { error: '目的地不在已测绘的步道上。请使用地图中的地点或步道坐标。', code: 422 };
       const duration = route.metres < 1e-7 ? 0 : Math.max(1000, Math.ceil(1000 * route.metres / CITY_WALK_METRES_PER_SECOND));
       const walk: CityWalk = { ...route, requestId, startedAt: at, arrivesAt: at + duration };
-      this.db.prepare('UPDATE city_walks SET shown=0 WHERE resident=? AND shown=1').run(resident);
-      this.db.prepare('DELETE FROM city_walks WHERE shown=0 AND started<?').run(at - CAFE_RETENTION_DAYS * 86400000);
-      this.db.prepare('INSERT INTO city_walks VALUES (?,?,?,?,1)').run(resident, requestId, at, JSON.stringify(walk));
+      this.saveCityWalk(resident, walk);
       return this.movement(walk, at);
     });
   }

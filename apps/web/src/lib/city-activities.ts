@@ -1,16 +1,18 @@
 import type { CityPoint } from './cafe-geometry';
+import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_READING_SPOT } from './council-notice';
 import { CITY_MAP, planCityWalk } from './city-navigation';
 import { routeDistance, type CityRegion, type CityWalk } from './city-movement';
 
 export type CityPerson = { id: string; name: string; position: CityPoint };
 export type CitySite = { place: string; name: string; people: CityPerson[]; facilities: Array<{ id: string; name: string }> };
-type CityActionKind = 'talk' | 'rest' | 'work';
+type CityActionKind = 'talk' | 'rest' | 'work' | 'read';
 export type CityActionOption = { id: string; label: string; kind: CityActionKind; target: string };
 type Checkpoint = { name: string; x: number; z: number };
 type Action = CityActionOption & (
   | { kind: 'talk'; person: CityPerson; question: string; reply: string }
   | { kind: 'rest'; restored: number }
   | { kind: 'work'; energyCost: number; checkpoints: Checkpoint[] }
+  | { kind: 'read'; board: string; text: string; destination: { x: number; z: number }; facing: [number, number] }
 );
 type Venue = CitySite & { entrance: CityPoint; reach: number; actions: Action[] };
 type CityActivityEvent = {
@@ -39,6 +41,7 @@ export type CityActivityView = Omit<CityActivity, 'walk' | 'energyAfter'> & {
 };
 
 const works = CITY_MAP.places.find(({ id }) => id === 'works')!;
+const governance = CITY_MAP.places.find(({ id }) => id === 'governance')!;
 const manager: CityPerson = { id: 'works.manager', name: '现场管理员', position: [96.5, 0.203, 72.4] };
 const venues: Venue[] = [{
   place: works.id, name: works.name, entrance: works.position, reach: 3,
@@ -59,6 +62,16 @@ const venues: Venue[] = [{
       ],
     },
   ],
+}, {
+  place: governance.id, name: governance.name, entrance: governance.position, reach: 10,
+  people: [],
+  facilities: [{ id: 'governance.notice', name: '议事公告栏' }],
+  actions: [{
+    id: 'governance.read', kind: 'read', label: '查看议事公告', target: 'governance.notice',
+    board: '议事公告栏', destination: COUNCIL_NOTICE_READING_SPOT,
+    facing: [COUNCIL_NOTICE_BOARD[0], COUNCIL_NOTICE_BOARD[2]],
+    text: `DEMO 议程：讨论${COUNCIL_DEMO_AGENDA.join('和')}。`,
+  }],
 }];
 
 export function nearbyCitySite(position: CityPoint | null) {
@@ -98,6 +111,22 @@ export function beginCityActivity(action: Action, place: string, position: CityP
     const energyAfter = Math.min(100, energy + action.restored);
     events.push({ type: 'completed', at: endsAt, text: `休息结束，精力 ${energy} → ${energyAfter}。` });
     return { ...base, endsAt, energyAfter };
+  }
+  if (action.kind === 'read') {
+    const route = planCityWalk(position, action.destination);
+    if (!route) return null;
+    const arrivesAt = at + Math.ceil(route.metres * 1000 / 1.6);
+    const endsAt = arrivesAt + 4500;
+    events[0] = { type: 'started', at, text: `前往${action.board}。` };
+    events.push(
+      { type: 'checkpoint', at: arrivesAt, position: route.points.at(-1)!, text: `已到达${action.board}。` },
+      { type: 'completed', at: endsAt, text: action.text },
+    );
+    const walk: CityWalk = {
+      // The surveyed shore path starts in the northern forecourt, where the kiosk is already loaded.
+      ...route, regions: ['north'], name: action.board, requestId, startedAt: at, arrivesAt, facing: action.facing,
+    };
+    return { ...base, endsAt, energyAfter: energy, walk };
   }
 
   const points = [position];

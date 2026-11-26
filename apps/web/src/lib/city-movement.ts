@@ -16,7 +16,7 @@ export type CityRoute = {
   regions: CityRegion[];
   metres: number;
 };
-export type CityWalk = CityRoute & { requestId: string; startedAt: number; arrivesAt: number };
+export type CityWalk = CityRoute & { requestId: string; startedAt: number; arrivesAt: number; facing?: [number, number] };
 export type CityMovement = CityWalk & { status: 'walking' | 'arrived' };
 export type CityObservation = {
   agentId: '01';
