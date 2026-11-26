@@ -64,7 +64,7 @@ const DISTRICT_ORBIT: Record<District, [yaw: number, pitch: number, distance: nu
   residential: [-0.44, 0.84, 94],
 };
 const DISTRICT_FILES: Record<District, [string, string]> = {
-  east: ['east-routes.json', 'east-civic-district.glb?v=2'],
+  east: ['east-routes.json', 'east-civic-district.glb?v=3'],
   west: ['west-route.json', 'west-community-district.glb'],
   shore: ['lakeshore-route.json', 'north-lakeshore.glb'],
   research: ['research-route.json', 'northwest-research-district.glb'],

@@ -38,6 +38,8 @@ from refine_nexciv_works_railing import RAILING
 
 ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "apps/web/public/nexciv-walk"
+WORKS_DEMONSTRATOR = "WORKS_Robotics_Demonstrator"
+WORKS_DEMONSTRATOR_LIBRARY = ROOT / "art-direction/world-upgrade-v1/lakeside-study/assets/Works_Robotics_Demonstrator.blend"
 WEST, EAST, SOUTH, NORTH = -52, 53, -81, 46
 GOVERNANCE_NORTH = 116
 GOVERNANCE_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.002"
@@ -592,6 +594,16 @@ def stage_assets(scene, graph, chunk, library=DEST):
         if name in (ROOF_DETAILS, ENTRANCE_DETAILS) and chunk != "works":
             continue
         if landmark and name != landmark:
+            continue
+        if chunk == "east" and name == WORKS_DEMONSTRATOR:
+            with bpy.data.libraries.load(str(WORKS_DEMONSTRATOR_LIBRARY), link=False) as (_, prepared):
+                prepared.objects = [WORKS_DEMONSTRATOR]
+            asset = prepared.objects[0]
+            if asset is None:
+                raise RuntimeError(f"Missing {WORKS_DEMONSTRATOR} in its asset library")
+            root.objects.link(asset)
+            asset.matrix_world = transform
+            asset["previewTier"] = "works_demonstrator"
             continue
         market = name.startswith("Market | ")
         street = tier in ("detail", "buildings") or name.startswith("Courtyard | roses")

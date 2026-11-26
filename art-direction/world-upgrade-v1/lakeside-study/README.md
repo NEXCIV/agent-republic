@@ -125,6 +125,8 @@ blender --background --factory-startup --python scripts/build_nexciv_works_rebui
 
 将生成的 `public-construction-rebuilt.glb` 放入 `apps/web/public/nexciv-walk/`。东区网格由 `scripts/export_nexciv_walk_preview.py -- --chunk east` 导出。旧的 `--chunk works` 仍可用于复现使用原 Tripo 模型的近景版本。
 
+门外的机械臂展示台使用[独立资产库](assets/Works_Robotics_Demonstrator.blend)。它保留原始模型的构件和贴图，约 6.4 万三角面，使用 2048 × 2048 底色、金属粗糙度和法线图。资产库使用 `scripts/prepare_nexciv_works_demonstrator.py -- --source <原始 GLB> --output <输出 blend>` 生成，东区导出时按场景中原有展示台的位置插入。
+
 安装 Pillow 后，在仓库根目录用现有工具重新打包角色贴图。
 
 ```powershell
