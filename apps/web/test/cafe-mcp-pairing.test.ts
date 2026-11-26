@@ -422,6 +422,7 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect((await get('?control=city', other).json()).lightingPilot).toBeUndefined();
     expect((await (await post(install, agent)).json()).status).toBe('completed');
     expect((await post({ ...install, requestId: randomUUID() }, agent)).status).toBe(422);
+    expect(await get('?newspaper=latest', owner).json()).toEqual({ issues: [], current: null });
 
     const eveningAfter = lit.eveningWalk;
     expect(eveningAfter.lighting).toMatchObject({
@@ -437,6 +438,8 @@ describe.skipIf(!supported)('café browser pairing', () => {
     const secondWalk = await atWater.json();
     expect(secondWalk.movement.points[0]).toEqual(atLamp.position);
     expect(secondWalk.observation.lighting.source.activityId).toBe(job.requestId);
+    vi.setSystemTime(secondWalk.activity.endsAt - 1);
+    expect(await get('?newspaper=latest', owner).json()).toEqual({ issues: [], current: null });
     local.nexcivCafeStore?.close();
     local.nexcivCafeStore = undefined;
     vi.setSystemTime(secondWalk.activity.endsAt);
@@ -444,6 +447,19 @@ describe.skipIf(!supported)('café browser pairing', () => {
     expect(restored.position).toEqual([13, 0.19, -165.3]);
     expect(restored.recent.map(({ status }: { status: string }) => status)).toEqual(['completed', 'completed']);
     expect((await get('?control=city', other).json()).eveningWalk.recent).toEqual([]);
+    const paper = await get('?newspaper=latest', owner).json();
+    expect(paper.current).toMatchObject({
+      kind: 'city', sceneActivityId: job.requestId,
+      issue: { id: `city-${job.requestId}`, publishedAt: secondWalk.activity.endsAt, headline: expect.stringContaining('临水步道') },
+    });
+    expect(paper.current.sources.map(({ id }: { id: string }) => id))
+      .toEqual([submit.requestId, job.requestId, firstWalk.activity.requestId, secondWalk.activity.requestId]);
+    expect(paper.current.sources[3].notes.join(' ')).toContain('已到达东侧临水步道');
+    expect(paper.issues).toHaveLength(1);
+    expect(await get('?newspaper=latest', agent).json()).toEqual(paper);
+    expect(await get(`?newspaper=${paper.current.issue.id}`, owner).json()).toEqual(paper);
+    expect(get(`?newspaper=${paper.current.issue.id}`, other).status).toBe(404);
+    expect(await get('?newspaper=latest', other).json()).toEqual({ issues: [], current: null });
   });
 
   it('persists a local conversation and restores a resident’s energy after resting', async () => {

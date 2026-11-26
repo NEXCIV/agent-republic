@@ -31,7 +31,7 @@ function activity(id: AgentId, report: AgentReport) {
   }[report.status];
 }
 
-export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
+export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?: boolean; requestedActivity?: string }) {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const latest = useRef<CafeSnapshot | null>(null);
@@ -126,7 +126,8 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
         setCity(observation);
         const construction = observation.lightingPilot?.worker?.activity;
         const outing = observation.eveningWalk?.recent[0]?.activity;
-        const job = outing && (!construction || outing.startedAt >= construction.startedAt) ? outing : construction;
+        const job = construction?.requestId === requestedActivity && requestedActivity ? construction
+          : outing && (!construction || outing.startedAt >= construction.startedAt) ? outing : construction;
         if (job?.agentId && seenCityJob.current !== job.requestId) {
           seenCityJob.current = job.requestId;
           followCityAgent(job.agentId);
@@ -139,7 +140,7 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [cafeMode, cityBusy, followCityAgent]);
+  }, [cafeMode, cityBusy, followCityAgent, requestedActivity]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);

@@ -157,7 +157,7 @@ serveStdio(() => {
     return state;
   });
 
-  tool('read_newspaper', '读取这个试玩会话的最新一期《城邦早报》和两份采访原话。只有采访完成后才出刊。', z.strictObject({}), true,
+  tool('read_newspaper', '读取本试玩会话的最新一期《城邦早报》，包含采访原话或湖畔试点对应的活动记录。', z.strictObject({}), true,
     () => request('?newspaper=latest'));
 
   return server;

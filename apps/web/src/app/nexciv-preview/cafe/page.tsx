@@ -3,6 +3,7 @@ import { WalkPreview } from '../WalkPreview';
 
 export const metadata: Metadata = { title: 'NEXCIV · 咖啡街的一个班次' };
 
-export default function Page() {
-  return <WalkPreview cafeMode />;
+export default async function Page({ searchParams }: { searchParams: Promise<{ activity?: string }> }) {
+  const { activity } = await searchParams;
+  return <WalkPreview cafeMode requestedActivity={typeof activity === 'string' ? activity : undefined} />;
 }

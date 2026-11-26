@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import type { NewspaperSnapshot } from '../../../../lib/cafe-newspaper';
+import type { CityNewspaperEdition, NewspaperSnapshot } from '../../../../lib/cafe-newspaper';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS } from '../../../../lib/cafe-observer';
 import styles from '../../preview.module.css';
 
@@ -13,6 +13,28 @@ const LOCAL_TIME = new Intl.DateTimeFormat('zh-CN', {
 
 function EditionTime({ at }: { at: number }) {
   return <time dateTime={new Date(at).toISOString()}>{LOCAL_TIME.format(at)}</time>;
+}
+
+function LightingEdition({ edition }: { edition: CityNewspaperEdition }) {
+  return <>
+    <article aria-labelledby="edition-title">
+      <div className={styles.editionMeta}>城市活动记录 <EditionTime at={edition.issue.publishedAt} /></div>
+      <h2 id="edition-title">{edition.issue.headline}</h2>
+      <p className={styles.editionLead}>{edition.issue.lead}</p>
+      <Link href={`/nexciv-preview/cafe?activity=${edition.sceneActivityId}`}>回到亮灯现场</Link>
+    </article>
+    <section className={styles.editionSources} aria-labelledby="edition-sources">
+      <h2 id="edition-sources">活动来源</h2>
+      <ol>
+        {edition.sources.map((source) => <li key={source.id} id={source.id} tabIndex={-1}>
+          <strong>{source.title} · {source.place}</strong>
+          <EditionTime at={source.at} />
+          {source.notes.map((note) => <p key={note}>{note}</p>)}
+          {source.metres !== undefined && <p>实际行程 {source.metres} 米</p>}
+        </li>)}
+      </ol>
+    </section>
+  </>;
 }
 
 export function CafeNewspaper({ requestedIssue }: { requestedIssue?: string }) {
@@ -49,7 +71,8 @@ export function CafeNewspaper({ requestedIssue }: { requestedIssue?: string }) {
         {error ? <div role="status">
           <p>{error}</p>
           {requestedIssue && <Link href="/nexciv-preview/cafe/news">阅读最新一期</Link>}
-        </div> : !snapshot ? <p role="status">正在载入早报</p> : !edition ? <p>完成一次「城邦观察员」班次后，采访报道就会出现在这里。</p> : <>
+        </div> : !snapshot ? <p role="status">正在载入早报</p> : !edition ? <p>采访或湖畔试点回访完成后，报道会出现在这里。</p> : <>
+          {edition.kind === 'city' ? <LightingEdition edition={edition} /> : <>
           <article aria-labelledby="edition-title">
             <div className={styles.editionMeta}>观察员 01 号报道 <EditionTime at={edition.issue.publishedAt} /></div>
             <h2 id="edition-title">{edition.issue.headline}</h2>
@@ -71,6 +94,7 @@ export function CafeNewspaper({ requestedIssue }: { requestedIssue?: string }) {
               </li>)}
             </ol>
           </section>
+          </>}
           {snapshot.issues.length > 1 && <nav className={styles.editionArchive} aria-label="历期早报">
             <h2>历期早报</h2>
             <ul>

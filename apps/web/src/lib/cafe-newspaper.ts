@@ -1,5 +1,8 @@
 import type { CafeRun } from './cafe-life';
 import { OBSERVER_SPEAKERS, type ObserverSource } from './cafe-observer';
+import type { CityActivity } from './city-activities';
+import type { EveningRecord } from './evening-stroll';
+import type { CityPoint } from './cafe-geometry';
 
 export type NewspaperIssue = {
   id: string;
@@ -11,8 +14,76 @@ export type NewspaperIssue = {
 
 export type NewspaperSnapshot = {
   issues: Pick<NewspaperIssue, 'id' | 'publishedAt' | 'headline'>[];
-  current: { issue: NewspaperIssue; sources: ObserverSource[] } | null;
+  current: { kind?: 'interview'; issue: NewspaperIssue; sources: ObserverSource[] } | CityNewspaperEdition | null;
 };
+
+type CityNewspaperSource = {
+  id: string;
+  title: string;
+  place: string;
+  at: number;
+  notes: string[];
+  position?: CityPoint;
+  metres?: number;
+};
+
+export type CityNewspaperEdition = {
+  kind: 'city';
+  issue: NewspaperIssue;
+  sources: CityNewspaperSource[];
+  sceneActivityId: string;
+};
+
+function finishedEvent(activity: CityActivity, at: number) {
+  if (activity.endsAt > at) return;
+  return activity.events.find(({ type, at }) => type === 'completed' && at === activity.endsAt);
+}
+
+function strollSource(record: EveningRecord, title: string, at: number): CityNewspaperSource | undefined {
+  const arrival = record.events.find((event) => event.type === 'checkpoint' && event.at === record.walk.arrivesAt);
+  if (!finishedEvent(record, at) || !arrival || !arrival.position) return;
+  return {
+    id: record.requestId, at: arrival.at, place: record.walk.name, title,
+    position: arrival.position, metres: Math.round(record.walk.metres),
+    notes: [record.observation.lighting.detail, record.reason, arrival.text],
+  };
+}
+
+export function writeLightingEdition(
+  report: CityActivity | undefined, installation: CityActivity | undefined, strolls: EveningRecord[], at: number,
+): CityNewspaperEdition | null {
+  if (!report || !installation) return null;
+  const submission = finishedEvent(report, at);
+  const lit = finishedEvent(installation, at);
+  if (!submission || !lit?.position || submission.at > installation.startedAt) return null;
+  const later = strolls.find((record) => {
+    const { lighting } = record.observation;
+    return record.startedAt >= lit.at && lighting.state === 'lit'
+      && lighting.source?.activityId === installation.requestId && lighting.source.litAt === lit.at;
+  });
+  if (!later) return null;
+  const followUp = strollSource(later, '03 号 · 亮灯后', at);
+  if (!followUp) return null;
+  const earlier = strolls.find((record) => record.startedAt < lit.at && record.observation.lighting.state === 'not-installed');
+  const before = earlier ? strollSource(earlier, '03 号 · 亮灯前的选择', at) : undefined;
+  const sources: CityNewspaperSource[] = [
+    { id: report.requestId, at: submission.at, title: '01 号 · 路灯调研报告', place: '议事公告栏', notes: [submission.text] },
+    { id: installation.requestId, at: lit.at, title: '02 号 · 试点灯完工', place: '北岸东侧步道', position: lit.position, notes: [lit.text] },
+    ...(before ? [before] : []),
+    followUp,
+  ];
+  const headline = later.selection.optionId === 'waterfront' ? '试点灯亮起，03 号走到临水步道' : '湖畔试点灯亮起后的居民记录';
+  const route = before ? `03 号亮灯前选择前往${before.place}，亮灯后到达${followUp.place}。`
+    : `03 号在出发前读到了亮灯记录，随后到达${followUp.place}。`;
+  return {
+    kind: 'city', sceneActivityId: installation.requestId, sources,
+    issue: {
+      id: `city-${installation.requestId}`, publishedAt: later.endsAt, headline,
+      lead: `01 号提交路灯调研报告后，02 号在北岸东侧装好一盏低位灯。${route}`,
+      sourceIds: sources.map(({ id }) => id),
+    },
+  };
+}
 
 export function writeNewspaper(shiftId: string, run: CafeRun): NewspaperIssue | null {
   const assignment = run.observer;

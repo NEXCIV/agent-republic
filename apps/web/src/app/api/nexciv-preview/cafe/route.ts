@@ -100,7 +100,7 @@ export function GET(request: NextRequest) {
   }
   if (newspaper !== null) {
     const requested = newspaper === 'latest' ? undefined : newspaper;
-    if (requested !== undefined && !uuid.test(requested)) return json({ error: '找不到这期早报。' }, 404);
+    if (requested !== undefined && !uuid.test(requested.replace(/^city-/, ''))) return json({ error: '找不到这期早报。' }, 404);
     if (resident && uuid.test(resident)) {
       const edition = store().newspaper(resident, requested);
       return edition ? json(edition) : json({ error: '找不到这期早报。' }, 404);

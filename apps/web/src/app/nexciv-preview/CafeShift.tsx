@@ -180,7 +180,7 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
       <CafeMcpPairing endpoint={endpoint} ready={ready} />
       {(run?.observer || (!active && kind === 'observer')) && <span>采访议题 · {OBSERVER_TOPIC}</span>}
       <Link className={styles.cafeLink} href="/nexciv-preview/cafe/news">
-        {run?.observer && run.phase === 'done' ? '阅读本班次的《城邦早报》' : '阅读《城邦早报》'}
+        阅读《城邦早报》
       </Link>
       {(error || feedback) && <p role="status">{error || feedback}</p>}
       {!!run?.observer?.sources.length && <details className={styles.cafeLog}>

@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createHash, randomBytes } from 'node:crypto';
 import { advanceCafe, beginCafe, CAFE_INITIAL_ENERGY, observeExternalChoice, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
 import type { ObserverDriver } from './cafe-observer';
-import { writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
+import { writeLightingEdition, writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
 import { buildCafePostcard } from './cafe-postcard';
 import type { CafeSnapshot } from './cafe-life';
 import { CITY_MAP, cityRestingPoint, planCityWalk } from './city-navigation';
@@ -240,10 +240,14 @@ export class CafeDemoStore {
 
   private lightingPilot(resident: string, at: number, submittedAt?: number) {
     if (submittedAt === undefined) return;
+    return lightingPilotView(submittedAt, this.installationRecord(resident), at);
+  }
+
+  private installationRecord(resident: string): CityActivity | undefined {
     const row = this.db.prepare(`
       SELECT activity FROM city_activities WHERE resident=? AND json_extract(activity, '$.actionId')=?
     `).get(resident, INSTALL_LIGHT.id);
-    return lightingPilotView(submittedAt, row ? JSON.parse(String(row.activity)) : undefined, at);
+    return row ? JSON.parse(String(row.activity)) : undefined;
   }
 
   private saveCityActivity(resident: string, activity: CityActivity) {
@@ -491,9 +495,21 @@ export class CafeDemoStore {
         SELECT n.issue FROM newspaper_issues n JOIN shifts s ON s.id=n.shift
         WHERE s.resident=? AND s.started>=? ORDER BY n.published DESC, s.started DESC
       `).all(resident, cutoff).map((row) => JSON.parse(String(row.issue)) as NewspaperIssue);
-      const issues = editions.map(({ id, publishedAt, headline }) => ({ id, publishedAt, headline }));
-      const issue = issueId ? editions.find(({ id }) => id === issueId) : editions[0];
+      const installation = this.installationRecord(resident);
+      const report = installation && this.db.prepare(`
+        SELECT activity FROM city_activities WHERE resident=? AND json_extract(activity, '$.actionId')=?
+        ORDER BY started DESC LIMIT 1
+      `).get(resident, COUNCIL_LIGHTING_ACTIONS[2]);
+      const cityEdition = installation && report && writeLightingEdition(
+        JSON.parse(String(report.activity)), installation, this.eveningRecords(resident), serverTime,
+      );
+      const publishedCityEdition = cityEdition && cityEdition.issue.publishedAt >= cutoff ? cityEdition : undefined;
+      const catalogue = [...editions, ...(publishedCityEdition ? [publishedCityEdition.issue] : [])]
+        .sort((a, b) => b.publishedAt - a.publishedAt);
+      const issues = catalogue.map(({ id, publishedAt, headline }) => ({ id, publishedAt, headline }));
+      const issue = issueId ? catalogue.find(({ id }) => id === issueId) : catalogue[0];
       if (!issue) return issueId ? null : { issues, current: null };
+      if (publishedCityEdition?.issue.id === issue.id) return { issues, current: publishedCityEdition };
 
       const run = this.current(issue.id, serverTime);
       const sources = issue.sourceIds.map((id) => run?.observer?.sources.find((source) => source.id === id));
