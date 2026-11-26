@@ -136,4 +136,54 @@ describe.skipIf(!supported)('café shift persistence', () => {
     expect(restored.read('interviewer')?.run).toEqual(done);
     expect(restored.read('another-browser')).toBeNull();
   });
+
+  it('publishes a private edition only after both answers and keeps its citations across later shifts', () => {
+    vi.useFakeTimers();
+    const file = fixture();
+    const first = open(file);
+    const started = first.start('report-shift', false, 'reader', 'observer');
+    if ('error' in started) throw new Error(started.error);
+    vi.advanceTimersByTime(30000);
+    expect(first.read('reader')?.run.observer?.sources).toHaveLength(1);
+    expect(first.newspaper('reader')).toEqual({ issues: [], current: null });
+    stores.pop()!.close();
+    vi.advanceTimersByTime(170000);
+
+    const resumed = open(file);
+    const paper = resumed.newspaper('reader', 'report-shift');
+    expect(paper?.issues).toHaveLength(1);
+    expect(paper?.current?.sources.map((source) => source.speaker)).toEqual(['ahe', 'regular']);
+    expect(paper?.current?.issue.publishedAt).toBe(resumed.read('reader')?.run.since);
+    expect(resumed.newspaper('different-browser', 'report-shift')).toBeNull();
+    expect(resumed.newspaper('reader', 'unknown-shift')).toBeNull();
+    start(resumed, 'later-shift', true, 'reader');
+    expect(resumed.newspaper('reader', 'report-shift')).toEqual(paper);
+    expect(resumed.newspaper('reader')?.issues).toHaveLength(1);
+  });
+
+  it('publishes from the deadline worker and backfills an already completed interview', async () => {
+    vi.useFakeTimers();
+    const file = fixture();
+    const store = open(file, true);
+    expect(store.start('first-issue', false, 'reader', 'observer')).toHaveProperty('run');
+    await vi.advanceTimersByTimeAsync(100000);
+    const sqlite = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
+    const inspector = new sqlite.DatabaseSync(file);
+    try {
+      expect(inspector.prepare('SELECT shift FROM newspaper_issues').get()?.shift).toBe('first-issue');
+      // An older completed shift has interview records but no printed edition.
+      const old = beginCafe(Date.now() - 200000, 'social', false, undefined, 'observer');
+      advanceCafe(old, Date.now());
+      inspector.prepare('INSERT INTO shifts(id,state,next_at,started,resident) VALUES (?,?,NULL,?,?)')
+        .run('older-issue', JSON.stringify(old), old.events[0]!.at, 'reader');
+    } finally { inspector.close(); }
+
+    const archive = store.newspaper('reader', 'older-issue');
+    expect(archive?.current?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ speaker: 'ahe' }),
+      expect.objectContaining({ speaker: 'regular' }),
+    ]));
+    expect(archive?.issues.map(({ id }) => id)).toEqual(['first-issue', 'older-issue']);
+    expect(store.newspaper('reader')?.current?.issue.id).toBe('first-issue');
+  });
 });

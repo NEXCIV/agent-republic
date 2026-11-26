@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { advanceCafe, beginCafe, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
+import { writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
 
 type Response = { run: CafeRun; serverTime: number; feedback?: string; accepted?: boolean };
 type Row = { state: string };
@@ -24,6 +25,11 @@ export class CafeDemoStore {
       CREATE TABLE IF NOT EXISTS notes (
         shift TEXT NOT NULL REFERENCES shifts(id) ON DELETE CASCADE, id TEXT NOT NULL,
         suggestion TEXT NOT NULL, reply TEXT NOT NULL, PRIMARY KEY(shift,id)
+      );
+      CREATE TABLE IF NOT EXISTS newspaper_issues (
+        shift TEXT PRIMARY KEY REFERENCES shifts(id) ON DELETE CASCADE,
+        issue TEXT NOT NULL,
+        published INTEGER NOT NULL
       );
     `);
     this.transaction(() => {
@@ -51,6 +57,13 @@ export class CafeDemoStore {
     this.db.prepare('UPDATE shifts SET state=?, next_at=? WHERE id=?').run(JSON.stringify(run), run.until, id);
   }
 
+  private publishIssue(shiftId: string, run: CafeRun) {
+    const issue = writeNewspaper(shiftId, run);
+    if (!issue) return;
+    this.db.prepare('INSERT INTO newspaper_issues(shift,issue,published) VALUES (?,?,?) ON CONFLICT(shift) DO NOTHING')
+      .run(shiftId, JSON.stringify(issue), issue.publishedAt);
+  }
+
   private current(id: string, at: number): CafeRun | null {
     const row = this.db.prepare('SELECT state FROM shifts WHERE id=?').get(id) as Row | undefined;
     if (!row) return null;
@@ -58,6 +71,7 @@ export class CafeDemoStore {
     if (run.until !== null && run.until <= at) {
       advanceCafe(run, at);
       this.save(id, run);
+      this.publishIssue(id, run);
     }
     return run;
   }
@@ -127,6 +141,37 @@ export class CafeDemoStore {
       const id = this.latestId(resident);
       const run = id ? this.current(id, serverTime) : null;
       return run && { run, serverTime };
+    });
+  }
+
+  newspaper(resident: string, issueId?: string): NewspaperSnapshot | null {
+    const serverTime = this.clock();
+    const cutoff = serverTime - CAFE_RETENTION_DAYS * 86400000;
+    return this.transaction(() => {
+      const latest = this.latestId(resident);
+      if (latest) this.current(latest, serverTime);
+
+      // Preserve access for interviews completed before the newspaper feature shipped.
+      const completed = this.db.prepare(`
+        SELECT s.id,s.state FROM shifts s
+        LEFT JOIN newspaper_issues n ON n.shift=s.id
+        WHERE s.resident=? AND s.started>=? AND s.next_at IS NULL
+          AND n.shift IS NULL AND json_type(s.state,'$.observer')='object'
+      `).all(resident, cutoff);
+      for (const row of completed) this.publishIssue(String(row.id), JSON.parse(String(row.state)));
+
+      const editions = this.db.prepare(`
+        SELECT n.issue FROM newspaper_issues n JOIN shifts s ON s.id=n.shift
+        WHERE s.resident=? AND s.started>=? ORDER BY n.published DESC, s.started DESC
+      `).all(resident, cutoff).map((row) => JSON.parse(String(row.issue)) as NewspaperIssue);
+      const issues = editions.map(({ id, publishedAt, headline }) => ({ id, publishedAt, headline }));
+      const issue = issueId ? editions.find(({ id }) => id === issueId) : editions[0];
+      if (!issue) return issueId ? null : { issues, current: null };
+
+      const run = this.current(issue.id, serverTime);
+      const sources = issue.sourceIds.map((id) => run?.observer?.sources.find((source) => source.id === id));
+      if (sources.some((source) => !source)) return null;
+      return { issues, current: { issue, sources: sources.filter((source) => source !== undefined) } };
     });
   }
 

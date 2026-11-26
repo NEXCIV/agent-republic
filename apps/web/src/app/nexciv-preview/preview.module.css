@@ -90,6 +90,27 @@
 .cafeLog { font-size: 14px; }
 .cafeLog summary { cursor: pointer; padding: 4px 0; }
 .cafeLog time { color: #c8bea8; margin-right: 12px; }
+.cafePanel > .cafeLink { justify-self: start; padding: 5px 0; }
+.newspaper { width: min(100% - 2 * var(--edge), 740px); margin: 40px auto 72px; }
+.newspaper h1 { margin: 0 0 32px; padding-bottom: 15px; border-bottom: 2px solid var(--gold); color: #f6eed8; font-size: clamp(28px, 5vw, 42px); }
+.newspaper h2 { color: #f6eed8; }
+.newspaper article h2 { margin: 12px 0 16px; font-size: clamp(25px, 4vw, 37px); line-height: 1.2; }
+.newspaper p { line-height: 1.75; }
+.newspaper a { color: #f2cb67; text-underline-offset: 0.18em; }
+.editionMeta { display: flex; flex-wrap: wrap; gap: 4px 18px; color: #c8bea8; font-size: 14px; }
+.editionLead { font-size: 18px; color: #f6eed8; }
+.editionQuote { padding-left: 16px; border-left: 2px solid #514939; }
+.editionQuote a { white-space: nowrap; font-size: 14px; }
+.editionNote { color: #c8bea8; font-size: 14px; }
+.editionSources, .editionArchive { margin-top: 32px; padding-top: 12px; border-top: 1px solid #494849; }
+.editionSources h2, .editionArchive h2 { font-size: 18px; }
+.editionSources ol, .editionArchive ul { padding-left: 24px; }
+.editionSources li { margin: 12px 0; padding: 12px; scroll-margin-top: 16px; background: #202226; }
+.editionSources li:target { box-shadow: inset 3px 0 var(--gold); }
+.editionSources time { display: block; padding-top: 5px; color: #c8bea8; font-size: 13px; }
+.editionSources p { margin: 8px 0 0; color: #c8bea8; }
+.editionSources blockquote { margin: 6px 0 0; line-height: 1.7; }
+.editionArchive li { margin: 9px 0; }
 .touchHint { display: none; }
 .route { min-height: 30px; gap: 10px; }
 .route progress { accent-color: var(--gold); width: min(32vw, 236px); height: 8px; }

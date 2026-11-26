@@ -51,6 +51,16 @@ export function GET(request: NextRequest) {
   const unavailable = checkRuntime();
   if (unavailable) return unavailable;
   const resident = request.cookies.get(residentCookie)?.value;
+  const newspaper = request.nextUrl.searchParams.get('newspaper');
+  if (newspaper !== null) {
+    const requested = newspaper === 'latest' ? undefined : newspaper;
+    if (requested !== undefined && !uuid.test(requested)) return json({ error: '找不到这期早报。' }, 404);
+    if (resident && uuid.test(resident)) {
+      const edition = store().newspaper(resident, requested);
+      return edition ? json(edition) : json({ error: '找不到这期早报。' }, 404);
+    }
+    return requested ? json({ error: '找不到这期早报。' }, 404) : json({ issues: [], current: null });
+  }
   if (resident && uuid.test(resident)) return json(snapshot(store().read(resident)));
   const legacy = request.cookies.get(legacyCookie)?.value;
   const migrated = legacy && uuid.test(legacy) ? store().read(legacy, true) : null;

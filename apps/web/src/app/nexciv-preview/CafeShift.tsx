@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import type { CafeShiftKind, CafeSnapshot, CafeSuggestion, CafeView } from '../../lib/cafe-life';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC } from '../../lib/cafe-observer';
 import styles from './preview.module.css';
@@ -116,6 +117,9 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
         {run && <span className={styles.energy}>01 号精力 <b>{run.energy}</b> / 100</span>}
       </div>
       {(run?.observer || (!active && kind === 'observer')) && <span>采访议题 · {OBSERVER_TOPIC}</span>}
+      <Link className={styles.cafeLink} href="/nexciv-preview/cafe/news">
+        {run?.observer && run.phase === 'done' ? '阅读本班次的《城邦早报》' : '阅读《城邦早报》'}
+      </Link>
       {(error || feedback) && <p role="status">{error || feedback}</p>}
       {!!run?.observer?.sources.length && <details className={styles.cafeLog}>
         <summary>采访记录（{run.observer.sources.length}）</summary>

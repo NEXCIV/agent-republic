@@ -1,7 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { advanceCafe, beginCafe, suggestCafe } from '../src/lib/cafe-life';
+import { writeNewspaper } from '../src/lib/cafe-newspaper';
 
 describe('isolated café activities', () => {
+  it('rejects a missing or duplicated source when composing an edition', () => {
+    const run = beginCafe(1000, 'social', false, undefined, 'observer');
+    advanceCafe(run, 300000);
+    expect(writeNewspaper('shift', run)?.sourceIds).toEqual(run.observer?.sources.map(({ id }) => id));
+    const duplicate = structuredClone(run);
+    duplicate.observer!.sources[1] = duplicate.observer!.sources[0]!;
+    expect(writeNewspaper('shift', duplicate)).toBeNull();
+    run.events = run.events.filter(({ sourceId }) => sourceId !== run.observer!.sources[0]!.id);
+    expect(writeNewspaper('shift', run)).toBeNull();
+  });
   it('records a sourced answer only after the selected resident is interviewed in place', () => {
     const run = beginCafe(1000, 'social', false, undefined, 'observer');
     expect(run.phase).toBe('briefing');
