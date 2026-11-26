@@ -91,6 +91,12 @@
 .cafeLog summary { cursor: pointer; padding: 4px 0; }
 .cafeLog time { color: #c8bea8; margin-right: 12px; }
 .cafePanel > .cafeLink { justify-self: start; padding: 5px 0; }
+.postcard { padding: 11px 15px; background: #202226; border-left: 2px solid var(--gold); line-height: 1.6; }
+.postcard summary { color: #f6eed8; font-weight: 650; cursor: pointer; }
+.postcard p { margin-top: 8px; color: #c8bea8; font-size: 14px; }
+.postcard ul { margin: 8px 0; padding-left: 20px; }
+.postcardLinks { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.postcardLinks a { color: #f2cb67; text-underline-offset: 0.18em; font-size: 14px; }
 .newspaper { width: min(100% - 2 * var(--edge), 740px); margin: 40px auto 72px; }
 .newspaper h1 { margin: 0 0 32px; padding-bottom: 15px; border-bottom: 2px solid var(--gold); color: #f6eed8; font-size: clamp(28px, 5vw, 42px); }
 .newspaper h2 { color: #f6eed8; }

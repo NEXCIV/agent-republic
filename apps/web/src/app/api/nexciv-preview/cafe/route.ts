@@ -61,7 +61,11 @@ export function GET(request: NextRequest) {
     }
     return requested ? json({ error: '找不到这期早报。' }, 404) : json({ issues: [], current: null });
   }
-  if (resident && uuid.test(resident)) return json(snapshot(store().read(resident)));
+  if (resident && uuid.test(resident)) {
+    const cursor = request.nextUrl.searchParams.get('seenAt');
+    const seenAt = cursor && /^\d{1,15}$/.test(cursor) ? Number(cursor) : undefined;
+    return json(snapshot(store().read(resident, false, seenAt)));
+  }
   const legacy = request.cookies.get(legacyCookie)?.value;
   const migrated = legacy && uuid.test(legacy) ? store().read(legacy, true) : null;
   const response = json(snapshot(migrated));

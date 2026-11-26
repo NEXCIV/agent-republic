@@ -186,4 +186,27 @@ describe.skipIf(!supported)('café shift persistence', () => {
     expect(archive?.issues.map(({ id }) => id)).toEqual(['first-issue', 'older-issue']);
     expect(store.newspaper('reader')?.current?.issue.id).toBe('first-issue');
   });
+
+  it('builds a private return postcard from unseen events and the finished edition after a restart', () => {
+    vi.useFakeTimers();
+    const file = fixture();
+    const first = open(file);
+    const initial = first.start('interview-shift', false, 'reader', 'observer');
+    if ('error' in initial) throw new Error(initial.error);
+    vi.advanceTimersByTime(18000);
+    const seen = first.read('reader')!;
+    expect(first.read('reader', false, seen.serverTime)?.postcard).toBeUndefined();
+    stores.pop()!.close();
+    vi.advanceTimersByTime(120000);
+
+    const restored = open(file);
+    const resumed = restored.read('reader', false, seen.serverTime)!;
+    expect(resumed.postcard?.before).toEqual(seen.run.events.at(-1));
+    expect(resumed.postcard?.events.every((event) => event.at > seen.serverTime)).toBe(true);
+    expect(resumed.postcard?.events.at(-1)).toEqual(resumed.run.events.at(-1));
+    expect(resumed.postcard?.issue).toMatchObject({ id: 'interview-shift', headline: '北岸码头的灯该照哪里？' });
+    expect(restored.read('stranger', false, seen.serverTime)).toBeNull();
+    expect(restored.read('reader', false, resumed.serverTime)?.postcard).toBeUndefined();
+    expect(restored.read('reader', false, resumed.serverTime + 60000)?.postcard).toBeUndefined();
+  });
 });

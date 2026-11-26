@@ -2,6 +2,7 @@
 import { agentObservationV1Schema, worldFrameV1Schema, type AgentObservationV1 } from '@agent-republic/domain';
 import { buildAgentObservation } from '@agent-republic/agent-engine';
 import demoFrame from '../../../../examples/world-frame.demo.json';
+import type { CafePostcard } from './cafe-postcard';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC, type ObserverAngle, type ObserverAssignment, type ObserverSpeaker, type ObserverSuggestion } from './cafe-observer';
 
 type Perception = NonNullable<AgentObservationV1['cafeDemo']>;
@@ -29,7 +30,7 @@ export type CafeRun = {
 };
 
 export type CafeView = Pick<CafeRun, 'phase' | 'since' | 'until' | 'place' | 'energy' | 'events' | 'requestedActivity' | 'fishResult' | 'observer'>;
-export type CafeSnapshot = { run: CafeView; serverTime: number; feedback?: string; accepted?: boolean };
+export type CafeSnapshot = { run: CafeView; serverTime: number; feedback?: string; accepted?: boolean; postcard?: CafePostcard };
 
 const frame = worldFrameV1Schema.parse(demoFrame);
 const baseline = buildAgentObservation(frame, {

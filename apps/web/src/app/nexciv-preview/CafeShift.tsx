@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { CafeShiftKind, CafeSnapshot, CafeSuggestion, CafeView } from '../../lib/cafe-life';
+import type { CafePostcard } from '../../lib/cafe-postcard';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC } from '../../lib/cafe-observer';
 import styles from './preview.module.css';
 
@@ -20,7 +21,23 @@ export function shiftLabel(run: CafeView) {
   return phaseLabel[run.phase];
 }
 const endpoint = '/api/nexciv-preview/cafe';
+const seenKey = 'nexciv-cafe-seen-at';
 type Command = { action: 'start'; busy: boolean; kind: CafeShiftKind } | { action: 'note'; suggestion: CafeSuggestion };
+
+function savedCheckpoint() {
+  try {
+    const value = window.localStorage.getItem(seenKey);
+    return value && /^\d{1,15}$/.test(value) ? Number(value) : undefined;
+  } catch { return undefined; }
+}
+
+function markShown(data: CafeSnapshot | null) {
+  if (document.visibilityState !== 'visible') return;
+  try {
+    if (!data) window.localStorage.removeItem(seenKey);
+    else if (data.serverTime > (savedCheckpoint() ?? 0)) window.localStorage.setItem(seenKey, String(data.serverTime));
+  } catch { /* The active shift is still readable with browser storage disabled. */ }
+}
 
 export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) => void }) {
   const [snapshot, setSnapshot] = useState<CafeSnapshot | null>(null);
@@ -30,6 +47,9 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
   const [ready, setReady] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [error, setError] = useState('');
+  const [postcard, setPostcard] = useState<CafePostcard | null>(null);
+  const onReturn = useRef(true);
+  const activity = useRef<HTMLDetailsElement>(null);
   const revision = useRef(0);
   const inFlight = useRef(false);
   const retry = useRef<{ command: string; id: string } | null>(null);
@@ -39,14 +59,24 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
+    let reading = false;
+    let visibilityVersion = 0;
     async function read() {
+      if (reading || document.visibilityState !== 'visible') return;
+      reading = true;
       const current = revision.current;
+      const visibility = visibilityVersion;
       try {
         if (inFlight.current) return;
-        const response = await fetch(endpoint, { cache: 'no-store', signal: controller.signal });
+        const seenAt = onReturn.current ? savedCheckpoint() : undefined;
+        const response = await fetch(seenAt === undefined ? endpoint : `${endpoint}?seenAt=${seenAt}`,
+          { cache: 'no-store', signal: controller.signal });
         const data = await response.json();
-        if (current !== revision.current || controller.signal.aborted) return;
+        if (current !== revision.current || visibility !== visibilityVersion || controller.signal.aborted) return;
         if (!response.ok) throw new Error(data?.error ?? '班次暂时无法读取。');
+        if (data?.postcard) setPostcard(data.postcard);
+        onReturn.current = false;
+        markShown(data);
         setReady(true);
         setSnapshot(data);
         onUpdate(data);
@@ -54,11 +84,25 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
       } catch (cause) {
         if (!controller.signal.aborted && current === revision.current) setError(cause instanceof Error ? cause.message : '连接中断，正在重试。');
       } finally {
-        if (!controller.signal.aborted) timer = setTimeout(read, active ? 900 : 4000);
+        reading = false;
+        if (!controller.signal.aborted && document.visibilityState === 'visible') timer = setTimeout(read, active ? 900 : 4000);
       }
     }
+    function visibilityChanged() {
+      visibilityVersion++;
+      clearTimeout(timer);
+      if (document.visibilityState === 'visible') {
+        onReturn.current = true;
+        void read();
+      }
+    }
+    document.addEventListener('visibilitychange', visibilityChanged);
     void read();
-    return () => { controller.abort(); clearTimeout(timer); };
+    return () => {
+      document.removeEventListener('visibilitychange', visibilityChanged);
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [active, onUpdate]);
 
   async function send(command: Command) {
@@ -79,6 +123,8 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error ?? '操作未送达，请重试。');
       retry.current = null;
+      markShown(data);
+      if (command.action === 'start') setPostcard(null);
       setSnapshot(data);
       setFeedback(data.feedback ?? '');
       onUpdate(data);
@@ -91,6 +137,19 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
   }
   return (
     <div className={styles.cafePanel}>
+      {postcard && <details key={postcard.events.at(-1)?.at} className={styles.postcard} open>
+        <summary>回访明信片 · {postcard.eventCount} 条新进展</summary>
+        {postcard.before && <p>上次看到 01 号时 · {postcard.before.text}</p>}
+        <ul>
+          {postcard.events.map((event, index) => <li key={index}>{event.text}</li>)}
+        </ul>
+        <div className={styles.postcardLinks}>
+          {postcard.issue && <Link href={`/nexciv-preview/cafe/news?issue=${postcard.issue.id}`}>阅读早报《{postcard.issue.headline}》</Link>}
+          {run?.events[0]?.at === postcard.shiftStartedAt && <a href="#cafe-activity" onClick={() => {
+            if (activity.current) activity.current.open = true;
+          }}>查看班次经过</a>}
+        </div>
+      </details>}
       <div className={styles.controls}>
         {active && run.observer ? <>
           {run.phase === 'briefing' ? <>
@@ -133,7 +192,7 @@ export function CafeShift({ onUpdate }: { onUpdate: (data: CafeSnapshot | null) 
           </div>;
         })}
       </details>}
-      {run && <details className={styles.cafeLog}>
+      {run && <details ref={activity} id="cafe-activity" className={styles.cafeLog}>
         <summary>{run.events.at(-1)?.text} · 查看经过</summary>
         <ol>{run.events.map((entry, index) => <li key={index}>
           <time>+{Math.round((entry.at - run.events[0]!.at) / 1000)} 秒</time>{entry.text}

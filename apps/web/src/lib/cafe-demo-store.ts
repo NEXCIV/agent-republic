@@ -1,8 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { advanceCafe, beginCafe, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
 import { writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
+import { buildCafePostcard } from './cafe-postcard';
+import type { CafeSnapshot } from './cafe-life';
 
-type Response = { run: CafeRun; serverTime: number; feedback?: string; accepted?: boolean };
+type Response = Omit<CafeSnapshot, 'run'> & { run: CafeRun };
 type Row = { state: string };
 export const CAFE_RETENTION_DAYS = 30;
 
@@ -132,15 +134,22 @@ export class CafeDemoStore {
     return result;
   }
 
-  read(resident: string, migrateLegacy = false): Response | null {
+  read(resident: string, migrateLegacy = false, seenAt?: number): Response | null {
     const serverTime = this.clock();
     return this.transaction(() => {
       if (migrateLegacy) {
         this.db.prepare('UPDATE shifts SET resident=? WHERE id=? AND resident IS NULL').run(resident, resident);
       }
       const id = this.latestId(resident);
-      const run = id ? this.current(id, serverTime) : null;
-      return run && { run, serverTime };
+      if (!id) return null;
+      const run = this.current(id, serverTime);
+      if (!run) return null;
+      if (seenAt === undefined || !Number.isSafeInteger(seenAt) || seenAt >= serverTime
+        || seenAt < serverTime - CAFE_RETENTION_DAYS * 86400000) return { run, serverTime };
+      const row = run.observer && run.phase === 'done'
+        ? this.db.prepare('SELECT issue FROM newspaper_issues WHERE shift=?').get(id) : undefined;
+      const issue = typeof row?.issue === 'string' ? JSON.parse(row.issue) as NewspaperIssue : undefined;
+      return { run, serverTime, postcard: buildCafePostcard(run, seenAt, issue) };
     });
   }
 
