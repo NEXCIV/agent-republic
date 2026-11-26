@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { advanceCafe, beginCafe, suggestCafe, type CafeEncounter, type CafeRun } from './cafe-life';
+import { advanceCafe, beginCafe, suggestCafe, type CafeEncounter, type CafeRun, type CafeShiftKind } from './cafe-life';
 
 type Response = { run: CafeRun; serverTime: number; feedback?: string; accepted?: boolean };
 type Row = { state: string };
@@ -90,7 +90,7 @@ export class CafeDemoStore {
     return typeof row?.id === 'string' ? row.id : undefined;
   }
 
-  start(id: string, busy: boolean, resident: string): Response | { error: string } {
+  start(id: string, busy: boolean, resident: string, kind: CafeShiftKind = 'cafe'): Response | { error: string } {
     const at = this.clock();
     const result = this.transaction(() => {
       this.db.prepare('DELETE FROM shifts WHERE started < ?').run(at - CAFE_RETENTION_DAYS * 86400000);
@@ -100,7 +100,7 @@ export class CafeDemoStore {
         if (this.latestId(resident) !== id) return { error: '该请求属于上一个班次。' };
         const existing = this.current(id, at)!;
         const originallyBusy = existing.friendBusyUntil > existing.events[0]!.at;
-        if (originallyBusy !== busy) return { error: '开班编号已用于另一种班次。' };
+        if (originallyBusy !== busy || Boolean(existing.observer) !== (kind === 'observer')) return { error: '开班编号已用于另一种班次。' };
         return { run: existing, serverTime: at };
       }
       const latestId = this.latestId(resident);
@@ -110,7 +110,7 @@ export class CafeDemoStore {
         FROM shifts WHERE resident=? AND json_extract(state, '$.meeting') IN ('declined', 'chatted')
         ORDER BY started DESC LIMIT 1
       `).get(resident) as CafeEncounter | undefined;
-      const initial = beginCafe(at, 'social', busy, memory);
+      const initial = beginCafe(at, 'social', busy, memory, kind);
       this.db.prepare('INSERT INTO shifts(id,state,next_at,started,resident) VALUES (?,?,?,?,?)').run(id, JSON.stringify(initial), initial.until, at, resident);
       return { run: initial, serverTime: at };
     });

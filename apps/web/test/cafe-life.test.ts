@@ -2,6 +2,46 @@ import { describe, expect, it } from 'vitest';
 import { advanceCafe, beginCafe, suggestCafe } from '../src/lib/cafe-life';
 
 describe('isolated café activities', () => {
+  it('records a sourced answer only after the selected resident is interviewed in place', () => {
+    const run = beginCafe(1000, 'social', false, undefined, 'observer');
+    expect(run.phase).toBe('briefing');
+    expect(suggestCafe(run, 'regularFirst').accepted).toBe(true);
+    expect(suggestCafe(run, 'askImpact').accepted).toBe(true);
+    expect(suggestCafe(run, 'fish').accepted).toBe(false);
+    advanceCafe(run, run.until!);
+    expect(run.phase).toBe('toPier');
+    expect(run.observer?.sources).toEqual([]);
+    advanceCafe(run, run.until!);
+    expect(run.phase).toBe('interviewing');
+    expect(run.place).toBe('pier');
+    expect(suggestCafe(run, 'aheFirst').accepted).toBe(false);
+    expect(run.observer?.sources).toEqual([]);
+    advanceCafe(run, run.until!);
+    expect(run.phase).toBe('toCounter');
+    expect(run.observer?.sources[0]).toMatchObject({ speaker: 'regular', place: 'pier', angle: 'impact' });
+    advanceCafe(run, 300000);
+    expect(run.phase).toBe('done');
+    expect(run.observer?.sources.map(({ speaker }) => speaker)).toEqual(['regular', 'ahe']);
+    const after = structuredClone(run);
+    advanceCafe(run, 600000);
+    expect(run).toEqual(after);
+  });
+
+  it('uses a previous refusal to reroute when a preferred source is still busy', () => {
+    const memory = { outcome: 'declined', shiftStartedAt: 20 } as const;
+    const first = beginCafe(1000, 'social', true, undefined, 'observer');
+    const repeat = beginCafe(1000, 'social', true, memory, 'observer');
+    expect(suggestCafe(first, 'aheFirst').accepted).toBe(true);
+    expect(suggestCafe(repeat, 'aheFirst').accepted).toBe(true);
+    advanceCafe(first, first.until!);
+    advanceCafe(repeat, repeat.until!);
+    expect(first.phase).toBe('waitingForAhe');
+    expect(repeat.phase).toBe('toPier');
+    expect(repeat.events.some((event) => event.recall?.outcome === 'declined')).toBe(true);
+    expect(repeat.observer?.sources).toEqual([]);
+    advanceCafe(first, 300000);
+    expect(first.observer?.sources.map(({ speaker }) => speaker)).toEqual(['ahe', 'regular']);
+  });
   it.each([
     ['declined', '上回我忙着收摊'],
     ['chatted', '上回聊完我还在想'],

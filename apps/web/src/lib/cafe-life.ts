@@ -2,11 +2,14 @@
 import { agentObservationV1Schema, worldFrameV1Schema, type AgentObservationV1 } from '@agent-republic/domain';
 import { buildAgentObservation } from '@agent-republic/agent-engine';
 import demoFrame from '../../../../examples/world-frame.demo.json';
+import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS, OBSERVER_TOPIC, type ObserverAngle, type ObserverAssignment, type ObserverSpeaker, type ObserverSuggestion } from './cafe-observer';
 
 type Perception = NonNullable<AgentObservationV1['cafeDemo']>;
 export type Preference = Perception['preference'];
-export type CafePhase = 'working' | 'inviting' | 'reconnecting' | 'chatting' | 'walking' | 'resting' | 'toPier' | 'casting' | 'fishing' | 'reeling' | 'done';
-export type CafeSuggestion = 'chat' | 'rest' | 'fish';
+export type CafePhase = 'working' | 'inviting' | 'reconnecting' | 'chatting' | 'walking' | 'resting' | 'toPier' | 'casting' | 'fishing' | 'reeling'
+  | 'briefing' | 'waitingForAhe' | 'interviewing' | 'toCounter' | 'done';
+export type CafeSuggestion = 'chat' | 'rest' | 'fish' | ObserverSuggestion;
+export type CafeShiftKind = 'cafe' | 'observer';
 export type CafeEncounter = { outcome: NonNullable<Perception['previousMeeting']>; shiftStartedAt: number };
 export type CafeRun = {
   phase: CafePhase;
@@ -21,10 +24,11 @@ export type CafeRun = {
   previousEncounter?: CafeEncounter;
   requestedActivity?: Perception['requestedActivity'];
   fishResult?: 'released' | 'noCatch';
-  events: { at: number; text: string; recall?: CafeEncounter }[];
+  observer?: ObserverAssignment;
+  events: { at: number; text: string; recall?: CafeEncounter; sourceId?: string }[];
 };
 
-export type CafeView = Pick<CafeRun, 'phase' | 'since' | 'until' | 'place' | 'energy' | 'events' | 'requestedActivity' | 'fishResult'>;
+export type CafeView = Pick<CafeRun, 'phase' | 'since' | 'until' | 'place' | 'energy' | 'events' | 'requestedActivity' | 'fishResult' | 'observer'>;
 export type CafeSnapshot = { run: CafeView; serverTime: number; feedback?: string; accepted?: boolean };
 
 const frame = worldFrameV1Schema.parse(demoFrame);
@@ -41,7 +45,7 @@ const activities = {
   fish: { place: 'pier', phase: 'casting', duration: 1500, start: '走到北岸码头的钓位，向湖里抛竿。' },
 } as const;
 
-function localObservation(run: CafeRun): AgentObservationV1 {
+function localObservation(run: CafeRun, at: number): AgentObservationV1 {
   const nearbyFriend = run.place === 'counter';
   const available: Perception['available'] = [];
   if (run.place === activities.work.place && !run.finishedWork) available.push('work');
@@ -49,11 +53,17 @@ function localObservation(run: CafeRun): AgentObservationV1 {
   if (nearbyFriend) available.push('invite');
   if (run.finishedWork && run.place === 'counter') available.push('visitPier');
   if (run.place === activities.fish.place && run.energy >= FISHING_ENERGY && !run.fishResult) available.push('fish');
+  const assignment = run.observer;
   return agentObservationV1Schema.parse({ ...baseline, cafeDemo: {
     place: run.place, energy: run.energy, nearbyFriend, available, finishedWork: run.finishedWork,
     lastMeeting: run.meeting, preference: run.preference,
     previousMeeting: nearbyFriend ? run.previousEncounter?.outcome : undefined,
     requestedActivity: run.requestedActivity,
+    observer: assignment && {
+      preferredSource: assignment.preferredSource,
+      aheAvailable: nearbyFriend && at >= run.friendBusyUntil,
+      remainingSources: (['ahe', 'regular'] as const).filter((speaker) => !assignment.sources.some((source) => source.speaker === speaker)),
+    },
   } });
 }
 
@@ -70,11 +80,11 @@ function decide(observation: AgentObservationV1) {
   return seen.available.includes('rest') ? 'rest' : 'walkToBench';
 }
 
-function enter(run: CafeRun, phase: CafePhase, at: number, duration: number, text: string, recall?: CafeEncounter) {
+function enter(run: CafeRun, phase: CafePhase, at: number, duration: number, text: string, details?: Pick<CafeRun['events'][number], 'recall' | 'sourceId'>) {
   run.phase = phase;
   run.since = at;
   run.until = duration ? at + duration : null;
-  run.events.push(recall ? { at, text, recall } : { at, text });
+  run.events.push({ at, text, ...details });
 }
 
 const RECALL_LINES = {
@@ -89,12 +99,12 @@ const RECALL_LINES = {
 };
 
 function nextDecision(run: CafeRun, at: number) {
-  const action = decide(localObservation(run));
+  const action = decide(localObservation(run, at));
   if (action === 'invite') return enter(run, 'inviting', at, 3000, '看见阿禾还在摊边，招手问她能不能聊两句。');
   if (action === 'reconnect') {
     const memory = run.previousEncounter!;
     const timing = at + 3000 < run.friendBusyUntil ? 'busy' : 'free';
-    return enter(run, 'reconnecting', at, 3000, `阿禾主动打招呼：“${RECALL_LINES[memory.outcome][timing]}”`, memory);
+    return enter(run, 'reconnecting', at, 3000, `阿禾主动打招呼：“${RECALL_LINES[memory.outcome][timing]}”`, { recall: memory });
   }
   if (action === 'walkToBench') return enter(run, 'walking', at, 4000, '决定去街边的空长椅歇会儿。');
   if (action === 'visitPier') return enter(run, 'toPier', at, PIER_TRAVEL_MS, '交班后带上鱼竿，沿街前往北岸码头。');
@@ -103,13 +113,56 @@ function nextDecision(run: CafeRun, at: number) {
   enter(run, activity.phase, at, activity.duration, activity.start);
 }
 
-export function beginCafe(at: number, preference: Preference, friendBusy: boolean, previousEncounter?: CafeEncounter): CafeRun {
+const INTERVIEW_ANSWERS: Record<ObserverSpeaker, Record<ObserverAngle, string>> = {
+  ahe: {
+    safety: '我收完摊往码头走，最暗的是上木栈道的那两级台阶。要加灯，我想先照台阶。',
+    impact: '加灯以后收摊走那条路会安心一点。灯朝下照吧，别让湖对面的窗户一晚上都亮着。',
+  },
+  regular: {
+    safety: '我常来钓鱼，更容易踩空的是栈道转角。我宁愿在转角装一盏矮灯。',
+    impact: '我喜欢黄昏在这里看水。灯照脚下就行，照到水上反而看不清浮漂。',
+  },
+};
+
+function nextInterview(run: CafeRun, at: number) {
+  const seen = localObservation(run, at).cafeDemo!;
+  const observer = seen.observer!;
+  if (observer.remainingSources.length === 0) {
+    return enter(run, 'done', at, 0, '两位居民都已采访，原话已存入采访记录。');
+  }
+  let speaker = observer.remainingSources[0]!;
+  if (observer.remainingSources.length === 2) {
+    const willingToWait = observer.preferredSource === 'ahe'
+      ? seen.previousMeeting !== 'declined'
+      : seen.previousMeeting === 'chatted';
+    if (observer.preferredSource === 'regular' || (!observer.aheAvailable && !willingToWait)) speaker = 'regular';
+  }
+  const target = OBSERVER_SPEAKERS[speaker];
+  if (run.place !== target.place) {
+    const reroute = speaker === 'regular' && !observer.aheAvailable && observer.preferredSource !== 'regular';
+    if (reroute && seen.previousMeeting === 'declined') {
+      return enter(run, 'toPier', at, PIER_TRAVEL_MS, '阿禾还在收摊。想到上次也没聊成，01 号先去北岸找常客。', { recall: run.previousEncounter });
+    }
+    return enter(run, speaker === 'regular' ? 'toPier' : 'toCounter', at, PIER_TRAVEL_MS,
+      reroute ? '阿禾正在收摊，01 号先去北岸采访常客。' : `01 号动身去${target.location}采访${target.name}。`);
+  }
+  if (speaker === 'ahe' && !observer.aheAvailable) {
+    return enter(run, 'waitingForAhe', at, run.friendBusyUntil - at, '01 号在咖啡摊旁等阿禾收完摊。');
+  }
+  const question = OBSERVER_QUESTIONS[run.observer!.angle];
+  return enter(run, 'interviewing', at, 8000, `01 号问${target.name}：“${question}”`);
+}
+
+export function beginCafe(at: number, preference: Preference, friendBusy: boolean, previousEncounter?: CafeEncounter, kind: CafeShiftKind = 'cafe'): CafeRun {
   const run: CafeRun = {
     phase: 'working', since: at, until: null, place: 'counter', energy: 68, preference,
     friendBusyUntil: friendBusy ? at + 30000 : at, finishedWork: false, meeting: 'none', events: [],
   };
   if (previousEncounter) run.previousEncounter = previousEncounter;
-  nextDecision(run, at);
+  if (kind === 'observer') {
+    run.observer = { angle: 'safety', sources: [] };
+    enter(run, 'briefing', at, 18000, `01 号接到采访议题「${OBSERVER_TOPIC}」`);
+  } else nextDecision(run, at);
   return run;
 }
 
@@ -117,6 +170,26 @@ export function advanceCafe(run: CafeRun, now: number): void {
   while (run.until !== null && run.until <= now) {
     const at = run.until;
     switch (run.phase) {
+      case 'briefing':
+      case 'waitingForAhe':
+        nextInterview(run, at);
+        break;
+      case 'toCounter':
+        run.place = 'counter';
+        nextInterview(run, at);
+        break;
+      case 'interviewing': {
+        const observer = run.observer!;
+        const speaker = run.place === 'pier' ? 'regular' : 'ahe';
+        const target = OBSERVER_SPEAKERS[speaker];
+        const quote = INTERVIEW_ANSWERS[speaker][observer.angle];
+        const id = `interview-${run.events[0]!.at}-${speaker}`;
+        observer.sources.push({ id, at, speaker, place: target.place, angle: observer.angle, quote });
+        run.events.push({ at, text: `${target.name}回答了采访。`, sourceId: id });
+        if (speaker === 'ahe') run.meeting = 'chatted';
+        nextInterview(run, at);
+        break;
+      }
       case 'working':
         run.finishedWork = true;
         run.energy += activities.work.energy;
@@ -154,7 +227,8 @@ export function advanceCafe(run: CafeRun, now: number): void {
         break;
       case 'toPier':
         run.place = 'pier';
-        nextDecision(run, at);
+        if (run.observer) nextInterview(run, at);
+        else nextDecision(run, at);
         break;
       case 'casting':
         enter(run, 'fishing', at, 10000, '浮漂已经落水，等一等。');
@@ -176,6 +250,21 @@ export function advanceCafe(run: CafeRun, now: number): void {
 }
 
 export function suggestCafe(run: CafeRun, suggestion: string) {
+  if (run.observer) {
+    if (run.phase !== 'briefing') return { accepted: false, reason: '01 号已经开始采访行程，这张纸条错过了本次决定。' };
+    switch (suggestion) {
+      case 'aheFirst':
+      case 'regularFirst':
+        run.observer.preferredSource = suggestion === 'aheFirst' ? 'ahe' : 'regular';
+        return { accepted: true, reason: `01 号会优先考虑采访${OBSERVER_SPEAKERS[run.observer.preferredSource].name}。` };
+      case 'askSafety':
+      case 'askImpact':
+        run.observer.angle = suggestion === 'askSafety' ? 'safety' : 'impact';
+        return { accepted: true, reason: `记下问题了：${OBSERVER_QUESTIONS[run.observer.angle]}` };
+      default:
+        return { accepted: false, reason: '这个班次正在准备采访。请建议采访对象或问题。' };
+    }
+  }
   if (suggestion !== 'chat' && suggestion !== 'rest' && suggestion !== 'fish') return { accepted: false, reason: '街区尚未开放这项活动。' };
   if (run.phase !== 'working') return { accepted: false, reason: '已经收工，这张纸条错过了本次决定。' };
   if (suggestion === 'fish') {

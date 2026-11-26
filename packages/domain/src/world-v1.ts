@@ -221,6 +221,11 @@ export const agentObservationV1Schema = z
       previousMeeting: z.enum(['declined', 'chatted']).optional(),
       preference: z.enum(['social', 'quiet']),
       requestedActivity: z.literal('fish').optional(),
+      observer: z.object({
+        preferredSource: z.enum(['ahe', 'regular']).optional(),
+        aheAvailable: z.boolean(),
+        remainingSources: z.array(z.enum(['ahe', 'regular'])).max(2),
+      }).strict().optional(),
     }).strict().optional(),
     approvedPublicMessages: z.array(publicMessageSchema).max(MAX_PUBLIC_MESSAGES),
     /** Public names for addressing an invitation. These carry no location or wallet authority. */

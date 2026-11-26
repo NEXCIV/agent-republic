@@ -112,4 +112,28 @@ describe.skipIf(!supported)('café shift persistence', () => {
     expect(start(store, 'after-migration', false, 'old-cookie').run.previousEncounter).toEqual({ outcome: 'declined', shiftStartedAt: at });
     expect(store.read('old-cookie', true)?.run.phase).toBe('working');
   });
+
+  it('restores an observer assignment and preserves one independently referenced answer per speaker', () => {
+    vi.useFakeTimers();
+    const file = fixture();
+    const store = open(file);
+    const start = store.start('interview', true, 'interviewer', 'observer');
+    if ('error' in start) throw new Error(start.error);
+    const { serverTime: started } = start;
+    expect(store.start('interview', true, 'interviewer')).toHaveProperty('error');
+    expect(store.note('interviewer', started, 'note', 'regularFirst')?.accepted).toBe(true);
+    expect(store.note('interviewer', started, 'note', 'aheFirst')?.accepted).toBe(false);
+    stores.pop()!.close();
+    vi.advanceTimersByTime(100000);
+    const restored = open(file);
+    expect(restored.read('interviewer')?.run.observer?.sources.map(({ speaker }) => speaker)).toEqual(['regular']);
+    expect(restored.note('interviewer', started, 'too-late', 'askImpact')?.accepted).toBe(false);
+    vi.advanceTimersByTime(100000);
+    const done = restored.read('interviewer')!.run;
+    expect(done.phase).toBe('done');
+    expect(done.observer?.sources.map(({ speaker, angle }) => [speaker, angle])).toEqual([['regular', 'safety'], ['ahe', 'safety']]);
+    expect(done.events.flatMap(({ sourceId }) => sourceId ? [sourceId] : [])).toEqual(done.observer?.sources.map(({ id }) => id));
+    expect(restored.read('interviewer')?.run).toEqual(done);
+    expect(restored.read('another-browser')).toBeNull();
+  });
 });

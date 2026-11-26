@@ -90,6 +90,8 @@ export type ProposedAction = {
 
 隔离的咖啡街试玩使用可选的 `cafeDemo` 观测字段。服务端提供当前地点、精力、附近同伴、可用活动、是否收工、本班次邀约结果、个人偏好和最新活动建议。当阿禾在附近时，`previousMeeting` 提供此前实际交谈或婉拒的结果，她可以据此主动开口。去北岸是可达目的地，钓鱼能力则由到达钓位和精力条件解锁。 [城市生活实施规划](civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)
 
+观察员班次额外读取 `cafeDemo.observer` 的优先采访人选、阿禾当前能否接待和待采访名单。规则在到达受访地点并收到回答后才写入来源。每位受访者在同一班次只生成一条可引用的原话。
+
 `WorldFrameV1` 在 `packages/domain/src/world-v1.ts` 定义，作为**唯一世界状态协议**；不得在 Agent Engine 中另行定义 v1.0 的平行 `WorldSnapshot`。由后端生成 `AgentObservationV1`：
 
 ```ts

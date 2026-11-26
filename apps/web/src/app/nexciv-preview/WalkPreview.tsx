@@ -49,7 +49,9 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
     latest.current = data;
     world.current?.syncCafe(data);
     setShift(data ? shiftLabel(data.run) : '等待开班');
-    setGreeting(data?.run.phase === 'reconnecting' ? data.run.events.at(-1)?.text ?? '' : '');
+    const phase = data?.run.phase;
+    setGreeting(phase === 'reconnecting' || phase === 'interviewing' || phase === 'waitingForAhe'
+      ? data?.run.events.at(-1)?.text ?? '' : '');
   }, []);
   const [state, setState] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [view, setView] = useState<View>('follow');

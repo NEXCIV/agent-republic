@@ -36,8 +36,8 @@ function checkRuntime() {
 
 function snapshot(data: ReturnType<CafeDemoStore['read']>) {
   if (!data) return null;
-  const { phase, since, until, place, energy, events, requestedActivity, fishResult } = data.run;
-  return { ...data, run: { phase, since, until, place, energy, events, requestedActivity, fishResult } };
+  const { phase, since, until, place, energy, events, requestedActivity, fishResult, observer } = data.run;
+  return { ...data, run: { phase, since, until, place, energy, events, requestedActivity, fishResult, observer } };
 }
 
 function setResident(response: NextResponse, request: NextRequest, resident: string) {
@@ -71,13 +71,16 @@ export async function POST(request: NextRequest) {
   const resident = request.cookies.get(residentCookie)?.value;
   if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
   if (input.action === 'start' && typeof input.busy === 'boolean') {
-    const result = store().start(input.requestId, input.busy, resident);
+    if (input.kind !== undefined && input.kind !== 'cafe' && input.kind !== 'observer') return json({ error: '这个班次尚未开放。' }, 400);
+    const result = store().start(input.requestId, input.busy, resident, input.kind);
     if ('error' in result) return json({ error: result.error }, 409);
     const response = json(snapshot(result));
     setResident(response, request, resident);
     return response;
   }
-  if (input.action !== 'note' || !['chat', 'rest', 'fish'].includes(input.suggestion)) return json({ error: '街区尚未开放这项动作。' }, 400);
+  if (input.action !== 'note' || !['chat', 'rest', 'fish', 'aheFirst', 'regularFirst', 'askSafety', 'askImpact'].includes(input.suggestion)) {
+    return json({ error: '街区尚未开放这项动作。' }, 400);
+  }
   if (!Number.isSafeInteger(input.shiftStartedAt)) return json({ error: '纸条缺少班次信息，请刷新后重试。' }, 400);
   const result = store().note(resident, input.shiftStartedAt, input.requestId, input.suggestion);
   return result ? json(snapshot(result)) : json({ error: '班次已过期，请重新开始。' }, 410);
