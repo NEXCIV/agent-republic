@@ -9,6 +9,7 @@ import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING, COUN
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { cityWalkTiming, type CityMovement, type CityObservation, type CityRegion } from '../../lib/city-movement';
 import type { CityPoint } from '../../lib/cafe-geometry';
+import type { SharedPilotView } from '../../lib/shared-pilot-runtime';
 import type { LightingPilot } from '../../lib/city-activities';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
@@ -55,6 +56,7 @@ type Callbacks = {
 export type WalkController = {
   syncCafe: (snapshot: CafeSnapshot | null) => void;
   syncCity: (observation: CityObservation | null) => void;
+  syncShared: (snapshot: SharedPilotView | null) => void;
   view: (mode: View, id?: FollowId) => void;
   select: (selection: WalkSelection | null) => void;
   focus: (selection: WalkSelection) => void;
@@ -125,7 +127,7 @@ function isRendered(object: THREE.Object3D) {
   return true;
 }
 
-function createResidentMarkerMaterial() {
+function createResidentMarkerMaterial(label?: string, color = '#f0b90b') {
   const icon = document.createElement('canvas');
   icon.width = icon.height = 48;
   const context = icon.getContext('2d');
@@ -135,15 +137,22 @@ function createResidentMarkerMaterial() {
   context.fillStyle = '#141619';
   context.fill();
   context.lineWidth = 5;
-  context.strokeStyle = '#f0b90b';
+  context.strokeStyle = color;
   context.stroke();
-  context.beginPath();
-  context.arc(24, 24, 5, 0, Math.PI * 2);
-  context.fillStyle = '#f0b90b';
-  context.fill();
+  context.fillStyle = color;
+  if (label) {
+    context.font = 'bold 20px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(label, 24, 25);
+  } else {
+    context.beginPath();
+    context.arc(24, 24, 5, 0, Math.PI * 2);
+    context.fill();
+  }
   const map = new THREE.CanvasTexture(icon);
   map.colorSpace = THREE.SRGBColorSpace;
-  return new THREE.SpriteMaterial({ map, sizeAttenuation: false, depthWrite: false, fog: false, toneMapped: false });
+  return new THREE.SpriteMaterial({ map, sizeAttenuation: false, depthWrite: false, depthTest: !label, fog: false, toneMapped: false });
 }
 
 function disposeModel(asset: THREE.Object3D) {
@@ -374,7 +383,7 @@ function addCouncilNotice(asset: THREE.Object3D) {
   };
 }
 
-export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks, cafeMode = false): WalkController {
+export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks, cafeMode = false, sharedMode = false): WalkController {
   const started = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   const canvas = renderer.domElement;
@@ -499,11 +508,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const worksBounds = new THREE.Box3();
   const viewProjection = new THREE.Matrix4();
   const landmarkModels = new Map<WalkLandmarkId, { root: THREE.Object3D; bounds: THREE.Box3; meshes: THREE.Mesh[] }[]>();
-  const markerMaterial = callbacks.onSelect ? createResidentMarkerMaterial() : undefined;
+  const markerMaterial = callbacks.onSelect && !sharedMode ? createResidentMarkerMaterial() : undefined;
+  const sharedMarkerMaterials: THREE.SpriteMaterial[] = [];
   const residentMarkers = new Map<ActorId, THREE.Sprite>();
-  if (markerMaterial) {
+  if (callbacks.onSelect) {
     for (const id of SELECTABLE_ACTORS) {
-      const marker = new THREE.Sprite(markerMaterial);
+      if (sharedMode && id !== '01' && id !== '02') continue;
+      const material = sharedMode ? createResidentMarkerMaterial(id, id === '01' ? '#f0b90b' : '#79bab7') : markerMaterial;
+      if (!material) continue;
+      if (sharedMode) sharedMarkerMaterials.push(material);
+      const marker = new THREE.Sprite(material);
+      if (sharedMode) marker.renderOrder = 100;
       marker.visible = false;
       scene.add(marker);
       residentMarkers.set(id, marker);
@@ -563,6 +578,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const navigation = createNavigation();
   const marketGreeting = createMarketGreeting();
   let marketGuest: { asset: GLTF; patrol: Patrol } | undefined;
+  let sharedOther: { asset: GLTF; patrol: Patrol } | undefined;
+  let sharedSnapshot: SharedPilotView | null = null;
+  let sharedReceivedAt = performance.now();
+  const sharedJourneys = new Map<string, string>();
+  const sharedRegions = new Set<CityRegion>();
   let marketGuestRequested = false;
   let greetingFraming = 0;
   let followed: ActorId = '01';
@@ -611,6 +631,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function selectableActor(id: ActorId) {
+    if (sharedMode) return id === '01' ? agents.get('01') : id === '02' ? sharedOther : undefined;
     const assignedWorker = cityObservation?.lightingPilot?.worker;
     if (id === WORKS_MANAGER) return assignedWorker ? undefined : siteHost;
     if (id === '02') return cafeMode || assignedWorker ? siteHost : marketGuest;
@@ -662,7 +683,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function updateResidentMarkers() {
-    const markerScale = 2 * 16 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
+    const markerScale = 2 * (sharedMode ? 27 : 16) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
     for (const [id, marker] of residentMarkers) {
       const root = selectableActor(id)?.patrol.root;
       marker.visible = Boolean(root && isRendered(root) && camera.position.distanceTo(root.position) > 62);
@@ -932,6 +953,42 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
   }
 
+  function poseShared(now: number, poseDt: number) {
+    const projection = sharedSnapshot;
+    const elapsed = Math.max(0, now - sharedReceivedAt);
+    const serverTime = (projection?.serverTime ?? 0) + Math.min(elapsed, 1600);
+    for (const id of ['01', '02'] as const) {
+      const patrol = id === '01' ? agents.get('01')?.patrol : sharedOther?.patrol;
+      const resident = projection?.residents.find(({ residentId }) => residentId === id);
+      if (patrol) patrol.root.visible = Boolean(resident);
+      if (!resident) continue;
+      const move = resident.movement;
+      if (move) for (const region of move.regions) {
+        if (sharedRegions.has(region)) continue;
+        sharedRegions.add(region);
+        loadRouteRegions([region]);
+      }
+      if (!patrol) continue;
+      if (move && move.status === 'walking' && move.metres > 0) {
+        const key = `${move.startedAt}:${move.destination.place}`;
+        const target = move.points.at(-1)!;
+        if (sharedJourneys.get(id) !== key) {
+          patrol.plan(move.points, [target[0], target[2]]);
+          sharedJourneys.set(id, key);
+        }
+        const duration = move.arrivesAt - move.startedAt;
+        const progress = Math.min(1, Math.max(0, (serverTime - move.startedAt) / Math.max(1, duration)));
+        patrol.observeJourney(elapsed > 1600 ? 0 : poseDt, progress, Math.max(1, duration) / 1000);
+      } else {
+        const [x, y, z] = resident.position;
+        const previous = move?.points.at(-2);
+        observedPosition.set(x, y, z);
+        observedFacing.set(previous ? 2 * x - previous[0] : x, y, previous ? 2 * z - previous[2] : z - 1);
+        patrol.observe(poseDt, observedPosition, observedFacing);
+      }
+    }
+  }
+
   function animate(now: number) {
     if (ended || contextLost || !model) return;
     const dt = document.hidden ? 0 : Math.min((now - lastFrame) / 1000, 0.075);
@@ -949,7 +1006,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const shift = cafeSnapshot?.run;
     const cityWalk = cityObservation?.movement;
     const projectedPosition = !cafeMode ? cityObservation?.position : undefined;
-    const nearMarketOnPatrol = !cafeMode && !cityWalk && !projectedPosition && primaryAgent?.destination === 'market';
+    const nearMarketOnPatrol = !sharedMode && !cafeMode && !cityWalk && !projectedPosition && primaryAgent?.destination === 'market';
     const greeting = marketGreeting(!cafeMode && playing ? dt : 0, nearMarketOnPatrol ? primary : undefined, marketGuest?.patrol);
     const latestActivity = cityObservation?.recentActivities?.[0];
     const conversation = latestActivity?.status === 'running' && latestActivity.kind === 'talk' ? latestActivity : undefined;
@@ -971,9 +1028,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       || (interviewing && !byPier));
     const poseDt = playing ? dt : 0;
     const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
-    poseWorksSite(pilot, cityTime, poseDt, conversation?.person?.id === WORKS_MANAGER ? primary?.root.position : undefined);
+    if (!sharedMode) poseWorksSite(pilot, cityTime, poseDt, conversation?.person?.id === WORKS_MANAGER ? primary?.root.position : undefined);
     let observedProgress: number | undefined;
-    if (cafeMode) {
+    if (sharedMode) {
+      poseShared(now, poseDt);
+    } else if (cafeMode) {
       if (theatre?.booking && districts.west.asset) {
         if (!theatreLights) {
           theatreLights = createTheatreLighting();
@@ -1083,6 +1142,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
     }
     for (const [id, agent] of agents) {
+      if (sharedMode) continue;
       const { patrol } = agent;
       const greetingHere = id === '01' && greeting.active;
       const hasCityPosition = id === '01' && !cafeMode && (cityWalk || projectedPosition);
@@ -1258,12 +1318,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (primary && marketEntrance.distanceTo(primary.root.position) < 29);
       if (nearMarket) {
         loadDetail('market');
-        loadMarketGuest();
+        if (!sharedMode) loadMarketGuest();
       }
       if (!wide && showStreetDetails) loadDetail('street');
-      if (!cafeMode && playing && (!primary || primary.progress >= 10)) loadNorth();
-      if (!cafeMode && playing && (!primary || primary.progress >= 30) && districts.east.status === 'idle') loadDistrict('east', false);
-      if (playing && (!primary || primary.progress >= 55) && districts.east.status !== 'loading' && districts.west.status === 'idle') loadDistrict('west', false);
+      if (!sharedMode && !cafeMode && playing && (!primary || primary.progress >= 10)) loadNorth();
+      if (!sharedMode && !cafeMode && playing && (!primary || primary.progress >= 30) && districts.east.status === 'idle') loadDistrict('east', false);
+      if (!sharedMode && playing && (!primary || primary.progress >= 55) && districts.east.status !== 'loading' && districts.west.status === 'idle') loadDistrict('west', false);
       const researcher = agents.get('03');
       if (playing && researcher?.destination === 'governance' && researcher.patrol.progress >= 34 && districts.research.status === 'idle') {
         loadDistrict('research', false);
@@ -1568,7 +1628,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       request('governance-route.json', priority).then((response) => response.json() as Promise<RouteData>),
       request('nexus-connector.json', priority).then((response) => response.json() as Promise<Connection>),
       request('governance-north-council-notice.glb', priority).then((response) => response.arrayBuffer()),
-      cafeMode ? undefined : request('agent-03.glb', priority).then((response) => response.arrayBuffer()).catch(() => undefined),
+      cafeMode || sharedMode ? undefined : request('agent-03.glb', priority).then((response) => response.arrayBuffer()).catch(() => undefined),
     ]).then(async ([layout, connector, cityBytes, agentBytes]) => {
       if (ended || contextLost) return;
       const city = await loader.parseAsync(cityBytes, ASSET_PATH);
@@ -1593,7 +1653,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       entranceLight.position.set(0, 4, -83);
       street.add(entranceLight);
 
-      if (cafeMode) return;
+      if (cafeMode || sharedMode) return;
       if (!agentBytes) throw new Error('Researcher asset unavailable');
       const agent = await loader.parseAsync(agentBytes, ASSET_PATH);
       if (ended || contextLost) { disposeModel(agent.scene); return; }
@@ -1676,6 +1736,21 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (!ended && !contextLost) callbacks.agent('01', { status: 'unavailable', progress: 0 });
   }).finally(() => { actorLoading = false; });
 
+  if (sharedMode) request('agent-02.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
+    if (ended || contextLost) return;
+    const asset = await loader.parseAsync(bytes, ASSET_PATH);
+    if (ended || contextLost) { disposeModel(asset.scene); return; }
+    const start: RoutePoint = [...CAFE_COUNTER];
+    const facing: RoutePoint = [start[0], start[1], start[2] + 1];
+    try {
+      const patrol = createAgentPatrol(asset, [start, facing], [facing[0], facing[2]]);
+      patrol.root.visible = false;
+      sharedOther = { asset, patrol };
+      actorLayer.add(patrol.root);
+      callbacks.agent('02', { status: 'arrived', progress: 100 });
+    } catch { disposeModel(asset.scene); callbacks.agent('02', { status: 'unavailable', progress: 0 }); }
+  }).catch(() => { if (!ended && !contextLost) callbacks.agent('02', { status: 'unavailable', progress: 0 }); });
+
   Promise.all([
     request('route.json').then((response) => response.json() as Promise<RouteData>),
     request('nexus-market.glb').then((response) => response.arrayBuffer()),
@@ -1692,7 +1767,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     prepareEnvironment(model, streetAnisotropy);
     softenRetailWindows(model);
     street.add(model);
-    if (cafeMode) {
+    if (cafeMode || sharedMode) {
       street.add(cafeProps);
       cafeProps.add(createCafePaving());
       if (fishingGear) cafeProps.add(fishingGear.group);
@@ -1724,6 +1799,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   return {
     syncCafe(snapshot) { cafeSnapshot = snapshot; receivedAt = performance.now(); },
+    syncShared(snapshot) { sharedSnapshot = snapshot; sharedReceivedAt = performance.now(); },
     syncCity(observation) {
       cityObservation = observation;
       cityReceivedAt = performance.now();
@@ -1752,6 +1828,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         marketGuest.patrol.dispose();
         disposeModel(marketGuest.asset.scene);
       }
+      if (sharedOther) {
+        sharedOther.patrol.dispose();
+        disposeModel(sharedOther.asset.scene);
+      }
       if (pierRegular) {
         pierRegular.patrol.dispose();
         disposeModel(pierRegular.asset.scene);
@@ -1777,6 +1857,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       selectionMaterial.dispose();
       markerMaterial?.map?.dispose();
       markerMaterial?.dispose();
+      for (const material of sharedMarkerMaterials) { material.map?.dispose(); material.dispose(); }
       sun.shadow.dispose();
       sunset.shadow.dispose();
       streetSky.dispose();

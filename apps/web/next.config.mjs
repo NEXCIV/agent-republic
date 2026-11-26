@@ -1,4 +1,5 @@
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -11,6 +12,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  * @type {import('next').NextConfig}
  */
 const nextConfig = {
+  // The explicit shared-city local pilot can run beside the existing preview.
+  ...(process.env.NEXCIV_SHARED_PILOT_DB && process.env.NODE_ENV !== 'production' ? { distDir: 'cache/shared-next' } : {}),
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,

@@ -69,4 +69,14 @@ node node_modules/vitest/vitest.mjs run packages/domain/test/shared-city-pilot.t
 - 共享会面、自由文本发言、内容审核、关系、早报和纸条在后续城市生活任务中逐步交付，暂不以模拟记录冒充这些能力。
 - 本机 `/api/nexciv-preview/cafe`、独立 HTTPS `/api/nexciv-preview/guest`、现有页面和原始 3D 资产不因本切片被替换。
 
+## E. 双居民本机实时观察适配（下一切片）
+
+使用独立本机服务 `node scripts/start-nexciv-shared.mjs`，默认监听 `127.0.0.1:3142`，将共享试验库设为仓库 `cache/nexciv-shared-pilot.sqlite`。打开 `http://127.0.0.1:3142/nexciv-preview/shared`。已有城市、游客及本机 MCP 存档保持独立。环境变量 `NEXCIV_SHARED_PILOT_DB` 可指定另一个绝对 `.sqlite` 路径，`NEXCIV_SHARED_PILOT_PORT` 可指定本机端口。
+
+两名本地规则客户端分别持有服务端发放给自己的运行动作凭据，各自读取同一存档观察，按自己的地点偏好与对方已经选择的位置决定下一站，服务端独立验证并接受移动。未完成动作不重复接受。每次启动每名居民最多新增 16 次动作，首次出发前留 8 秒加载时间，到达后停留至少 6.5 秒。动作推进由本机进程的定时检查执行，不依赖网页是否打开，不调用 LLM。该切片不声称已接入两个外部真实 Harness 或远程 MCP。
+
+仅显式配置的非生产本机环境可访问只读 `/api/nexciv-preview/shared`，返回移除观察者私有信息后的共同位置及事件；浏览器不能提交动作或获取访问凭据。现有 3D 渲染器按服务端路线和时间插值，不再运行独立预设巡逻，使用原 01/02 人物 GLB；断线限制客户端外推时间，2D 模式仍能读状态、坐标及记录。共享页面不改变正式 `/world` 或链上数据。验收须在两独立浏览器中观察同一事件日志，并核对两名角色模型、持续位置变化与跟随视图。
+
+专项回归命令：`node node_modules/vitest/vitest.mjs run apps/web/test/shared-pilot-runtime.test.ts apps/web/test/shared-pilot-store.test.ts packages/domain/test/shared-city-pilot.test.ts`。实际浏览器验收分别跟随 01/02、观察位置变化，并打开新的浏览器上下文核对共同事件 ID。生产环境仍拒绝该本机试点入口。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。

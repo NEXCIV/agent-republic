@@ -1,0 +1,43 @@
+.viewer { --panel: rgba(20,22,25,.94); --stroke: #575447; --muted: #c6c0b3; color: #f5eddf; min-height: 570px; }
+.header { position: absolute; top: 16px; left: 24px; right: 24px; z-index: 2; display: flex; align-items: center; gap: 18px; padding: 9px 14px; min-height: 56px; background: var(--panel); border: 1px solid var(--stroke); border-radius: 9px; }
+.brand { display: inline-flex; align-items: center; gap: 9px; color: #f5eddf; font-weight: 750; letter-spacing: .075em; text-decoration: none; }
+.brand svg { width: 25px; height: 25px; color: #f0b90b; }
+.brand b { color: #f0b90b; }
+.divider { color: var(--muted); border-left: 1px solid #534f43; padding-left: 18px; }
+.connection { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #e4d8be; white-space: nowrap; }
+.connection i { width: 8px; height: 8px; background: #c3aa68; border-radius: 50%; }
+.connection[data-live="true"] i { background: #72d09a; box-shadow: 0 0 9px #72d09a65; }
+.header a:last-child { color: #eed28a; font-size: 13px; text-decoration: none; }
+.header button,.resident button,.overview { min-height: 36px; padding: 0 12px; color: #f5e0a5; background: #292d32; border: 1px solid #6d624a; border-radius: 5px; font: inherit; font-size: 13px; cursor: pointer; }
+.header button:focus-visible,.resident button:focus-visible,.overview:focus-visible { outline: 2px solid #f0b90b; outline-offset: 3px; }
+.resident button[aria-pressed="true"],.overview[aria-pressed="true"] { border-color: #f0b90b; background: #f0b90b; color: #141619; }
+.resident button:disabled,.overview:disabled { opacity: .5; cursor: default; }
+.residents,.journal { position: absolute; z-index: 1; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; padding: 16px; box-shadow: 0 8px 20px #14161955; }
+.residents { top: 88px; left: 24px; width: 292px; }
+.panelHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.panelHead h1,.panelHead h2 { margin: 0; color: #f3e5be; font-size: 18px; letter-spacing: 0; }
+.panelHead span,.panelHead small { color: #d0ad57; font-size: 12px; font-variant-numeric: tabular-nums; }
+.explain,.journal p { margin: 7px 0 14px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.resident { border-top: 1px solid #46443d; padding: 14px 0; }
+.residentIdentity { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.residentIdentity>div { flex: 1; }
+.residentIdentity b,.residentIdentity small { display: block; }
+.residentIdentity b { font-size: 14px; }
+.residentIdentity small,.position { color: #c6c1b4; font-size: 11px; }
+.number { width: 37px; height: 37px; border: 1px solid #d1ad57; background: #42391f; color: #f0cf69; border-radius: 50%; display: grid; place-items: center; font-weight: 700; }
+.resident[data-resident="02"] .number { background: #243d40; border-color: #75aaa9; color: #bddcda; }
+.resident>strong { display: block; font-size: 15px; margin-bottom: 6px; font-weight: 650; }
+.progress { display: flex; align-items: center; gap: 9px; font-variant-numeric: tabular-nums; color: #e4c56f; font-size: 12px; margin: 4px 0 6px; }
+.progress progress { flex: 1; height: 8px; accent-color: #f0b90b; }
+.resident[data-resident="02"] .progress progress { accent-color: #75aaa9; }
+.overview { width: 100%; }
+.alert { color: #ffc59b; font-size: 12px; line-height: 1.5; }
+.journal { bottom: 24px; right: 24px; width: 360px; }
+.journal ol { list-style: none; padding: 0; margin: 10px 0; max-height: 195px; overflow-y: auto; }
+.journal li { display: grid; grid-template-columns: 7px 1fr auto; gap: 9px; align-items: center; margin: 0; padding: 7px 0; border-bottom: 1px solid #393b3d; font-size: 12px; }
+.journal li i { width: 6px; height: 6px; background: #efbd55; border-radius: 50%; }
+.journal li i[data-resident="02"] { background: #79bab7; }
+.journal time { font-size: 11px; color: #c5bba6; font-variant-numeric: tabular-nums; }
+.journalFooter { display: flex; gap: 10px; justify-content: space-between; color: #bfb8ab; font-size: 11px; border-top: 1px solid #46443d; padding-top: 9px; }
+@media (max-width: 800px) { .header { left: 10px; right: 10px; gap: 8px; } .header .divider { display: none; } .residents { left: 10px; width: 252px; } .journal { right: 10px; width: 290px; bottom: 10px; } }
+@media (max-width: 580px) { .viewer { min-height: 780px; } .residents { width: calc(100% - 20px); } .journal { width: calc(100% - 20px); } .connection { font-size: 10px; } .brand { font-size: 13px; } }
