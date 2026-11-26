@@ -313,6 +313,10 @@ function chooseAgentWaypoint(seed: string, tick: bigint, agentId: string,
 
 **明确不做**：不可验证的自由经济模拟、自治 Agent 无限链上资金转账、复杂物理寻路、虚假机器人活跃数、用户个人资产托管。
 
+### 12.1 共享生活试点隔离边界
+
+E3-05 可在独立、未公开的 DEMO 存档中验证 300m NEXCIV 预览路网内两个测试居民的命名地点移动与到达记录。这只是共享生活动作日志的内部试验，不是正式 `WorldFrameV1`、`AgentObservationV1` 或新的世界事实源；预览坐标不得写入 `district-01@1` 的 40m 场景，模拟移动不改变链上事实、BUILD、REP 或 60s 世界 tick。正式共享投影必须遵循现有协议或通过明确的版本化变更验收。见 [ADR-006](adr/ADR-006-shared-city-pilot.md)。
+
 ## 13. 关联文档
 
 - `SMART_CONTRACTS.md`：BUILD/REP、项目状态、提案及事件的**正式合约定义**。

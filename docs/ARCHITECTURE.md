@@ -322,6 +322,7 @@ API 进程领取有期限的任务租约，每次推进一个步骤。提交、�
 - `ADR-003` AI 先生成提案再让用户确认，不以 agent 输出作为合约交易成功证明。
 - `ADR-004` Web2 会话仅管理私有配置，链上身份绑定需真实 owner tx。
 - `ADR-005` 生产前必须进行钱包实际流程的 P0 Gate，不绕过 Developer Mode 或用户确认。
+- [`ADR-006`](adr/ADR-006-shared-city-pilot.md) E3-05 共享生活移动试点：独立测试存档与短期可撤销访问凭据；不接入正式 API、游客存档、本机 MCP 或链上身份。生产账户认领、PostgreSQL 共享活动和正式观测投影另行验证。
 
 来源：
 - https://www.binance.com/en/support/announcement/detail/95f5dbe0ea674a48a739b59e046648bf

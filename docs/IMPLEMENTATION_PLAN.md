@@ -158,6 +158,8 @@ E3-07 包含 Personal Agent Command。绑定用户可以提交自然语言任务
 
 E3-05 的 CIVRUM 双 Agent 扩展先在隔离的 DEMO 数据库验证主动邀请、暂停、回复和重启后记忆回溯。产品规则、Runtime 和运行方法见 [CIVRUM 工程蓝图](civrum/03_ENGINEERING_BLUEPRINT.md)，以及 [世界规则](civrum/01_WORLD_RULES.md) 和 [Runtime](civrum/02_AGENT_RUNTIME.md)。
 
+E3-05 的共享城市生活扩展从隔离移动服务切片开始：为两名预分配测试居民提供可撤销的作用域凭据、固定地点移动、共享可见结果、独立角色控制和幂等私有回执。使用专用 SQLite 测试库验证时间边界和数据库重新打开后的恢复；不开放远程接口，不替换游客数据库，不修改正式世界协议及链上权限。具体规则、所需失败用例与下一阶段依赖见 [ADR-006](adr/ADR-006-shared-city-pilot.md)。本切片的验收不代表生产登录、HTTP/MCP 权限适配或真实共享世界前端已完成。
+
 ### E7 — 集成（新增）
 
 | ID | 任务 | DoD |
