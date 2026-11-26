@@ -4,21 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CafeShift, shiftLabel } from './CafeShift';
 import type { CafeSnapshot } from '../../lib/cafe-life';
+import { CITY_PLACES, type CityObservation } from '../../lib/city-movement';
 import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type View, type WalkController } from './walk';
 import type { Place } from './navigation';
 import styles from './preview.module.css';
 
-const PLACES: Record<Place, string> = {
-  plaza: '中央广场',
-  market: 'Corner Market',
-  governance: '议会大厅',
-  registry: '公民注册中心',
-  works: '公共建设中心',
-  forum: '社区剧场',
-  pier: '湖畔码头',
-  center: 'Agent 中心',
-  residence: '花园住宅',
-};
+const PLACES: Record<Place, string> = CITY_PLACES;
 const DISTRICTS = {
   east: { button: '东区', title: '东部街区', places: '公民注册中心与公共建设中心' },
   west: { button: '西区', title: '西部街区', places: '社区剧场与展亭' },
@@ -43,6 +34,10 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const latest = useRef<CafeSnapshot | null>(null);
+  const latestCity = useRef<CityObservation | null>(null);
+  const [city, setCity] = useState<CityObservation | null>(null);
+  const cityWalk = city?.movement;
+  const cityMoving = cityWalk?.status === 'walking';
   const [shift, setShift] = useState('等待开班');
   const [greeting, setGreeting] = useState('');
   const updateCafe = useCallback((data: CafeSnapshot | null) => {
@@ -82,12 +77,38 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
         fps: setFps,
       }, cafeMode);
       world.current = controller;
-      if (cafeMode) controller.syncCafe(latest.current);
+      if (cafeMode) {
+        controller.syncCafe(latest.current);
+        controller.syncCity(latestCity.current);
+      }
       return () => { controller.dispose(); world.current = null; };
     } catch {
       setState('fallback');
     }
   }, [cafeMode]);
+
+  useEffect(() => {
+    if (!cafeMode || !['127.0.0.1', 'localhost'].includes(window.location.hostname)) return;
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      try {
+        const response = await fetch('/api/nexciv-preview/cafe?control=city', { cache: 'no-store', signal: controller.signal });
+        if (!response.ok) return;
+        const observation: CityObservation = await response.json();
+        if (controller.signal.aborted) return;
+        latestCity.current = observation;
+        world.current?.syncCity(observation);
+        setCity(observation);
+      } catch {
+        // Retry on the next poll, retaining the last position during a brief disconnect.
+      } finally {
+        if (!controller.signal.aborted) timer = setTimeout(refresh, cityMoving ? 1000 : 2500);
+      }
+    }
+    void refresh();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [cafeMode, cityMoving]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
@@ -97,6 +118,10 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
 
   const sceneReady = state === 'ready';
   const agent = reports[selected];
+  const cityLabel = cityWalk && (cityMoving ? `前往 ${cityWalk.name}` : `已到达 ${cityWalk.name}`);
+  const travelProgress = city && cityWalk && cityMoving
+    ? Math.min(100, Math.max(0, Math.round(100 * (city.serverTime - cityWalk.startedAt) / (cityWalk.arrivesAt - cityWalk.startedAt))))
+    : 100;
   const origin = PLACES[agent.from ?? 'plaza'];
   const destination = agent.destination ? PLACES[agent.destination] : '';
   const agentReady = sceneReady && agent.status !== 'loading' && agent.status !== 'unavailable';
@@ -132,13 +157,20 @@ export function WalkPreview({ cafeMode = false }: { cafeMode?: boolean }) {
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
           <small>{cafeMode ? 'AGENT 01 · AI SIMULATED · DEMO' : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
-          <strong role="status">{cafeMode ? shift : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
-          {greeting && <p className={styles.greeting}>{greeting}</p>}
+          <strong role="status">{cafeMode ? cityLabel || shift : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
+          {!cityWalk && greeting && <p className={styles.greeting}>{greeting}</p>}
         </div>
         {state === 'fallback' && <p className={styles.fallback}>{cafeMode ? '3D 场景暂时无法加载。仍可在下方观察班次和递纸条。' : '3D 场景暂时无法加载。下方可查看路线的两处实景。'}</p>}
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
-        {cafeMode ? <CafeShift onUpdate={updateCafe} /> : <>
+        {cafeMode ? <>
+          {cityWalk && <div className={styles.route}>
+            <span>全城试走</span>
+            <progress aria-label={cityLabel || 'Agent 01 行程'} max={100} value={travelProgress} />
+            <span>{cityWalk.name} · {Math.round(cityWalk.metres)} 米</span>
+          </div>}
+          <CafeShift onUpdate={updateCafe} />
+        </> : <>
         <div className={styles.controls}>
           <div className={styles.switcher} role="group" aria-label="视角">
             <button disabled={!sceneReady} aria-pressed={view === 'overview'} onClick={() => select('overview')}>全城</button>

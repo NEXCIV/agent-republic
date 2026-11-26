@@ -4,6 +4,7 @@ import path from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { CAFE_RETENTION_DAYS, CafeDemoStore, InvalidCafeMcpConnection, type CafeActor } from '../../../../lib/cafe-demo-store';
 import { OBSERVER_ACTIONS, type ObserverAction } from '../../../../lib/cafe-observer';
+import type { CityDestination } from '../../../../lib/city-movement';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -72,11 +73,18 @@ export function GET(request: NextRequest) {
   const newspaper = params.get('newspaper');
   if (request.headers.has('authorization')) {
     return mcpAction(request, (actor) => {
+      if (control === 'city-map') return json(store().cityMap(actor));
+      if (control === 'city') return json(store().cityObservation(actor));
       if (control === 'observer') return json(store().observeExternal(actor));
       if (newspaper === 'latest') return json(store().newspaper(actor));
       if (!request.nextUrl.search) return json(snapshot(store().read(actor)));
-      return json({ error: '此连接仅限观察员班次和最新早报。' }, 403);
+      return json({ error: '此连接仅限本机城市试走、观察员班次和最新早报。' }, 403);
     });
+  }
+  if (control === 'city-map' || control === 'city') {
+    if (!loopback(request)) return json({ error: '全城试走仅用于本机试玩。' }, 403);
+    if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
+    return json(control === 'city-map' ? store().cityMap(resident) : store().cityObservation(resident));
   }
   if (control === 'pairing') {
     if (!loopback(request)) return json({ error: '配对仅用于本机咖啡街试玩。' }, 403);
@@ -121,12 +129,13 @@ export async function POST(request: NextRequest) {
   if (!input || typeof input.requestId !== 'string' || !uuid.test(input.requestId)) return json({ error: '无效的请求编号。' }, 400);
   if (request.headers.has('authorization')) {
     return mcpAction(request, (actor) => {
+      if (input.action === 'moveTo') return move(actor, input.requestId, input.destination);
       if (input.action === 'start' && input.kind === 'observer' && input.driver === 'external' && typeof input.busy === 'boolean') {
         const result = store().start(input.requestId, input.busy, actor, 'observer', 'external');
         return 'error' in result ? json(result, 409) : json(snapshot(result));
       }
       if (input.action === 'choose') return applyNote(actor, input);
-      return json({ error: '此连接仅允许开始观察员班次或选择采访对象。' }, 403);
+      return json({ error: '此连接仅允许试走、开始观察员班次或选择采访对象。' }, 403);
     });
   }
   if (input.action === 'redeemMcpCode') {
@@ -137,6 +146,10 @@ export async function POST(request: NextRequest) {
   }
   const resident = request.cookies.get(residentCookie)?.value;
   if (!resident || !uuid.test(resident)) return json({ error: '请刷新试玩页后重试。' }, 409);
+  if (input.action === 'moveTo') {
+    if (!loopback(request)) return json({ error: '全城试走仅用于本机试玩。' }, 403);
+    return move(resident, input.requestId, input.destination);
+  }
   if (input.action === 'issueMcpCode' || input.action === 'disconnectMcp') {
     if (!loopback(request)) return json({ error: '配对仅用于本机咖啡街试玩。' }, 403);
     return json(input.action === 'issueMcpCode' ? store().issueMcpCode(resident) : store().disconnectMcp(resident));
@@ -151,6 +164,23 @@ export async function POST(request: NextRequest) {
     return response;
   }
   return applyNote(resident, input);
+}
+
+function move(actor: CafeActor, requestId: string, input: unknown) {
+  let destination: CityDestination | undefined;
+  if (input && typeof input === 'object') {
+    const values = Object.keys(input);
+    if (values.length === 1 && 'place' in input && typeof input.place === 'string' && /^[a-z][a-z0-9_-]{0,39}$/.test(input.place)) {
+      destination = { place: input.place };
+    } else if (values.length === 2 && 'x' in input && 'z' in input
+      && typeof input.x === 'number' && typeof input.z === 'number'
+      && Number.isFinite(input.x) && Number.isFinite(input.z)) {
+      destination = { x: input.x, z: input.z };
+    }
+  }
+  if (!destination) return json({ error: '目的地需使用地点 ID 或一组有限的 X、Z 坐标。' }, 400);
+  const result = store().moveTo(actor, requestId, destination);
+  return 'error' in result ? json({ error: result.error }, result.code) : json(result);
 }
 
 function applyNote(

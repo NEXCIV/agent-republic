@@ -5,6 +5,9 @@ import type { ObserverDriver } from './cafe-observer';
 import { writeNewspaper, type NewspaperIssue, type NewspaperSnapshot } from './cafe-newspaper';
 import { buildCafePostcard } from './cafe-postcard';
 import type { CafeSnapshot } from './cafe-life';
+import { CITY_MAP, cityRestingPoint, planCityWalk } from './city-navigation';
+import { CAFE_COUNTER } from './cafe-geometry';
+import { positionOnWalk, routeDistance, type CityDestination, type CityMovement, type CityObservation, type CityWalk } from './city-movement';
 
 type Response = Omit<CafeSnapshot, 'run'> & { run: CafeRun };
 type Row = { state: string };
@@ -13,6 +16,7 @@ export class InvalidCafeMcpConnection extends Error {}
 export const CAFE_RETENTION_DAYS = 30;
 const PAIR_CODE_LIFETIME = 5 * 60 * 1000;
 const MCP_CONNECTION_LIFETIME = 24 * 60 * 60 * 1000;
+const CITY_WALK_METRES_PER_SECOND = 4;
 const hashCredential = (value: string) => createHash('sha256').update(value).digest('hex');
 
 export class CafeDemoStore {
@@ -47,6 +51,15 @@ export class CafeDemoStore {
         token_hash TEXT UNIQUE,
         token_expires INTEGER
       );
+      CREATE TABLE IF NOT EXISTS city_walks (
+        resident TEXT NOT NULL,
+        id TEXT NOT NULL,
+        started INTEGER NOT NULL,
+        walk TEXT NOT NULL,
+        shown INTEGER NOT NULL,
+        PRIMARY KEY (resident,id)
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS city_current_walk ON city_walks(resident) WHERE shown=1;
     `);
     this.transaction(() => {
       if (!this.db.prepare('PRAGMA table_info(shifts)').all().some((column) => column.name === 'resident')) {
@@ -168,6 +181,68 @@ export class CafeDemoStore {
     return row.resident;
   }
 
+  private activeRun(resident: string, at: number) {
+    const id = this.latestId(resident);
+    return id ? this.current(id, at) : null;
+  }
+
+  private currentWalk(resident: string): CityWalk | null {
+    const row = this.db.prepare('SELECT walk FROM city_walks WHERE resident=? AND shown=1').get(resident);
+    return row ? JSON.parse(String(row.walk)) : null;
+  }
+
+  private movement(walk: CityWalk, at: number): CityMovement {
+    return { ...walk, status: at < walk.arrivesAt ? 'walking' : 'arrived' };
+  }
+
+  cityMap(actor: CafeActor) {
+    this.authorizedResident(actor);
+    return CITY_MAP;
+  }
+
+  cityObservation(actor: CafeActor): CityObservation {
+    return this.transaction(() => {
+      const resident = this.authorizedResident(actor);
+      const serverTime = this.clock();
+      const walk = this.currentWalk(resident);
+      const run = this.activeRun(resident, serverTime);
+      const activeShift = run !== null && run.phase !== 'done';
+      const movement = walk ? this.movement(walk, serverTime) : null;
+      const reason = activeShift ? '已有进行中的班次。' : movement?.status === 'walking' ? '01 号正在赶路。' : undefined;
+      const position = walk ? positionOnWalk(walk, serverTime)
+        : activeShift ? null : cityRestingPoint(run?.place, Boolean(run?.observer));
+      return { agentId: '01', serverTime, position, movement, canMove: !reason, reason };
+    });
+  }
+
+  moveTo(actor: CafeActor, requestId: string, destination: CityDestination): CityMovement | { error: string; code: 409 | 422 } {
+    return this.transaction(() => {
+      const resident = this.authorizedResident(actor);
+      const at = this.clock();
+      const row = this.db.prepare('SELECT walk FROM city_walks WHERE resident=? AND id=?').get(resident, requestId);
+      if (row) {
+        const saved: CityWalk = JSON.parse(String(row.walk));
+        if (JSON.stringify(saved.destination) !== JSON.stringify(destination)) {
+          return { error: '请求编号已用于另一个目的地。', code: 409 };
+        }
+        return this.movement(saved, at);
+      }
+      const run = this.activeRun(resident, at);
+      if (run && run.phase !== 'done') return { error: '班次正在执行，请结束后再自由移动。', code: 409 };
+      const previous = this.currentWalk(resident);
+      if (previous && previous.arrivesAt > at) return { error: '01 号正在赶路，到达后可继续出发。', code: 409 };
+      const origin = previous?.points.at(-1) ?? cityRestingPoint(run?.place, Boolean(run?.observer));
+      const route = planCityWalk(origin, destination);
+      if (!route) return { error: '目的地不在已测绘的步道上。请使用地图中的地点或步道坐标。', code: 422 };
+      const duration = route.metres < 1e-7 ? 0 : Math.max(1000, Math.ceil(1000 * route.metres / CITY_WALK_METRES_PER_SECOND));
+      const walk: CityWalk = { ...route, requestId, startedAt: at, arrivesAt: at + duration };
+      this.db.prepare('UPDATE city_walks SET shown=0 WHERE resident=? AND shown=1').run(resident);
+      this.db.prepare('DELETE FROM city_walks WHERE shown=0 AND started<?').run(at - CAFE_RETENTION_DAYS * 86400000);
+      this.db.prepare('INSERT INTO city_walks VALUES (?,?,?,?,1)').run(resident, requestId, at, JSON.stringify(walk));
+      return this.movement(walk, at);
+    });
+  }
+
   start(id: string, busy: boolean, actor: CafeActor, kind: CafeShiftKind = 'cafe', driver: ObserverDriver = 'rules'): Response | { error: string } {
     const at = this.clock();
     const result = this.transaction(() => {
@@ -184,6 +259,11 @@ export class CafeDemoStore {
       }
       const latestId = this.latestId(resident);
       if (latestId && this.current(latestId, at)?.phase !== 'done') return { error: '已有进行中的班次。' };
+      const walk = this.currentWalk(resident);
+      if (walk && (walk.arrivesAt > at || routeDistance(walk.points.at(-1)!, CAFE_COUNTER) > 1e-5)) {
+        return { error: '请先让 01 号走回咖啡摊，再开始班次。' };
+      }
+      if (walk) this.db.prepare('UPDATE city_walks SET shown=0 WHERE resident=? AND shown=1').run(resident);
       const memory = this.db.prepare(`
         SELECT json_extract(state, '$.meeting') AS outcome, started AS shiftStartedAt
         FROM shifts WHERE resident=? AND json_extract(state, '$.meeting') IN ('declined', 'chatted')

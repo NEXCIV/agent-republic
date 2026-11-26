@@ -54,7 +54,7 @@ async function pairBrowser(code) {
 }
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-observer', version: '0.2.0' });
+  const server = new McpServer({ name: 'nexciv-observer', version: '0.3.0' });
   let connection;
   async function request(query, command) {
     const token = await savedPairing();
@@ -85,6 +85,31 @@ serveStdio(() => {
   tool('pair_browser', '使用玩家从本机 NEXCIV 咖啡街生成的一次性配对码，连接当前网页的 01 号。只在玩家明确要求配对时使用。', z.strictObject({
     code: z.string().trim().regex(/^[A-Za-z0-9_-]{24}$/).describe('咖啡街网页生成的 24 字符配对码'),
   }), false, ({ code }) => pairBrowser(code));
+
+  tool('list_city_places', '查看本机城市里 01 号可到达的地标、入口坐标和步道路网范围。全城共用同一次配对。', z.strictObject({}), true,
+    () => request('?control=city-map'));
+
+  tool('move_to', '让 01 号沿已测绘的城市步道前往指定地点 ID 或 X、Z 坐标。先查看可达地点和当前状态。行程完成后可以继续去其他地点。', z.strictObject({
+    destination: z.union([
+      z.strictObject({ place: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).describe('地图返回的地点 ID') }),
+      z.strictObject({ x: z.number(), z: z.number() }).describe('地面坐标（米），必须位于已测绘步道附近'),
+    ]),
+    requestId: z.uuidv4().optional().describe('重试同一个目的地时复用原 UUID'),
+  }), false, async ({ destination, requestId = randomUUID() }) => movementSummary(
+    await request('', { action: 'moveTo', destination, requestId }),
+  ));
+
+  tool('observe_city', '读取 01 号的城市位置、当前目的地和到达状态。可等待最多 20 秒。', z.strictObject({
+    waitSeconds: z.number().int().min(0).max(20).default(0),
+  }), true, async ({ waitSeconds }) => {
+    const until = Date.now() + waitSeconds * 1000;
+    let state = await request('?control=city');
+    while (state?.movement?.status === 'walking' && Date.now() < until) {
+      await delay(Math.min(2500, Math.max(0, until - Date.now())));
+      state = await request('?control=city');
+    }
+    return state?.movement ? { ...state, movement: movementSummary(state.movement) } : state;
+  });
 
   tool('start_observer', '为 01 号开启一次外部 Agent 观察员班次。配对时班次会同步到玩家的咖啡街网页。已有进行中的班次请先查看。', z.strictObject({
     busy: z.boolean().default(true).describe('开班时阿禾是否正在收摊'),
@@ -120,3 +145,7 @@ serveStdio(() => {
 
   return server;
 });
+
+function movementSummary({ points, ...movement }) {
+  return { ...movement, from: points[0], target: points.at(-1) };
+}

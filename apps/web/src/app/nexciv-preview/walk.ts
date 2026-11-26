@@ -6,6 +6,7 @@ import { createAgentPatrol, type RoutePoint } from './agent';
 import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
 import type { CafeSnapshot } from '../../lib/cafe-life';
+import type { CityObservation } from '../../lib/city-movement';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -38,6 +39,7 @@ type Callbacks = {
 
 export type WalkController = {
   syncCafe: (snapshot: CafeSnapshot | null) => void;
+  syncCity: (observation: CityObservation | null) => void;
   view: (mode: View, id?: AgentId) => void;
   zoom: (factor: number) => void;
   play: (enabled: boolean) => void;
@@ -341,6 +343,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const observedPosition = new THREE.Vector3();
   const cafeProps = new THREE.Group();
   let cafeSnapshot: CafeSnapshot | null = null;
+  let cityObservation: CityObservation | null = null;
+  let cityReceivedAt = 0;
+  let cityAssetsFor: string | undefined;
+  let cityJourney: { traveller: Patrol; id: string } | undefined;
   const fishingGear = cafeMode ? createFishingGear() : undefined;
   const fishingSpot = new THREE.Vector3(...FISHING_SPOT);
   const waterFacing = fishingSpot.clone().add(new THREE.Vector3(1, 0, 0));
@@ -587,19 +593,20 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const primary = primaryAgent?.patrol;
     const greeting = marketGreeting(!cafeMode && playing ? dt : 0, !cafeMode && primaryAgent?.destination === 'market' ? primary : undefined, marketGuest?.patrol);
     const shift = cafeSnapshot?.run;
-    const byPier = cafeMode && shift?.place === 'pier';
-    const observer = shift?.observer;
-    const interviewing = shift?.phase === 'interviewing';
-    const travelling = shift?.phase === 'toPier' || shift?.phase === 'toCounter';
-    const social = shift?.phase === 'inviting' || shift?.phase === 'chatting' || shift?.phase === 'reconnecting'
-      || (interviewing && !byPier);
+    const cityWalk = cityObservation?.movement;
+    const byPier = cafeMode && !cityWalk && shift?.place === 'pier';
+    const observer = cityWalk ? undefined : shift?.observer;
+    const interviewing = !cityWalk && shift?.phase === 'interviewing';
+    const travelling = !cityWalk && (shift?.phase === 'toPier' || shift?.phase === 'toCounter');
+    const social = !cityWalk && (shift?.phase === 'inviting' || shift?.phase === 'chatting' || shift?.phase === 'reconnecting'
+      || (interviewing && !byPier));
     if (cafeMode) {
       const poseDt = playing ? dt : 0;
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
       const time = (cafeSnapshot?.serverTime ?? 0) + (playing ? now - receivedAt : 0);
       const duration = shift?.until ? shift.until - shift.since : 0;
       const progress = shift && duration > 0 ? THREE.MathUtils.clamp((time - shift.since) / duration, 0, 1) : 0;
-      if ((shift?.requestedActivity === 'fish' || observer) && districts.shore.status === 'idle') loadDistrict('shore', true);
+      if ((!cityWalk && shift?.requestedActivity === 'fish' || observer) && districts.shore.status === 'idle') loadDistrict('shore', true);
       if (observer && districts.shore.status === 'ready' && !regularRequested) {
         regularRequested = true;
         request('agent-03.glb').then((response) => response.arrayBuffer())
@@ -620,9 +627,32 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (observer) pierRegular.patrol.observe(poseDt, regularPosition, interviewSpot, false, interviewing && byPier ? 'nod' : undefined);
       }
       const phase = shift?.phase;
-      const fishing = phase === 'casting' || phase === 'fishing' || phase === 'reeling';
+      const fishing = !cityWalk && (phase === 'casting' || phase === 'fishing' || phase === 'reeling');
       if (!fishing) fishingGear?.hide();
-      if (travelling && pierRoute && primary) {
+      if (cityWalk) {
+        if (model && cityAssetsFor !== cityWalk.requestId) {
+          cityAssetsFor = cityWalk.requestId;
+          for (const region of cityWalk.regions) {
+            if (region === 'north') loadNorth(true);
+            else loadDistrict(region, true);
+          }
+        }
+        if (primary) {
+          const target = cityWalk.points.at(-1)!;
+          const duration = cityWalk.arrivesAt - cityWalk.startedAt;
+          if (duration > 0) {
+            if (cityJourney?.id !== cityWalk.requestId || cityJourney.traveller !== primary) {
+              primary.plan(cityWalk.points, [target[0], target[2]]);
+              cityJourney = { traveller: primary, id: cityWalk.requestId };
+            }
+            const cityTime = cityObservation!.serverTime + (playing ? now - cityReceivedAt : 0);
+            primary.observeJourney(poseDt, THREE.MathUtils.clamp((cityTime - cityWalk.startedAt) / duration, 0, 1), duration / 1000);
+          } else {
+            observedPosition.set(...target);
+            primary.observe(poseDt, observedPosition, counterFacing);
+          }
+        }
+      } else if (travelling && pierRoute && primary) {
         if (pierJourney?.traveller !== primary || pierJourney.startedAt !== shift.since) {
           const outbound = shift.phase === 'toPier';
           const path: RoutePoint[] = observer ? pierRoute : [...pierRoute, [...FISHING_SPOT]];
@@ -1146,6 +1176,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   return {
     syncCafe(snapshot) { cafeSnapshot = snapshot; receivedAt = performance.now(); },
+    syncCity(observation) { cityObservation = observation; cityReceivedAt = performance.now(); },
     view: setView,
     zoom,
     play(enabled) { playing = enabled; },

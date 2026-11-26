@@ -85,7 +85,7 @@ export function CafeMcpPairing({ endpoint, ready }: { endpoint: string; ready: b
     <details className={styles.cafePairing} onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>连接 Agent{connection?.connected ? ' · 已连接' : ''}</summary>
       <div className={styles.pairingContent}>
-        {connection?.connected && <p>Codex 可以控制这个试玩会话里的 01 号。让它开启观察员班次，网页会跟随行动。</p>}
+        {connection?.connected && <p>让 Codex 查看可到达的地点，选择下一站。01 号的路线和位置会显示在这个网页里。</p>}
         {pairing ? <>
           <p>把这条指令发给 Codex。配对码 5 分钟内有效，只能使用一次。</p>
           <code>{instruction}</code>

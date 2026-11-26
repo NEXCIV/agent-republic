@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
-export const FISHING_SPOT = [73.65, 0.09, -190] as const;
+import { FISHING_SPOT } from '../../lib/cafe-geometry';
+export { FISHING_SPOT };
 const FLOAT_TARGET = new THREE.Vector3(76.75, -1.31, -190);
 const UP = new THREE.Vector3(0, 1, 0);
 type Gesture = 'casting' | 'fishing' | 'reeling';
