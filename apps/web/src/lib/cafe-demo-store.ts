@@ -14,6 +14,8 @@ import {
   type CityActivity, type CityActivityView,
 } from './city-activities';
 import { beginEveningWalk, eveningResult, EVENING_STROLL_ACTION, observeEveningWalk, type EveningChoice, type EveningRecord } from './evening-stroll';
+import { applyTheatreDecision, observeTheatre, theatreJourney, type TheatreDecision, type TheatreTrial } from './theatre-trial';
+import type { LightingPilot } from './city-activities';
 
 type Response = Omit<CafeSnapshot, 'run'> & { run: CafeRun };
 type Row = { state: string };
@@ -75,6 +77,7 @@ export class CafeDemoStore {
         PRIMARY KEY (resident,id)
       );
       CREATE INDEX IF NOT EXISTS city_activity_history ON city_activities(resident,started DESC);
+      CREATE TABLE IF NOT EXISTS theatre_trials (resident TEXT PRIMARY KEY, state TEXT NOT NULL);
     `);
     this.transaction(() => {
       if (!this.db.prepare('PRAGMA table_info(shifts)').all().some((column) => column.name === 'resident')) {
@@ -269,6 +272,37 @@ export class CafeDemoStore {
     return history.find((activity) => activity.endsAt <= at && (!run || activity.endsAt >= run.since))?.energyAfter;
   }
 
+  private theatreTrial(resident: string): TheatreTrial | undefined {
+    const row = this.db.prepare('SELECT state FROM theatre_trials WHERE resident=?').get(resident) as Row | undefined;
+    return row ? JSON.parse(row.state) : undefined;
+  }
+
+  private primaryResident(resident: string, at: number) {
+    const run = this.activeRun(resident, at);
+    const activeShift = run !== null && run.phase !== 'done';
+    const history = this.cityActivityHistory(resident);
+    const activeActivity = history[0] && history[0].endsAt > at ? history[0] : null;
+    const walk = activeActivity?.walk ?? this.currentWalk(resident);
+    const movement = walk ? this.movement(walk, at) : null;
+    const reason = activeShift ? '已有进行中的班次。' : activeActivity ? `进行中 · ${activeActivity.label}`
+      : movement?.status === 'walking' ? '01 号正在赶路或参加活动。' : undefined;
+    const position = walk ? positionOnWalk(walk, at)
+      : activeShift ? null : cityRestingPoint(run?.place, Boolean(run?.observer));
+    const energy = this.energyFromActivities(history, run, at) ?? run?.energy ?? CAFE_INITIAL_ENERGY;
+    return { run, activeShift, history, activeActivity, movement, position, energy, reason, busy: Boolean(reason) };
+  }
+
+  private eveningResident(resident: string, at: number, pilot: LightingPilot | undefined, trial: TheatreTrial | undefined, observerBusy: boolean) {
+    const records = this.eveningRecords(resident);
+    const latest = records[0];
+    const journey = theatreJourney(trial, '03');
+    const theatreBusy = Boolean(journey && at < journey.walk.arrivesAt);
+    const position = journey && (!latest || latest.startedAt <= journey.walk.startedAt) ? positionOnWalk(journey.walk, at) : undefined;
+    const busy = observerBusy || theatreBusy || Boolean(latest && latest.endsAt > at);
+    const view = observeEveningWalk(resident, records, pilot, at, busy, position);
+    return { view, records, busy, position: view.position, energy: view.energy };
+  }
+
   cityMap(actor: CafeActor) {
     this.authorizedResident(actor);
     return CITY_MAP;
@@ -278,31 +312,56 @@ export class CafeDemoStore {
     return this.transaction(() => {
       const resident = this.authorizedResident(actor);
       const serverTime = this.clock();
-      const run = this.activeRun(resident, serverTime);
-      const activeShift = run !== null && run.phase !== 'done';
-      const history = this.cityActivityHistory(resident);
-      const activeActivity = history[0] && history[0].endsAt > serverTime ? history[0] : null;
-      const walk = activeActivity?.walk ?? this.currentWalk(resident);
-      const movement = walk ? this.movement(walk, serverTime) : null;
-      const reason = activeShift ? '已有进行中的班次。' : activeActivity ? `进行中 · ${activeActivity.label}`
-        : movement?.status === 'walking' ? '01 号正在赶路。' : undefined;
-      const position = walk ? positionOnWalk(walk, serverTime)
-        : activeShift ? null : cityRestingPoint(run?.place, Boolean(run?.observer));
-      const energy = this.energyFromActivities(history, run, serverTime) ?? run?.energy ?? CAFE_INITIAL_ENERGY;
+      const primary = this.primaryResident(resident, serverTime);
+      const { run, activeShift, movement, position, energy, reason, activeActivity, history } = primary;
       const survey = this.lightingSurvey(resident, serverTime);
       const lightingPilot = this.lightingPilot(resident, serverTime, survey?.submittedAt);
+      const trial = this.theatreTrial(resident);
+      const evening = this.eveningResident(resident, serverTime, lightingPilot, trial, activeShift && Boolean(run?.observer));
+      const theatre = trial || survey ? observeTheatre(trial, { '01': primary, '03': evening }, serverTime) : undefined;
       const nearby = nearbyCitySite(position, survey?.stage, Boolean(lightingPilot?.worker));
       const availableActions = reason || !nearby ? [] : availableCityActions(nearby.actions, energy);
       if (lightingPilot?.stage === 'approved' && activeActivity?.actionId !== 'works.chat') availableActions.push(INSTALL_LIGHT);
       return {
-        agentId: '01', serverTime, position, movement, canMove: !reason, reason, energy,
+        agentId: '01', serverTime, position: theatre?.residents['01'].status === 'seated' ? theatre.residents['01'].position : position,
+        movement, canMove: !reason, reason, energy,
         nearby: nearby?.site ?? null,
         ...(survey ? { lightingSurvey: survey.stage } : {}),
         ...(lightingPilot ? { lightingPilot } : {}),
-        eveningWalk: observeEveningWalk(resident, this.eveningRecords(resident), lightingPilot, serverTime, activeShift && Boolean(run.observer)),
+        eveningWalk: evening.view,
+        ...(theatre ? { theatre } : {}),
         availableActions,
         recentActivities: history.map((activity) => cityActivityView(activity, serverTime)),
       };
+    });
+  }
+
+  theatreDecision(actor: CafeActor, requestId: string, choice: TheatreDecision) {
+    return this.transaction(() => {
+      const resident = this.authorizedResident(actor);
+      const at = this.clock();
+      const trial = this.theatreTrial(resident);
+      const survey = this.lightingSurvey(resident, at);
+      if (!trial && !survey) return { error: '请让 01 号先阅读议事公告。', code: 422 };
+      const isRepeat = trial?.commands.some((command) => command.requestId === requestId);
+      if (!isRepeat && (this.db.prepare('SELECT 1 FROM city_activities WHERE resident=? AND id=?').get(resident, requestId)
+        || this.db.prepare('SELECT 1 FROM city_walks WHERE resident=? AND id=?').get(resident, requestId))) {
+        return { error: '请求编号已用于另一项活动。', code: 409 };
+      }
+      const primary = this.primaryResident(resident, at);
+      const pilot = this.lightingPilot(resident, at, survey?.submittedAt);
+      const evening = this.eveningResident(resident, at, pilot, trial, primary.activeShift && Boolean(primary.run?.observer));
+      const result = applyTheatreDecision(trial, { '01': primary, '03': evening }, choice, requestId, at);
+      if ('error' in result) return result;
+      if (!result.repeated) {
+        if (choice.agentId === '01' && choice.decision === 'attend') {
+          this.saveCityWalk(resident, theatreJourney(result.state, '01')!.walk);
+        }
+        this.db.prepare(`
+          INSERT INTO theatre_trials (resident,state) VALUES (?,?) ON CONFLICT(resident) DO UPDATE SET state=excluded.state
+        `).run(resident, JSON.stringify(result.state));
+      }
+      return result.view;
     });
   }
 
@@ -324,7 +383,7 @@ export class CafeDemoStore {
       const run = this.activeRun(resident, at);
       const survey = this.lightingSurvey(resident, at);
       const pilot = this.lightingPilot(resident, at, survey?.submittedAt);
-      const view = observeEveningWalk(resident, records, pilot, at, Boolean(run?.observer && run.phase !== 'done'));
+      const { view } = this.eveningResident(resident, at, pilot, this.theatreTrial(resident), Boolean(run?.observer && run.phase !== 'done'));
       if (choice.observationId !== view.observationId || !view.options.length) {
         return { error: '散步选项已更新或 03 号正在忙，请重新查看城市。', code: 409 };
       }
@@ -428,6 +487,9 @@ export class CafeDemoStore {
       if (run && run.phase !== 'done') return { error: '已有进行中的班次。' };
       if (kind === 'observer' && this.eveningRecords(resident).some(({ endsAt }) => endsAt > at)) {
         return { error: '03 号正在散步或休息，请完成后再开启观察员班次。' };
+      }
+      if (kind === 'observer' && (theatreJourney(this.theatreTrial(resident), '03')?.walk.arrivesAt ?? 0) > at) {
+        return { error: '03 号正在参加剧场活动，请等其离场。' };
       }
       if (this.activityInProgress(resident, at)) return { error: '01 号正在执行现场活动。' };
       const walk = this.currentWalk(resident);

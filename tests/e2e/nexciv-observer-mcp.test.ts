@@ -60,6 +60,11 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
         response.end(JSON.stringify({ selection: input.choice, movement: { points: [[0, 0, 0], [1, 0, 0]], status: 'walking' } }));
         return;
       }
+      if (input?.action === 'theatreDecision') {
+        expect(input).toMatchObject({ revision: 1, agentId: '03', decision: 'counter', slot: 'late' });
+        response.end(JSON.stringify({ phase: 'negotiating', residents: { '03': { energy: 64 } } }));
+        return;
+      }
       response.end(JSON.stringify({ run: { phase: 'briefing' } }));
       return;
     }
@@ -99,7 +104,7 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
   try {
     client = await connect();
     expect((await client.listTools()).tools.map(({ name }) => name)).toEqual([
-      'pair_browser', 'list_city_places', 'move_to', 'observe_city', 'choose_evening_walk', 'interact_city',
+      'pair_browser', 'list_city_places', 'move_to', 'observe_city', 'choose_evening_walk', 'respond_theatre', 'interact_city',
       'start_observer', 'observe_observer', 'choose_interview', 'read_shift', 'read_newspaper',
     ]);
     const observation = await client.callTool({ name: 'observe_observer', arguments: {} });
@@ -134,6 +139,9 @@ it('binds MCP tools to one local demo session and rejects invalid tool input', a
     expect(choice.isError).toBeFalsy();
     expect(JSON.stringify(choice)).toContain('pilot-light');
     expect(JSON.stringify(choice)).not.toContain('points');
+    const theatre = await client.callTool({ name: 'respond_theatre', arguments: { revision: 1, agentId: '03', decision: 'counter', slot: 'late' } });
+    expect(theatre.isError).toBeFalsy();
+    expect(JSON.stringify(theatre)).toContain('negotiating');
     const activity = await client.callTool({ name: 'interact_city', arguments: { actionId: 'works.patrol' } });
     expect(JSON.stringify(activity)).toContain('works.patrol');
     expect(JSON.stringify(activity)).toContain('running');

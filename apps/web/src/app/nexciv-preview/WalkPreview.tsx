@@ -6,6 +6,8 @@ import { CafeShift, shiftLabel } from './CafeShift';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
 import { COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
+import { THEATRE_CLOCK } from '../../lib/theatre-layout';
+import type { TheatreView } from '../../lib/theatre-trial';
 import { createWalk, type AgentId, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController } from './walk';
 import type { Place } from './navigation';
 import styles from './preview.module.css';
@@ -19,6 +21,29 @@ const DISTRICTS = {
   residential: { button: '住宅区', title: '东北住宅区', places: '花园住宅与邻里庭院' },
 };
 const STARTING: AgentReport = { status: 'loading', progress: 0 };
+const THEATRE_STATUS: Record<TheatreView['phase'], string> = {
+  available: '待选时段', negotiating: '协商时段中', cancelled: '本轮未排期',
+  scheduled: '候场中', open: '已开放入场', finished: '试演结束',
+};
+const THEATRE_RESIDENT_STATUS: Record<TheatreView['residents']['01']['status'], string> = {
+  undecided: '待回应', absent: '缺席', 'en-route': '前往剧场', waiting: '入口候场',
+  entering: '正在入场', seated: '已就座', leaving: '正在离场', departed: '已离场',
+};
+
+function TheatreProgramme({ theatre }: { theatre: TheatreView }) {
+  const { booking, phase, offer, slots, attendees, residents, events } = theatre;
+  return <details className={styles.cityActivity}>
+    <summary>社区剧场 · {THEATRE_STATUS[phase]}{booking && ` · 已到场 ${attendees.length} 人`}</summary>
+    {booking ? <p>
+      {booking.name} · <time dateTime={new Date(booking.opensAt).toISOString()}>{THEATRE_CLOCK.format(booking.opensAt)}</time> 开放
+    </p> : <p>{offer ? `${offer.by} 号提议${slots.find(({ id }) => id === offer.slot)?.name}`
+      : slots.map(({ name, waitSeconds }) => `${name}（确认后 ${waitSeconds} 秒开放）`).join('、')}</p>}
+    <p>{(['01', '03'] as const).map((id) => `${id} 号 ${THEATRE_RESIDENT_STATUS[residents[id].status]}`).join(' · ')}</p>
+    {events.length > 0 && <ol>{events.map((entry) => <li key={entry.id}>
+      <time dateTime={new Date(entry.at).toISOString()}>{THEATRE_CLOCK.format(entry.at)}</time> · {entry.agentId && `${entry.agentId} 号 · `}{entry.text}
+    </li>)}</ol>}
+  </details>;
+}
 
 function activity(id: AgentId, report: AgentReport) {
   const place = PLACES[report.destination ?? 'plaza'];
@@ -37,12 +62,18 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
   const latest = useRef<CafeSnapshot | null>(null);
   const latestCity = useRef<CityObservation | null>(null);
   const seenCityJob = useRef<string | undefined>(undefined);
+  const seenTheatre = useRef<number | undefined>(undefined);
   const followedCafeId = useRef<FollowId>('01');
   const [cafeFollow, setCafeFollow] = useState<FollowId>('01');
   const followCityAgent = useCallback((id: FollowId) => {
     followedCafeId.current = id;
     setCafeFollow(id);
+    setView('follow');
     world.current?.view('follow', id);
+  }, []);
+  const showTheatre = useCallback(() => {
+    setView('west');
+    world.current?.view('west');
   }, []);
   const [city, setCity] = useState<CityObservation | null>(null);
   const pilot = city?.lightingPilot;
@@ -50,8 +81,11 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
   const evening = city?.eveningWalk;
   const strolls = evening?.recent ?? [];
   const stroll = strolls[0];
-  const cityWalk = cafeFollow === '03' ? stroll?.movement : cafeFollow === '02' ? worker?.movement : city?.movement;
-  const cityMoving = cityWalk?.status === 'walking';
+  const theatre = city?.theatre;
+  const theatre03 = theatre?.residents['03'].walk;
+  const thirdWalk = theatre03 && theatre03.startedAt >= (stroll?.movement.startedAt ?? 0) ? theatre03 : stroll?.movement;
+  const cityWalk = cafeFollow === '03' ? thirdWalk : cafeFollow === '02' ? worker?.movement : city?.movement;
+  const cityMoving = city && cityWalk && city.serverTime < cityWalk.arrivesAt;
   const primaryHistory = city?.recentActivities ?? [];
   const recent = [...primaryHistory, ...strolls.map(({ activity }) => activity), ...(worker ? [worker.activity] : [])]
     .sort((a, b) => b.startedAt - a.startedAt);
@@ -59,7 +93,8 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
   const currentActivity = active?.status === 'running' ? active : undefined;
   const movementActivity = recent.find(({ requestId }) => requestId === cityWalk?.requestId);
   const cityBusy = city?.movement?.status === 'walking' || primaryHistory[0]?.status === 'running'
-    || pilot?.stage === 'review' || worker?.activity.status === 'running' || stroll?.status === 'running';
+    || pilot?.stage === 'review' || worker?.activity.status === 'running' || stroll?.status === 'running'
+    || theatre?.phase === 'scheduled' || theatre?.phase === 'open';
   const pilotStatus = pilot ? LIGHTING_PILOT_STATUS[pilot.stage] : '';
   const [shift, setShift] = useState('等待开班');
   const [greeting, setGreeting] = useState('');
@@ -126,11 +161,16 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         setCity(observation);
         const construction = observation.lightingPilot?.worker?.activity;
         const outing = observation.eveningWalk?.recent[0]?.activity;
+        const opensAt = observation.theatre?.booking?.opensAt;
         const job = construction?.requestId === requestedActivity && requestedActivity ? construction
           : outing && (!construction || outing.startedAt >= construction.startedAt) ? outing : construction;
         if (job?.agentId && seenCityJob.current !== job.requestId) {
           seenCityJob.current = job.requestId;
           followCityAgent(job.agentId);
+        }
+        if (!requestedActivity && opensAt && seenTheatre.current !== opensAt) {
+          seenTheatre.current = opensAt;
+          if (observation.theatre?.phase !== 'finished') showTheatre();
         }
       } catch {
         // Retry on the next poll, retaining the last position during a brief disconnect.
@@ -140,7 +180,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [cafeMode, cityBusy, followCityAgent, requestedActivity]);
+  }, [cafeMode, cityBusy, followCityAgent, requestedActivity, showTheatre]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
@@ -149,11 +189,16 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
   }
 
   const sceneReady = state === 'ready';
+  const watchingTheatre = cafeMode && view === 'west' && Boolean(theatre?.booking);
+  const theatreResident = cafeFollow !== '02' ? theatre?.residents[cafeFollow] : undefined;
+  const followingAttendee = Boolean(theatreResident?.walk?.requestId && theatreResident.walk.requestId === cityWalk?.requestId);
   const agent = reports[selected];
   const cityLabel = cityWalk && (cityMoving ? `前往 ${cityWalk.name}`
     : movementActivity?.kind === 'survey' ? '已返回 议事公告栏' : `已到达 ${cityWalk.name}`);
-  const cafeTitle = cafeFollow === '02' ? pilotStatus : (cafeFollow === '03' ? cityLabel : currentActivity?.label || cityLabel) || shift;
-  const sceneCaption = (cafeFollow === '03' ? active : currentActivity)?.events.at(-1);
+  const cafeTitle = watchingTheatre && theatre ? THEATRE_STATUS[theatre.phase]
+    : followingAttendee && theatreResident ? THEATRE_RESIDENT_STATUS[theatreResident.status]
+      : cafeFollow === '02' ? pilotStatus : (cafeFollow === '03' ? cityLabel : currentActivity?.label || cityLabel) || shift;
+  const sceneCaption = watchingTheatre || followingAttendee ? undefined : (cafeFollow === '03' ? active : currentActivity)?.events.at(-1);
   const travelProgress = city && cityWalk && cityMoving
     ? Math.round(100 * cityWalkTiming(cityWalk, city.serverTime).progress)
     : 100;
@@ -191,11 +236,14 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
         <img className={styles.poster} src="/nexciv-walk/poster.webp" alt="Nexus 中央广场和 Corner Market 的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={state === 'ready'} />
         <div className={styles.destination}>
-          <small>{cafeMode ? `AGENT ${cafeFollow} · AI SIMULATED · DEMO` : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
+          <small>{watchingTheatre ? '社区剧场 · DEMO' : cafeMode ? `AGENT ${cafeFollow} · AI SIMULATED · DEMO` : view === 'overview' ? '全城俯视' : district?.title ?? (agentReady ? `AGENT ${selected} · 模拟行为` : 'NEXUS 中央街区')}</small>
           <strong role="status">{cafeMode ? cafeTitle
             : overviewMessage ?? districtMessage ?? (sceneReady ? activity(selected, agent) : '中央广场')}</strong>
           {sceneCaption && <p className={styles.greeting}>
             {sceneCaption.speaker && `${sceneCaption.speaker} · `}{sceneCaption.text}
+          </p>}
+          {watchingTheatre && theatre?.booking && <p className={styles.greeting}>
+            {theatre.booking.name} · 已到场 {theatre.attendees.length} 人
           </p>}
           {!cityWalk && !sceneCaption && greeting && <p className={styles.greeting}>{greeting}</p>}
         </div>
@@ -203,8 +251,8 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
       </section>
       <footer id="walk-controls" tabIndex={-1} className={styles.footer}>
         {cafeMode ? <>
-          {cityWalk && <div className={styles.route}>
-            <span>{cafeFollow === '03' ? '傍晚行程' : cafeFollow === '02' ? '施工路线' : movementActivity?.kind === 'survey' ? '调研路线'
+          {cityWalk && !watchingTheatre && <div className={styles.route}>
+            <span>{followingAttendee ? '剧场行程' : cafeFollow === '03' ? '傍晚行程' : cafeFollow === '02' ? '施工路线' : movementActivity?.kind === 'survey' ? '调研路线'
               : movementActivity?.kind === 'work' ? '巡查路线' : movementActivity?.kind === 'read' ? '公告栏路线' : '全城试走'}</span>
             <progress aria-label={currentActivity?.label || cityLabel || `Agent ${cafeFollow} 行程`} max={100} value={travelProgress} />
             <span>{cityWalk.name} · {Math.round(cityWalk.metres)} 米</span>
@@ -214,6 +262,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
             <span>01 号精力 <b>{city.energy}</b> / 100</span>
             {city.nearby.place === 'governance' && city.lightingSurvey === 'submitted'
               && <span>公告栏 · {pilotStatus || COUNCIL_SURVEY_RECEIPT}</span>}
+            {city.nearby.place === 'governance' && theatre && <span>剧场公告 · {THEATRE_STATUS[theatre.phase]}</span>}
           </div>}
           {!!city?.availableActions.length && <span className={styles.cityOptions}>
             可选 · {city.availableActions.map(({ label }) => label).join('、')}
@@ -222,11 +271,13 @@ export function WalkPreview({ cafeMode = false, requestedActivity }: { cafeMode?
             <span>03 号精力 <b>{evening.energy}</b> / 100</span>
             <span>湖畔 · {evening.lighting.detail}</span>
           </div>}
-          {(worker || stroll) && <div className={styles.controls} role="group" aria-label="跟拍居民">
-            <button disabled={!sceneReady} aria-pressed={cafeFollow === '01'} onClick={() => followCityAgent('01')}>跟随 01</button>
-            {worker && <button disabled={!sceneReady} aria-pressed={cafeFollow === '02'} onClick={() => followCityAgent('02')}>跟随 02</button>}
-            {stroll && <button disabled={!sceneReady} aria-pressed={cafeFollow === '03'} onClick={() => followCityAgent('03')}>跟随 03</button>}
+          {(worker || stroll || theatre?.booking) && <div className={styles.controls} role="group" aria-label="跟拍居民">
+            <button disabled={!sceneReady} aria-pressed={!watchingTheatre && cafeFollow === '01'} onClick={() => followCityAgent('01')}>跟随 01</button>
+            {worker && <button disabled={!sceneReady} aria-pressed={!watchingTheatre && cafeFollow === '02'} onClick={() => followCityAgent('02')}>跟随 02</button>}
+            {(stroll || theatre03) && <button disabled={!sceneReady} aria-pressed={!watchingTheatre && cafeFollow === '03'} onClick={() => followCityAgent('03')}>跟随 03</button>}
+            {theatre?.booking && <button disabled={!sceneReady} aria-pressed={watchingTheatre} onClick={showTheatre}>查看剧场</button>}
           </div>}
+          {theatre && <TheatreProgramme theatre={theatre} />}
           {recent.length > 0 && <details className={styles.cityActivity}>
             <summary>现场活动记录 · {recent.length} 条{recent[0]?.status === 'completed' ? ` · 已完成${recent[0].label}` : ''}</summary>
             {recent.map((entry) => <section key={entry.requestId}>

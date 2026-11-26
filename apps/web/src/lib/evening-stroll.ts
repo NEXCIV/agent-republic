@@ -83,13 +83,13 @@ function optionsAt(position: CityPoint, energy: number, lighting: Lighting) {
   });
 }
 
-export function observeEveningWalk(resident: string, records: EveningRecord[], pilot: LightingPilot | undefined, at: number, busy = false): EveningWalk {
+export function observeEveningWalk(resident: string, records: EveningRecord[], pilot: LightingPilot | undefined, at: number, busy = false, overridePosition?: CityPoint): EveningWalk {
   const latest = records[0];
   const energy = !latest ? 64 : at < latest.walk.arrivesAt ? latest.observation.energy
     : at < latest.endsAt ? latest.energyAtArrival : latest.energyAfter;
-  const position = latest ? positionOnWalk(latest.walk, at) : START;
+  const position = overridePosition ?? (latest ? positionOnWalk(latest.walk, at) : START);
   const lighting = lightingAt(pilot);
-  const observationId = createHash('sha256').update(JSON.stringify([resident, lighting.state, lighting.source?.activityId, latest?.requestId])).digest('hex');
+  const observationId = createHash('sha256').update(JSON.stringify([resident, lighting.state, lighting.source?.activityId, latest?.requestId, overridePosition])).digest('hex');
   const alreadyChose = records.some((record) => record.observation.lighting.state === lighting.state);
   const options = busy || alreadyChose || (latest && latest.endsAt > at)
     ? [] : optionsAt(position, energy, lighting);

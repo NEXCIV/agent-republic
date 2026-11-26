@@ -11,6 +11,8 @@ import { cityWalkTiming, type CityObservation, type CityRegion } from '../../lib
 import type { CityPoint } from '../../lib/cafe-geometry';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
+import { THEATRE_CLOCK, THEATRE_STAGE } from '../../lib/theatre-layout';
+import { createTheatreLighting } from './theatre-lighting';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
 export type District = 'east' | 'west' | 'shore' | 'research' | 'residential';
@@ -296,9 +298,16 @@ function addCouncilNotice(asset: THREE.Object3D) {
   notice.rotation.y = COUNCIL_NOTICE_HEADING;
   asset.add(notice);
   let receipt = '';
-  return (message: string) => {
-    if (message === receipt) return;
+  let theatreLine = COUNCIL_DEMO_AGENDA[1] as string;
+  return (message: string, theatre: string) => {
+    if (message === receipt && theatre === theatreLine) return;
     receipt = message;
+    theatreLine = theatre;
+    brush.fillStyle = '#193640';
+    brush.fillRect(22, 274, 340, 58);
+    brush.fillStyle = '#f5e8c9';
+    brush.font = '400 29px "Microsoft YaHei", sans-serif';
+    brush.fillText(theatreLine, 24, 303, 336);
     const received = Boolean(message);
     brush.fillStyle = received ? '#edbe56' : '#193640';
     brush.fillRect(24, 352, 336, 49);
@@ -402,6 +411,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let workerJourney: string | undefined;
   let lightingLamp: THREE.Group | undefined;
   let installationKit: THREE.Group | undefined;
+  let theatreLights: ReturnType<typeof createTheatreLighting> | undefined;
+  let theatreOpen = false;
+  const theatreFocus = new THREE.Vector3(THEATRE_STAGE[0], 0.82, 83.25);
   let siteHost: { patrol: Patrol; asset: GLTF; position: THREE.Vector3; facing: THREE.Vector3 } | undefined;
   let siteHostRequested = false;
   const fishingGear = cafeMode ? createFishingGear() : undefined;
@@ -529,6 +541,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function resetOrbit() {
     if (mode !== 'overview' && mode !== 'follow') {
+      if (mode === 'west' && cafeMode && cityObservation?.theatre?.booking) {
+        [orbitYaw, orbitPitch, desiredDistance] = [Math.PI + 0.12, 0.64, 27];
+        return;
+      }
       [orbitYaw, orbitPitch, desiredDistance] = DISTRICT_ORBIT[mode];
       return;
     }
@@ -666,9 +682,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const surveying = latestActivity?.status === 'running' && latestActivity.kind === 'survey';
     const pilot = cityObservation?.lightingPilot;
     const worker = pilot?.worker;
+    const theatre = cityObservation?.theatre;
+    const theatre01 = theatre?.residents['01'];
+    const theatre03 = theatre?.residents['03'];
     const byPier = cafeMode && !cityWalk && shift?.place === 'pier';
     const observer = cityWalk ? undefined : shift?.observer;
     const outing = observer && shift?.phase !== 'done' ? undefined : cityObservation?.eveningWalk?.recent[0];
+    const theatre03Walk = (!observer || shift?.phase === 'done') && theatre03?.walk
+      && theatre03.walk.startedAt >= (outing?.movement.startedAt ?? 0) ? theatre03.walk : undefined;
+    const thirdWalk = theatre03Walk ?? outing?.movement;
     const interviewing = !cityWalk && shift?.phase === 'interviewing';
     const travelling = !cityWalk && (shift?.phase === 'toPier' || shift?.phase === 'toCounter');
     const social = !cityWalk && (shift?.phase === 'inviting' || shift?.phase === 'chatting' || shift?.phase === 'reconnecting'
@@ -676,6 +698,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (cafeMode) {
       const poseDt = playing ? dt : 0;
       const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
+      if (theatre?.booking && districts.west.asset) {
+        if (!theatreLights) {
+          theatreLights = createTheatreLighting();
+          cafeProps.add(theatreLights.group);
+        }
+        const open = theatre.phase === 'open';
+        if (open !== theatreOpen) {
+          theatreOpen = open;
+          theatreLights.setOpen(open);
+        }
+      }
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
       const host = cityObservation?.nearby?.people[0];
       const hostPosition = worker?.movement.points[0] ?? host?.position;
@@ -719,11 +752,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const duration = shift?.until ? shift.until - shift.since : 0;
       const progress = shift && duration > 0 ? THREE.MathUtils.clamp((time - shift.since) / duration, 0, 1) : 0;
       if ((!cityWalk && shift?.requestedActivity === 'fish' || observer) && districts.shore.status === 'idle') loadDistrict('shore', true);
-      if (outing && strollAssetsFor !== outing.movement.requestId) {
-        strollAssetsFor = outing.movement.requestId;
-        loadRouteRegions(outing.movement.regions);
+      if (thirdWalk && strollAssetsFor !== thirdWalk.requestId) {
+        strollAssetsFor = thirdWalk.requestId;
+        loadRouteRegions(thirdWalk.regions);
       }
-      if ((outing || (observer && districts.shore.status === 'ready')) && !regularRequested) {
+      if ((thirdWalk || (observer && districts.shore.status === 'ready')) && !regularRequested) {
         regularRequested = true;
         request('agent-03.glb').then((response) => response.arrayBuffer())
           .then((bytes) => loader.parseAsync(bytes, ASSET_PATH)).then((asset) => {
@@ -739,22 +772,24 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           }).catch(() => { if (!ended && !contextLost) callbacks.fallback(); });
       }
       if (pierRegular) {
-        pierRegular.patrol.root.visible = Boolean(outing || observer);
-        if (outing) {
-          const movement = outing.movement;
+        pierRegular.patrol.root.visible = Boolean(thirdWalk || observer);
+        if (thirdWalk) {
+          const movement = thirdWalk;
           const target = movement.points.at(-1)!;
           const [x, z] = movement.facing!;
-          if (cityTime < movement.arrivesAt && movement.metres > 0) {
+          const { progress, walkingMs, stop } = cityWalkTiming(movement, cityTime);
+          const sitting = Boolean(theatre03Walk && theatre03?.status === 'seated');
+          if (!sitting && !stop && cityTime < movement.arrivesAt && walkingMs > 0) {
             if (strollJourney !== movement.requestId) {
               pierRegular.patrol.plan(movement.points, [x, z]);
               strollJourney = movement.requestId;
             }
-            const { progress, walkingMs } = cityWalkTiming(movement, cityTime);
             pierRegular.patrol.observeJourney(poseDt, progress, walkingMs / 1000);
           } else {
-            observedPosition.set(...target);
-            observedFacing.set(x, target[1], z);
-            pierRegular.patrol.observe(poseDt, observedPosition, observedFacing);
+            const position = sitting ? theatre03!.position! : stop?.position ?? target;
+            observedPosition.set(...position);
+            observedFacing.set(x, position[1], z);
+            pierRegular.patrol.observe(poseDt, observedPosition, observedFacing, false, undefined, sitting);
           }
         } else if (observer) {
           pierRegular.patrol.observe(poseDt, regularPosition, interviewSpot, false, interviewing && byPier ? 'nod' : undefined);
@@ -771,7 +806,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (primary) {
           const target = cityWalk.points.at(-1)!;
           const { walkingMs, progress, stop } = cityWalkTiming(cityWalk, cityTime);
-          if (conversation?.person) {
+          if (theatre01?.status === 'seated' && theatre01.walk?.requestId === cityWalk.requestId) {
+            observedPosition.set(...theatre01.position!);
+            observedFacing.set(...THEATRE_STAGE);
+            primary.observe(poseDt, observedPosition, observedFacing, false, undefined, true);
+          } else if (conversation?.person) {
             observedPosition.set(...target);
             primary.observe(poseDt, observedPosition, siteHost?.position ?? counterFacing, false, 'nod');
           } else if (stop || (cityWalk.facing && cityTime >= cityWalk.arrivesAt)) {
@@ -871,7 +910,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const noticeFrame = followed === '01' && cityWalk?.facing ? 1 - THREE.MathUtils.smoothstep(feet.distanceTo(councilNotice), 2, 7) : 0;
       const workFrame = followed === '02' && worker ? THREE.MathUtils.smoothstep(-feet.z, 154, 168) : 0;
       const surveyFrame = followed === '01' && surveying ? THREE.MathUtils.smoothstep(-feet.z, 150, 164) : 0;
-      const strollFrame = followed === '03' && outing ? THREE.MathUtils.smoothstep(-feet.z, 150, 164) : 0;
+      const strollFrame = followed === '03' && outing && !theatre03Walk ? THREE.MathUtils.smoothstep(-feet.z, 150, 164) : 0;
       const shoreFrame = Math.max(workFrame, surveyFrame, strollFrame);
       const hallFrame = (1 - THREE.MathUtils.smoothstep(feet.distanceTo(landmarkEntrances.hall), 7, 41)) * (1 - noticeFrame);
       const forumFrame = 1 - THREE.MathUtils.smoothstep(feet.distanceTo(forumEntrance), 3, 20);
@@ -937,7 +976,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       fog.far = wide ? 770 : seeingLake ? 510 : north || sideDistrictLoaded() ? 275 : 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
       const target = wide && !district ? citywideFocus
-        : mode !== 'overview' && mode !== 'follow' && (districts[mode].asset || wide) ? districtFocus[mode] : focus;
+        : mode === 'west' && cafeMode && theatre?.booking && districts.west.asset ? theatreFocus
+          : mode !== 'overview' && mode !== 'follow' && (districts[mode].asset || wide) ? districtFocus[mode] : focus;
       if (tween) viewFocus.lerp(target, 1 - Math.exp(-8 * dt));
       else viewFocus.copy(target);
       const distance = orbitDistance * (camera.aspect < 0.8 ? 1.09 : 1);
@@ -1299,7 +1339,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function updateCouncilReceipt() {
     const pilot = cityObservation?.lightingPilot;
     const text = pilot ? LIGHTING_PILOT_STATUS[pilot.stage] : cityObservation?.lightingSurvey === 'submitted' ? COUNCIL_SURVEY_RECEIPT : '';
-    updateCouncilNotice?.(text);
+    const theatre = cityObservation?.theatre;
+    const booking = theatre?.booking;
+    const programme = theatre?.phase === 'open' ? '社区剧场 · 已开放'
+      : theatre?.phase === 'finished' ? '社区剧场 · 试演结束'
+        : booking ? `剧场 · ${THEATRE_CLOCK.format(booking.opensAt)} 开放` : COUNCIL_DEMO_AGENDA[1];
+    updateCouncilNotice?.(text, programme);
   }
 
   request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {

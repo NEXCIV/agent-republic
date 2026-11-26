@@ -99,20 +99,22 @@ serveStdio(() => {
     await request('', { action: 'moveTo', destination, requestId }),
   ));
 
-  tool('observe_city', '读取城市活动和 03 号的 eveningWalk。傍晚散步时，请根据其中的照明、精力和路线，自行挑选可用的选项和理由。可等待活动最多 20 秒。', z.strictObject({
+  tool('observe_city', '读取路灯、03 号的 eveningWalk 和社区剧场 theatre。剧场提供候选时段、两位居民的精力与行程、可选回应和实际到场名单。可等待活动最多 20 秒。', z.strictObject({
     waitSeconds: z.number().int().min(0).max(20).default(0),
   }), true, async ({ waitSeconds }) => {
     const until = Date.now() + waitSeconds * 1000;
     let state = await request('?control=city');
     while ((state?.movement?.status === 'walking' || state?.recentActivities?.[0]?.status === 'running'
       || state?.lightingPilot?.stage === 'review' || state?.lightingPilot?.worker?.activity?.status === 'running'
-      || state?.eveningWalk?.recent?.[0]?.status === 'running') && Date.now() < until) {
+      || state?.eveningWalk?.recent?.[0]?.status === 'running'
+      || ['scheduled', 'open'].includes(state?.theatre?.phase)) && Date.now() < until) {
       await delay(Math.min(2500, Math.max(0, until - Date.now())));
       state = await request('?control=city');
     }
     const worker = state?.lightingPilot?.worker;
     if (worker) worker.movement = movementSummary(worker.movement);
     if (state?.eveningWalk) state.eveningWalk.recent = state.eveningWalk.recent.map(eveningSummary);
+    if (state?.theatre) theatreSummary(state.theatre);
     return state?.movement ? { ...state, movement: movementSummary(state.movement) } : state;
   });
 
@@ -122,6 +124,14 @@ serveStdio(() => {
     reasonId: z.string().regex(/^[a-z][a-z0-9-]{0,31}$/),
     requestId: z.uuidv4().optional(),
   }), false, async ({ requestId = randomUUID(), ...choice }) => eveningSummary(await request('', { action: 'chooseEveningWalk', choice, requestId })));
+
+  tool('respond_theatre', '从最近一次 observe_city.theatre 的 availableActions 中选择动作，附上该观察的 revision。01 号与 03 号可报价时段、接受、改约或谢绝。排期后可选择前往剧场或缺席。', z.strictObject({
+    revision: z.number().int().min(0).max(10),
+    agentId: z.enum(['01', '03']),
+    decision: z.enum(['propose', 'counter', 'accept', 'decline', 'attend', 'skip']),
+    slot: z.enum(['early', 'late']).optional(),
+    requestId: z.uuidv4().optional(),
+  }), false, async ({ requestId = randomUUID(), ...choice }) => theatreSummary(await request('', { action: 'theatreDecision', requestId, ...choice })));
 
   tool('interact_city', '执行最近一次 observe_city 返回的可用动作。议会试玩中，01 号调研后可交报告，试点获批后可让 02 号领取路灯施工。用 observe_city 查看现场结果。', z.strictObject({
     actionId: z.string().regex(/^[a-z][a-z0-9_-]{0,23}\.[a-z][a-z0-9_-]{0,23}$/),
@@ -169,4 +179,11 @@ function movementSummary({ points, ...movement }) {
 
 function eveningSummary(result) {
   return { ...result, movement: movementSummary(result.movement) };
+}
+
+function theatreSummary(theatre) {
+  for (const resident of Object.values(theatre.residents)) {
+    if (resident.walk) resident.walk = movementSummary(resident.walk);
+  }
+  return theatre;
 }
