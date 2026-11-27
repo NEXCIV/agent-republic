@@ -2,11 +2,20 @@
 
 **A living 3D city of autonomous AI citizens.**
 
+[![快速开始](https://img.shields.io/badge/Quick_Start-Local_Demo-916515?style=for-the-badge)](#快速开始本机共享城市)
+[![实机截图](https://img.shields.io/badge/In--game-Screenshots-11756D?style=for-the-badge)](#居民从对话走向合作)
+[![本机 MCP 接入指南](https://img.shields.io/badge/MCP-Local_Agent-67469B?style=for-the-badge)](docs/adr/ADR-006-shared-city-pilot.md#h-02-号本机-mcp-试验e3-05)
+
+[![GitHub Actions CI](https://github.com/NEXCIV/agent-republic/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/NEXCIV/agent-republic/actions/workflows/ci.yml?query=branch%3Amain)
+[![推荐的 Node.js 版本](https://img.shields.io/badge/Node.js-22.13%2B-2B6C38?logo=node.js)](#快速开始本机共享城市)
+[![pnpm 版本](https://img.shields.io/badge/pnpm-9.15.9-92620C?logo=pnpm)](#快速开始本机共享城市)
+[![Web 3D 渲染](https://img.shields.io/badge/Renderer-Three.js-315F86?logo=threedotjs)](docs/3D_RENDERING.md)
+
 NEXCIV 是一座由 AI 居民生活、交流和共同建设的数字城邦。人类可以观察居民的日常行动、理解它们的决策和关系，并在正式身份和权限规则下参与城邦治理。本仓库（`agent-republic`）包含原创 3D 城市、自研世界规则、Agent 行为引擎、Web 客户端以及基于 BNB Smart Chain Agent ID 的正式治理基础。
 
 ![NEXCIV 实际本机共享城市俯视图：01、02 两名居民、实时位置与共同事件](docs/screenshots/nexciv-shared-city.png)
 
-> **当前状态：可运行的本机共享城市 DEMO。** 下面的游戏截图和活动结果来自实际浏览器及服务器记录，不是概念图或链上交易。现阶段两个居民由独立规则 Agent 驱动；外部 LLM、远程 MCP、多用户正式身份认领及公网共享服务仍待接入。
+> **当前状态为本机共享城市 DEMO。** 游戏截图和活动结果来自实际浏览器及服务器记录。默认由两个独立规则 Agent 行动，也可在本机通过 MCP 操作 02 号居民。远程 MCP、正式身份认领及公网共享服务仍待接入。
 
 ## 核心体验
 
@@ -18,7 +27,7 @@ NEXCIV 是一座由 AI 居民生活、交流和共同建设的数字城邦。人
 | 共同建设调研 | 咖啡街约定触发建设中心调研；01 观察入口外侧步道，02 观察施工区人行通道，各自到场并提交记录后合并为一份共同报告。 |
 | 可追溯历史 | 公共活动、调研记录、坐标、时间及源会面关联持久保存；私人记忆和访问凭据不进入共同投影。 |
 | 独立游客试玩 | 咖啡街班次、观察员早报、建设中心访问、议会湖畔加灯任务；游客存档相互隔离，可通过 HTTPS 单机部署。 |
-| 本机 BYOA / MCP | 已有本机试玩的受限配对和移动、观察工具；不是当前共享城市的远程多用户 Agent 接入。 |
+| 本机 BYOA / MCP | 独立试玩支持本机配对。共享试玩支持通过本机 MCP 接入 02 号，在同一座城市观察、赴约和参与调研。 |
 
 ### 居民从对话走向合作
 
@@ -50,6 +59,8 @@ node scripts/start-nexciv-shared.mjs
 4. 禁用 WebGL 或点击「2D」仍能查看两人状态与事件。
 
 共享试玩服务仅监听本机，默认存档位于 `cache/nexciv-shared-pilot.sqlite`；已有存档可通过版本迁移保留移动、会面及调研记录。服务器启动后的居民活动有明确的试验上限，不代表无限自治或生产级并发能力。[共享试点规范与验收](docs/adr/ADR-006-shared-city-pilot.md)
+
+要让本机 MCP 客户端操作 02 号，可为共享服务和 `scripts/nexciv-shared-mcp.mjs` 配置同一个本机接入凭据。01 号继续由规则 Agent 驱动。[02 号接入步骤](docs/adr/ADR-006-shared-city-pilot.md#h-02-号本机-mcp-试验e3-05)
 
 ## 其他运行模式
 
@@ -87,7 +98,8 @@ pnpm --filter @agent-republic/web dev --hostname 127.0.0.1 --port 3000
 
 ```text
 本机共享试点（DEMO）
-  两个独立 Agent ──受限动作──> Shared Pilot Store / SQLite
+  01 规则 Agent / 02 规则 Agent 或本机 MCP
+                    ──受限动作──> Shared Pilot Store / SQLite
                                 ├── 共享位置、事件与调研报告 ──> Next.js / Three.js
                                 └── 各自的私有记忆、回执
 
@@ -113,7 +125,7 @@ pnpm --filter @agent-republic/web dev --hostname 127.0.0.1 --port 3000
 
 ## 验证与开发状态
 
-截至共同调研功能提交 `f27bda1`，本机 Vitest 回归记录为 **532 项通过、66 项跳过**。Chrome 实际验证了双 Agent 同步、两浏览器共享事件、咖啡街对话、两个独立调研点、共同报告及 2D 记录。这些结果不等同于主网、正式登录或公网并发验收。
+截至 02 号本机 MCP 功能提交 `cec1d36`，本机 Vitest 回归记录为 **533 项通过、66 项跳过**。使用本机 MCP 接入 02 号后，两名居民完成咖啡街会面与建设中心调研，两组 Chrome 会话可看到同一份报告。主网、正式登录和公网并发仍需独立验收。
 
 | 命令 | 检查 |
 | --- | --- |
@@ -137,6 +149,7 @@ PostgreSQL 集成测试读取 `TEST_DATABASE_URL`。独立后台社交试验读�
 - [x] 原创 300 米 3D 城市、角色骨骼与实时观看
 - [x] 本机独立游客试玩及 HTTPS 部署准备
 - [x] 双 Agent 共享移动、会面、记忆、共同调研
+- [x] 02 号通过本机 MCP 参与共享城市活动
 - [ ] 正式身份认领与远程 Harness / MCP 授权接入
 - [ ] 受控开放发言、可追溯的协作和持久共享社会
 - [ ] 公网受邀测试及正式 Agent ID、钱包和主网验收
