@@ -189,21 +189,33 @@ function disposeModel(asset: THREE.Object3D, sharedTexture?: THREE.Texture) {
   for (const mesh of meshes) mesh.dispose();
 }
 
-function createStreetSky(horizon: THREE.Color) {
-  const zenith = new THREE.Color('#526887');
-  const lower = new THREE.Color('#535454');
+function createClearDuskSky(horizon: THREE.Color, sunDirection: THREE.Vector3) {
+  const zenith = new THREE.Color('#315990');
+  const lower = new THREE.Color('#536b85');
+  const sunlight = new THREE.Color('#ffd097');
   const sample = new THREE.Color();
-  const height = 128;
-  const pixels = new Uint8Array(4 * height * 4);
+  const width = 256, height = 128;
+  const pixels = new Uint8Array(width * height * 4);
+  const direction = new THREE.Vector3();
   for (let row = 0; row < height; row++) {
-    const elevation = -Math.cos(Math.PI * (row + 0.5) / height);
-    sample.copy(horizon).lerp(elevation > 0 ? zenith : lower, THREE.MathUtils.smoothstep(Math.abs(elevation), 0, 0.68));
-    sample.getRGB(sample, THREE.SRGBColorSpace);
-    for (let column = 0; column < 4; column++) {
-      pixels.set([sample.r * 255, sample.g * 255, sample.b * 255, 255], (row * 4 + column) * 4);
+    const latitude = ((row + 0.5) / height - 0.5) * Math.PI;
+    const elevation = Math.sin(latitude);
+    const gradient = THREE.MathUtils.smoothstep(Math.abs(elevation), 0, 0.72);
+    for (let column = 0; column < width; column++) {
+      const longitude = ((column + 0.5) / width - 0.5) * Math.PI * 2;
+      direction.set(Math.cos(latitude) * Math.cos(longitude), elevation, Math.cos(latitude) * Math.sin(longitude));
+      const towardSun = Math.max(0, direction.dot(sunDirection));
+      const glow = 0.7 * towardSun ** 16 * THREE.MathUtils.smoothstep(elevation, -0.14, 0.07);
+      sample.copy(horizon).lerp(elevation > 0 ? zenith : lower, gradient);
+      sample.lerp(sunlight, glow).getRGB(sample, THREE.SRGBColorSpace);
+      const i = (row * width + column) * 4;
+      pixels[i] = Math.round(sample.r * 255);
+      pixels[i + 1] = Math.round(sample.g * 255);
+      pixels[i + 2] = Math.round(sample.b * 255);
+      pixels[i + 3] = 255;
     }
   }
-  const sky = new THREE.DataTexture(pixels, 4, height);
+  const sky = new THREE.DataTexture(pixels, width, height);
   sky.mapping = THREE.EquirectangularReflectionMapping;
   sky.colorSpace = THREE.SRGBColorSpace;
   sky.magFilter = THREE.LinearFilter;
@@ -258,12 +270,12 @@ function addLakeRipples(asset: THREE.Object3D, time: { value: number }, overview
             #include <emissivemap_fragment>
             vec3 toEye = normalize(cameraPosition - vec3(vLakePosition.x, 0.0, vLakePosition.y));
             vec3 skyRay = reflect(-toEye, vec3(0.0, 1.0, 0.0));
-            float westernSky = pow(max(0.0, dot(skyRay, normalize(vec3(-0.68, 0.30, -0.67)))), 6.0);
+            float westernSky = pow(max(0.0, dot(skyRay, normalize(vec3(-0.68, 0.30, -0.67)))), 12.0);
             float phase = dot(vLakePosition, vec2(0.93, 2.12)) + 2.1 * sin(vLakePosition.x * 0.13)
               + 1.4 * sin(dot(vLakePosition, vec2(0.11, 0.31))) + lakeTime * 0.30;
             float swell = sin(phase) * (1.0 - smoothstep(0.7, 2.0, fwidth(phase)));
-            totalEmissiveRadiance += vec3(0.007, 0.017, 0.048)
-              + vec3(0.19, 0.086, 0.071) * westernSky * (0.96 + 0.04 * swell);
+            totalEmissiveRadiance += vec3(0.005, 0.021, 0.057)
+              + vec3(0.105, 0.043, 0.014) * westernSky * (0.96 + 0.04 * swell);
           `);
         }
       };
@@ -415,11 +427,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   scene.add(street);
   const actorLayer = callbacks.onSelect ? new THREE.Group() : street;
   if (actorLayer !== street) scene.add(actorLayer);
-  const citySky = new THREE.Color('#858599');
-  const horizon = new THREE.Color('#aa8e7b');
-  const streetSky = createStreetSky(horizon);
-  scene.background = streetSky;
-  const fog = new THREE.Fog(horizon, 110, 235);
+  const horizon = new THREE.Color('#8baac7');
+  const fog = new THREE.Fog(horizon, 255, 540);
   scene.fog = fog;
   const camera = new THREE.PerspectiveCamera(STREET_FOV, 1, 0.18, 285);
   const ambient = new THREE.HemisphereLight('#b5ceff', '#81705a', 0.84);
@@ -441,6 +450,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   sunset.shadow.bias = -0.00038;
   sunset.shadow.normalBias = 0.10;
   scene.add(sunset, sunset.target);
+  const sunsetDirection = sunset.position.clone().sub(sunset.target.position).normalize();
+  const duskSky = createClearDuskSky(horizon, sunsetDirection);
+  scene.background = duskSky;
   const marketLamp = new THREE.PointLight('#ffc478', 180, 15, 2);
   marketLamp.position.set(13.6, 2.8, 53.7);
   street.add(marketLamp);
@@ -1414,11 +1426,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         target.z + framedDistance * Math.cos(framedYaw) * Math.cos(framedPitch),
       );
       camera.lookAt(target);
-      fog.near = wide ? 395 : seeingLake ? 82 : 48;
-      fog.far = wide ? 770 : seeingLake ? 340 : 139;
     } else {
-      fog.near = wide ? 395 : seeingLake ? 177 : north || sideDistrictLoaded() ? 165 : 110;
-      fog.far = wide ? 770 : seeingLake ? 510 : north || sideDistrictLoaded() ? 275 : 235;
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
       const target = framedLandmark ? landmarkTarget : wide && !district ? citywideFocus
         : mode === 'west' && cafeMode && theatre?.booking && districts.west.asset ? theatreFocus
@@ -1433,6 +1441,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       );
       camera.lookAt(viewFocus);
     }
+    // Only the exterior horizon blends into the sky. The city and both lakefront walks stay clear.
+    fog.near = wide ? 755 : seeingLake ? 410 : 255;
+    fog.far = wide ? 1140 : seeingLake ? 780 : 540;
     // Use the bounded frame delta so a slow terrain upload cannot skip the descent.
     if (approaching) flight.elapsed += dt * 1000;
     else if (flight) entryFlight = undefined;
@@ -1442,8 +1453,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       street.visible = !wide;
       sunset.visible = wide;
       sun.visible = !wide;
-      scene.background = wide ? citySky : streetSky;
-      fog.color.copy(wide ? citySky : horizon);
       ambient.color.set(wide ? '#adc7ff' : '#b5ceff');
       ambient.intensity = wide ? 0.63 : 0.84;
       scene.environment = (wide && duskReflection) || environment.texture;
@@ -1732,7 +1741,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       prepareEnvironment(asset, 1, true);
       softenRetailWindows(asset);
       addLakeRipples(asset, lakeTime, true);
-      duskReflection = createDuskReflection(sunset.position.clone().sub(sunset.target.position).normalize());
+      duskReflection = createDuskReflection(sunsetDirection);
       lightOverview(asset, duskReflection);
       asset.traverse((node) => {
         const match = LANDMARK_NAMES.find(([prefix]) => node.name.startsWith(prefix));
@@ -2152,7 +2161,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       speechTexture?.dispose(); speechMaterial?.dispose();
       sun.shadow.dispose();
       sunset.shadow.dispose();
-      streetSky.dispose();
+      duskSky.dispose();
       environment.dispose();
       renderer.forceContextLoss();
       renderer.dispose();
