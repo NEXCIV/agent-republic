@@ -150,7 +150,7 @@ pnpm audit --prod
 
 | ID | 严重度 | 领域 | 问题 | 处理建议 | 状态 |
 |---|---|---|---|---|---|
-| R-01 | **Blocker** | 主网 | Gate A 未执行；无真实 Agent ID 钱包注册/交易证据 | 由真人用官方 Agent ID 钱包完成一笔注册交易并留证 | 未开始 |
+| R-01 | **Blocker** | 主网 | Gate A 真机验证待完成，尚无真实注册交易证据 | 由持有人用官方钱包完成注册交易并留证 | [只读预检通过](#8-e1-00-钱包验收预检2026-11-27) |
 | R-02 | **High** | 身份 | 无 Web2 登录/会话；owner 接口运行态全 401 | 接入 passkey/email 会话，补 CSRF/SameSite 测试 | 未开始 |
 | R-03 | **High** | 可用性/安全 | 无速率限制；identity 触发 RPC、SSE 无连接上限 | 增加按 IP/账户限流、SSE 上限与超时 | 未开始 |
 | R-04 | **High** | 依赖 | PostCSS 3 个 high + 2 个 moderate；Zod high | 评估 override/升级；升级后跑 build + visual + E2E | 已披露 |
@@ -166,3 +166,24 @@ pnpm audit --prod
 - **开发与演示**：本次 A11y/性能/安全基线可接受；失败态与 owner 保护有自动化证据。
 - **生产/主网**：不通过。R-01（Gate A）、R-02（会话）、R-03（限流）、R-04（依赖漏洞）必须先解决；R-05～R-10 需在上线前逐项关闭或有书面接受记录。
 - 本报告不构成安全保证；所有“通过”仅指所列命令在本次环境中的结果。
+
+## 8. E1-00 钱包验收预检（2026-11-27）
+
+| 检查 | 实测结果 |
+| --- | --- |
+| 官方 Agent ID 主网读取 | BNB Smart Chain 的 `eth_chainId` 返回 56。官方 Agent ID 合约有部署字节码。在区块 `135998074` 查询，真实铸造样本的 `balanceOf` 返回 `1`，对照地址 `0x000000000000000000000000000000000000dead` 返回 `0`。 |
+| 绑定挑战、失败路径与确认状态 | 编码和 API 测试 27 项通过。因没有配置独立 PostgreSQL 测试库，10 项数据库集成测试跳过。 |
+| 真机注册与账号绑定 | **BLOCKED**。仓库没有主网 Registry/Core 部署清单，运行环境未配置上述地址，生产会话提供方尚未接入。尚无用户注册交易或账号绑定的主网证据。 |
+
+主网只读查询使用 [BNB Chain 官方 RPC](https://docs.bnbchain.org/bnb-smart-chain/developers/json_rpc/json-rpc-endpoint/) 和 [活动公告中的 Agent ID 合约](https://www.binance.com/zh-CN/support/announcement/detail/95f5dbe0ea674a48a739b59e046648bf)。正样本取自 [官方合约铸造交易](https://bscscan.com/tx/0x55731dc509f95d487bb070739e23347d5a1b465c66ee6a6989dd78b3a20ef140) 回执的 `Transfer` 事件，日志索引为 `0x14a`。复测时从该日志取接收地址，对两个地址在同一近期区块调用 `balanceOf`。需要复核原区块状态时应使用支持历史查询的 RPC。原区块哈希为 `0x30465c2bec602f8e2f684fa0be4aa8ba4bddba61ad06782d22bd64522e620ea0`。
+
+```sh
+pnpm exec vitest run packages/chain/test/binding.test.ts apps/api/test/binding-routes.test.ts apps/api/test/binding-pg.test.ts
+```
+
+完成验收需要以下步骤。
+
+1. 确认受控的 BSC 主网 Registry/Core 地址，核验已部署代码和两合约的关联，并确认 Registry 引用的是官方 Agent ID 合约。
+2. 接好站内登录会话和绑定接口，通过已登录账号生成与持有地址匹配的一次性挑战，检查交易链、目标、`registerCitizen(commitment)` 和零转账金额。
+3. 由实验参与者本人在支持的官方钱包流程里确认注册。持有人可以提供公开交易哈希用于核验。[币安钱包操作规范](https://web3.binance.com/en/dev-docs/products/agentic-wallet/introduction#verified-capabilities-only)
+4. 检查成功回执、确认区块、交易发起地址、Registry 的 `CitizenRegistered` 事件及匹配的 commitment。只有索引确认并由绑定接口返回 `BOUND`，才记录账号绑定通过。
