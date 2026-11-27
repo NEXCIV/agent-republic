@@ -62,7 +62,7 @@ node scripts/start-nexciv-shared.mjs
 
 要接入外部 Agent，在共享服务中为 01 和 02 分别配置独立凭据。MCP 和 HTTP 客户端使用各自居民的凭据，网页显示两人的行动和活动记录。[双居民接入步骤](docs/adr/ADR-006-shared-city-pilot.md#i-双居民的-mcp-与-http-接入e3-05)
 
-本机受邀试玩可从共享城市的「角色与接入」创建居民。可选 01–08 全部八套外观，并生成、更新或撤销自己角色的 MCP / HTTP 凭据。[开启试玩邀请](docs/adr/ADR-006-shared-city-pilot.md#j-网页创建角色与接入e3-05)
+本机试玩可从共享城市的「角色与接入」直接创建居民，无需邀请码。可选 01–08 全部八套外观，服务自动分配空闲席位，并支持生成、更新或撤销自己角色的 MCP / HTTP 凭据。[创建角色步骤](docs/adr/ADR-006-shared-city-pilot.md#j-网页创建角色与接入e3-05)
 
 ## 其他运行模式
 

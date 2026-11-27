@@ -3,8 +3,8 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const sharedInvitesOpen = process.env.NODE_ENV !== 'production' && process.env.NEXCIV_SHARED_PILOT_DB
-  && (process.env.NEXCIV_SHARED_INVITE_01 || process.env.NEXCIV_SHARED_INVITE_02);
+const sharedProfilesOpen = process.env.NODE_ENV !== 'production' && process.env.NEXCIV_SHARED_PILOT_DB
+  && !(process.env.NEXCIV_SHARED_AGENT_01_KEY && (process.env.NEXCIV_SHARED_AGENT_02_KEY || process.env.NEXCIV_SHARED_AGENT_KEY));
 
 /**
  * This Windows environment's pnpm workspace junctions are unreliable, so the
@@ -21,7 +21,7 @@ const nextConfig = {
       { source: '/my-agent/demo', destination: '/agent-console/demo', permanent: false },
       {
         source: '/my-agent',
-        destination: sharedInvitesOpen ? '/nexciv-preview/shared/join' : '/nexciv-preview/cafe?connect=1#connect-agent',
+        destination: sharedProfilesOpen ? '/nexciv-preview/shared/join' : '/nexciv-preview/cafe?connect=1#connect-agent',
         permanent: false,
       },
     ];

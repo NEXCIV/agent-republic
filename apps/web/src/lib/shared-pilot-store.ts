@@ -372,28 +372,29 @@ export class SharedPilotStore {
     });
   }
 
-  claim(profile: SharedPilotProfile, invite: string, currentSession: string) {
+  claim(details: Pick<SharedPilotProfile, 'name' | 'avatar'>, profileResidents: readonly SharedPilotResidentId[], currentSession: string) {
     return this.transaction((at) => {
-      this.assertResident(profile.residentId);
       if (this.browserProfile(currentSession, at)) {
         throw new SharedPilotError('CONFLICT', '当前浏览器已经创建了一个角色。');
       }
-      const inviteHash = hashToken(`invite:${invite}`);
-      const used = this.db.prepare('SELECT 1 FROM shared_pilot_profiles WHERE resident_id=? OR invite_hash=?')
-        .get(profile.residentId, inviteHash);
-      if (used) throw new SharedPilotError('CONFLICT', '这份邀请已用于创建角色。');
+      const occupied = this.db.prepare('SELECT resident_id FROM shared_pilot_profiles').all();
+      const residentId = profileResidents.find((id) => !occupied.some((row) => row.resident_id === id));
+      if (!residentId) throw new SharedPilotError('CONFLICT', '当前两个本机试玩名额已占用，请返回城市查看。');
+      this.assertResident(residentId);
+      const profile: SharedPilotProfile = { residentId, name: details.name, avatar: details.avatar };
       const session = randomBytes(32).toString('base64url');
+      // Keep the v5 storage format and its unique legacy claim marker.
       this.db.prepare(`INSERT INTO shared_pilot_profiles (resident_id,name,avatar,session_hash,session_expires_at,invite_hash)
         VALUES (?,?,?,?,?,?)`).run(profile.residentId, profile.name, profile.avatar, hashToken(`browser:${session}`),
-          at + SHARED_PILOT_SESSION_SECONDS * 1000, inviteHash);
+          at + SHARED_PILOT_SESSION_SECONDS * 1000, hashToken(`claim:${session}`));
       return { session, profile, hasKey: false };
     });
   }
 
-  setProfileKey(session: string, issue: boolean, inviteResidents: readonly SharedPilotResidentId[]) {
+  setProfileKey(session: string, issue: boolean, profileResidents: readonly SharedPilotResidentId[]) {
     return this.transaction((at) => {
       const row = this.browserProfile(session, at);
-      if (!row || !inviteResidents.includes(row.residentId)) throw new SharedPilotError('AUTH_REQUIRED', '请在创建角色的浏览器重新打开入城页。');
+      if (!row || !profileResidents.includes(row.residentId)) throw new SharedPilotError('AUTH_REQUIRED', '请在创建角色的浏览器重新打开入城页。');
       const key = issue ? randomBytes(32).toString('base64url') : null;
       const expiresAt = key ? Math.min(at + MAX_CREDENTIAL_LIFETIME, row.sessionExpiresAt) : null;
       this.db.prepare('UPDATE shared_pilot_profiles SET access_hash=?, access_expires_at=? WHERE resident_id=?')

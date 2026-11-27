@@ -19,7 +19,7 @@ describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('two connected rule 
     try {
       vi.stubEnv('NODE_ENV', 'test');
       vi.stubEnv('NEXCIV_SHARED_PILOT_DB', join(folder, 'shared.sqlite'));
-      expect((await command({ action: 'observe' })).status).toBe(404);
+      expect((await command({ action: 'observe' })).status).toBe(401);
       vi.stubEnv('NEXCIV_SHARED_AGENT_KEY', key);
       expect((await command({ action: 'observe' }, randomBytes(32).toString('base64url'))).status).toBe(401);
       expect((await command({ action: 'observe' }, key, { origin: 'http://127.0.0.1:3142' })).status).toBe(403);

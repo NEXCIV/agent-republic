@@ -30,14 +30,12 @@ function configuredFile() {
 function connections() {
   const keys = { '01': process.env.NEXCIV_SHARED_AGENT_01_KEY,
     '02': process.env.NEXCIV_SHARED_AGENT_02_KEY || process.env.NEXCIV_SHARED_AGENT_KEY };
-  const invites = { '01': process.env.NEXCIV_SHARED_INVITE_01, '02': process.env.NEXCIV_SHARED_INVITE_02 };
-  const values = [...Object.values(keys), ...Object.values(invites)].filter((value): value is string => Boolean(value));
-  if (new Set(values).size !== values.length || values.some((value) => !SHARED_PILOT_SECRET.test(value))
-    || SHARED_PILOT_RESIDENT_IDS.some((id) => keys[id] && invites[id])) return null;
+  const values = Object.values(keys).filter((value): value is string => Boolean(value));
+  if (new Set(values).size !== values.length || values.some((value) => !SHARED_PILOT_SECRET.test(value))) return null;
   return {
-    keys, invites,
-    externalResidents: SHARED_PILOT_RESIDENT_IDS.filter((id) => keys[id] || invites[id]),
-    inviteResidents: SHARED_PILOT_RESIDENT_IDS.filter((id) => invites[id]),
+    keys,
+    externalResidents: SHARED_PILOT_RESIDENT_IDS.filter((id) => keys[id]),
+    profileResidents: SHARED_PILOT_RESIDENT_IDS.filter((id) => !keys[id]),
   };
 }
 
@@ -65,14 +63,14 @@ export function GET(request: NextRequest) {
   const config = connections();
   if (!config) return json({ error: '共享 Agent 凭据配置无效。' }, 503);
   const profile = request.nextUrl.searchParams.get('profile') === '1';
-  if (profile && !config.inviteResidents.length) return json({ error: '本机试玩尚未启用邀请。' }, 404);
+  if (profile && !config.profileResidents.length) return json({ error: '本机试玩名额已分配给测试 Agent。' }, 409);
   try {
     const pilot = pilotFor(file, config.externalResidents);
     if (profile) {
       const view = pilot.profile(request.cookies.get(profileCookie)?.value ?? '');
-      return json(view.profile && config.inviteResidents.includes(view.profile.residentId) ? view : { profile: null, hasKey: false });
+      return json(view.profile && config.profileResidents.includes(view.profile.residentId) ? view : { profile: null, hasKey: false });
     }
-    return json({ ...pilot.snapshot(), invitesEnabled: config.inviteResidents.length > 0 });
+    return json({ ...pilot.snapshot(), profilesEnabled: config.profileResidents.length > 0 });
   } catch {
     return json({ error: '共享城市暂不可用，请确认本机试验配置。' }, 503);
   }
@@ -113,21 +111,18 @@ function readCommand(body: Record<string, unknown> | undefined): SharedAgentComm
 async function changeProfile(request: NextRequest, file: string, config: NonNullable<ReturnType<typeof connections>>) {
   const origin = `${request.nextUrl.protocol}//${request.headers.get('host')}`;
   if (request.headers.get('origin') !== origin) return json({ error: '请从当前本机城市页面操作。' }, 403);
-  if (!config.inviteResidents.length) return json({ error: '本机试玩尚未启用邀请。' }, 404);
+  if (!config.profileResidents.length) return json({ error: '本机试玩名额已分配给测试 Agent。' }, 409);
   const body = await readBody(request);
   if (!body) return json({ error: '角色操作无效。' }, 400);
   const session = request.cookies.get(profileCookie)?.value ?? '';
   const pilot = pilotFor(file, config.externalResidents);
   if (body.action === 'claim') {
     const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim() : '';
-    const { avatar, invite } = body;
-    if (Object.keys(body).length !== 4 || !SHARED_PILOT_NAME.test(name)
-      || !isSharedPilotAvatar(avatar) || typeof invite !== 'string' || !SHARED_PILOT_SECRET.test(invite)) {
-      return json({ error: '请填写邀请、角色名和外观。' }, 400);
+    const { avatar } = body;
+    if (Object.keys(body).length !== 3 || !SHARED_PILOT_NAME.test(name) || !isSharedPilotAvatar(avatar)) {
+      return json({ error: '请填写角色名并选择外观。' }, 400);
     }
-    const residentId = config.inviteResidents.find((id) => matches(config.invites[id], invite));
-    if (!residentId) return json({ error: '邀请无效。请向本机试玩组织者核对。' }, 401);
-    const claimed = pilot.claimProfile({ residentId, name, avatar }, invite, session);
+    const claimed = pilot.claimProfile({ name, avatar }, config.profileResidents, session);
     const response = json({ profile: claimed.profile, hasKey: claimed.hasKey }, 201);
     response.cookies.set(profileCookie, claimed.session, {
       httpOnly: true, sameSite: 'strict', secure: request.nextUrl.protocol === 'https:',
@@ -136,7 +131,7 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
     return response;
   }
   if (Object.keys(body).length === 1 && (body.action === 'issue' || body.action === 'revoke')) {
-    return json(pilot.setProfileKey(session, body.action === 'issue', config.inviteResidents));
+    return json(pilot.setProfileKey(session, body.action === 'issue', config.profileResidents));
   }
   return json({ error: '角色操作无效。' }, 400);
 }
@@ -152,16 +147,15 @@ export async function POST(request: NextRequest) {
   if (!config) return json({ error: '共享 Agent 凭据配置无效。' }, 503);
   try {
     if (profile) return await changeProfile(request, file, config);
-    if (!config.externalResidents.length) return json({ error: '共享 Agent 接入未启用。' }, 404);
     const supplied = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get('authorization') ?? '')?.[1];
     if (!supplied) return json({ error: '共享 Agent 凭据无效。' }, 401);
     const residentId = config.externalResidents.find((id) => matches(config.keys[id], supplied));
-    if (!residentId && !config.inviteResidents.length) return json({ error: '共享 Agent 凭据无效。' }, 401);
+    if (!residentId && !config.profileResidents.length) return json({ error: '共享 Agent 凭据无效。' }, 401);
     const pilot = pilotFor(file, config.externalResidents);
     const body = await readBody(request);
     const command = readCommand(body);
     if (!command) return json({ error: '共享 Agent 动作无效。' }, 400);
-    return json(residentId ? pilot.actAsExternal(residentId, command) : pilot.actWithProfileKey(supplied, config.inviteResidents, command));
+    return json(residentId ? pilot.actAsExternal(residentId, command) : pilot.actWithProfileKey(supplied, config.profileResidents, command));
   } catch (error) {
     if (error instanceof SharedPilotError && error.code === 'AUTH_REQUIRED') return json({ error: '登录已过期或 Agent 凭据无效。' }, 401);
     if (error instanceof SharedPilotError) return json({ error: error.message, code: error.code }, 409);

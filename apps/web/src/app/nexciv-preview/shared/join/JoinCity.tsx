@@ -4,7 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { SHARED_AVATARS, SHARED_PILOT_NAME, SHARED_PILOT_SECRET, type SharedPilotAvatar, type SharedPilotProfileView } from '@/lib/shared-pilot-profiles';
+import { SHARED_AVATARS, SHARED_PILOT_NAME, type SharedPilotAvatar, type SharedPilotProfileView } from '@/lib/shared-pilot-profiles';
 import { AvatarPreview } from './AvatarPreview';
 import styles from './join.module.css';
 
@@ -22,7 +22,6 @@ export function JoinCity() {
   const [pending, setPending] = useState(false);
   const [entering, setEntering] = useState(false);
   const [name, setName] = useState('');
-  const [invite, setInvite] = useState('');
   const [avatar, setAvatar] = useState<SharedPilotAvatar>('citizen');
   const [secret, setSecret] = useState<{ key: string; expiresAt: number } | null>(null);
   const [location, setLocation] = useState({ origin: '', port: '3142' });
@@ -48,7 +47,7 @@ export function JoinCity() {
     try {
       const response = await fetch(endpoint, {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(action === 'claim' ? { action, name, invite: invite.trim(), avatar } : { action }),
+        body: JSON.stringify(action === 'claim' ? { action, name, avatar } : { action }),
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error);
@@ -71,8 +70,6 @@ export function JoinCity() {
     event.preventDefault();
     if (!SHARED_PILOT_NAME.test(name.normalize('NFC').trim())) {
       setFailure('请填写 1 至 24 个字符，可用文字、数字、空格、中点、下划线和短横线。');
-    } else if (!SHARED_PILOT_SECRET.test(invite.trim())) {
-      setFailure('请检查本机试玩邀请是否复制完整。');
     } else {
       void change('claim');
     }
@@ -111,14 +108,9 @@ export function JoinCity() {
           </label>)}
         </div>
       </fieldset>
-      <div className={styles.fields}>
-        <label className={styles.field}>角色名
-          <input name="name" autoComplete="off" maxLength={24} required disabled={creating} value={name} onChange={(event) => setName(event.target.value)} placeholder="给居民起个名字" />
-        </label>
-        <label className={styles.field}>试玩邀请
-          <input name="invite" autoComplete="off" autoCapitalize="off" spellCheck={false} type="password" required disabled={creating} value={invite} onChange={(event) => setInvite(event.target.value)} placeholder="粘贴试玩邀请" />
-        </label>
-      </div>
+      <label className={styles.field}>角色名
+        <input name="name" autoComplete="off" maxLength={24} required disabled={creating} value={name} onChange={(event) => setName(event.target.value)} placeholder="给居民起个名字" />
+      </label>
       <button className={styles.primary} disabled={creating} type="submit">{entering ? '正在进入城市…' : pending ? '正在创建…' : '创建并进入城市'}</button>
     </form>}
     {profile && appearance && <div className={styles.form}>

@@ -12,7 +12,7 @@ import styles from './shared.module.css';
 
 type ResidentId = '01' | '02';
 type CameraView = 'overview' | 'meeting' | 'survey' | ResidentId;
-type SharedCityView = SharedPilotView & { invitesEnabled: boolean };
+type SharedCityView = SharedPilotView & { profilesEnabled: boolean };
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
 const endpoint = '/api/nexciv-preview/shared';
 
@@ -142,7 +142,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
         <span className={styles.divider}>共享城市</span>
         <span className={styles.connection} data-live={joining || loadingCity ? showCity : status === 'live'} role="status"><i />{joining || loadingCity ? previewStatus : status === 'live' ? '状态同步中' : status === 'connecting' ? '正在连接' : '连接中断'} · DEMO</span>
         {joining ? <Link className={styles.join} href={CITY_PATH}>返回城市</Link>
-          : snapshot?.invitesEnabled && <Link className={styles.join} href={JOIN_PATH} prefetch={false}>角色与接入</Link>}
+          : snapshot?.profilesEnabled && <Link className={styles.join} href={JOIN_PATH} prefetch={false}>角色与接入</Link>}
         <button type="button" onClick={() => { if (!staticMode && scene !== 'fallback') setStaticMode(true); else { setScene('loading'); setOverview('idle'); setView('overview'); setFailedAgents([]); setStaticMode(false); setRenderAttempt((attempt) => attempt + 1); } }}>{staticMode || scene === 'fallback' ? '开启 3D' : '2D'}</button>
         {!joining && <Link href="/nexciv-preview" prefetch={false}>独立试玩</Link>}
       </header>

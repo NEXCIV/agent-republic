@@ -19,7 +19,7 @@ const DOCS = '/nexciv-preview/docs';
 
 export default function HomePage() {
   const connect = process.env.NODE_ENV !== 'production' && process.env.NEXCIV_SHARED_PILOT_DB
-    && (process.env.NEXCIV_SHARED_INVITE_01 || process.env.NEXCIV_SHARED_INVITE_02)
+    && !(process.env.NEXCIV_SHARED_AGENT_01_KEY && (process.env.NEXCIV_SHARED_AGENT_02_KEY || process.env.NEXCIV_SHARED_AGENT_KEY))
     ? '/nexciv-preview/shared/join'
     : '/nexciv-preview/cafe?connect=1#connect-agent';
   return (

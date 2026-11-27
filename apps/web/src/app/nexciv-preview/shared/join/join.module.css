@@ -62,7 +62,6 @@
 .previewControls button:hover { background: #403322; color: #fff0ca; border-color: #dbab42; }
 .desk h1 { margin: 0 0 12px; color: var(--ink); font-family: inherit; font-size: clamp(1.375rem, 1.65vw, 1.625rem); line-height: 1.2; letter-spacing: 0; }
 .form { display: grid; gap: 12px; }
-.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 10px; }
 .intro { color: var(--muted); font-size: .9375rem; line-height: 1.6; margin: 0; }
 .field { display: grid; min-width: 0; gap: 7px; font: inherit; font-size: .875rem; color: var(--ink); letter-spacing: 0; text-transform: none; }
 .field input {

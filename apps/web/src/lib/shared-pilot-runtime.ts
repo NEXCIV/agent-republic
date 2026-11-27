@@ -46,19 +46,21 @@ export class SharedPilotRuntime {
     return this.runExternal(residentId, connection.token, command, observation);
   }
 
-  actWithProfileKey(key: string, inviteResidents: readonly SharedPilotResidentId[], command: SharedAgentCommand) {
+  actWithProfileKey(key: string, profileResidents: readonly SharedPilotResidentId[], command: SharedAgentCommand) {
     const observation = this.store.observe(key);
     const residentId = observation.viewerResidentId;
-    if (!inviteResidents.includes(residentId)) throw new SharedPilotError('AUTH_REQUIRED', '共享 Agent 凭据无效。');
+    if (!profileResidents.includes(residentId)) throw new SharedPilotError('AUTH_REQUIRED', '共享 Agent 凭据无效。');
     return this.runExternal(residentId, key, command, observation);
   }
 
   profile(session: string) { return this.store.profile(session); }
-  claimProfile(profile: SharedPilotProfile, invite: string, session: string) {
-    return this.store.claim(profile, invite, session);
+  claimProfile(profile: Pick<SharedPilotProfile, 'name' | 'avatar'>, profileResidents: readonly SharedPilotResidentId[], session: string) {
+    const claimed = this.store.claim(profile, profileResidents, session);
+    this.start();
+    return claimed;
   }
-  setProfileKey(session: string, issue: boolean, inviteResidents: readonly SharedPilotResidentId[]) {
-    const result = this.store.setProfileKey(session, issue, inviteResidents);
+  setProfileKey(session: string, issue: boolean, profileResidents: readonly SharedPilotResidentId[]) {
+    const result = this.store.setProfileKey(session, issue, profileResidents);
     this.lastExternalCallAt.delete(result.residentId);
     return { key: result.key, expiresAt: result.expiresAt, hasKey: result.hasKey };
   }
@@ -173,16 +175,21 @@ export class SharedPilotRuntime {
     return choices.find((place) => place !== peerDestination) ?? choices[0] ?? null;
   }
 
+  private externallyControlled(profiles: SharedPilotProfile[]) {
+    return new Set([...this.externalResidents, ...profiles.map(({ residentId }) => residentId)]);
+  }
+
   tick() {
     if (this.failure) return;
-    if (this.externalResidents.length === this.connections.length) {
+    const firstObservation = this.observeConnection(this.connections[0]!);
+    const external = this.externallyControlled(firstObservation.profiles);
+    if (external.size === this.connections.length) {
       // With both residents externally controlled, keep settling accepted actions and deadlines.
-      this.observeConnection(this.connections[0]!);
       return;
     }
     for (const connection of this.connections) {
-      if (this.externalResidents.includes(connection.residentId)) continue;
-      const observation = this.observeConnection(connection);
+      if (external.has(connection.residentId)) continue;
+      const observation = connection === this.connections[0] ? firstObservation : this.observeConnection(connection);
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
@@ -199,7 +206,8 @@ export class SharedPilotRuntime {
       try {
         this.tick();
         if (!this.externalResidents.length && this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS)) {
-          const { social, survey } = this.snapshot();
+          const { social, survey, profiles } = this.snapshot();
+          if (profiles.length) return;
           if (meetingActive(social.meeting) || surveyActive(survey.task)) return;
           clearInterval(this.timer); this.timer = undefined;
         }
@@ -210,9 +218,10 @@ export class SharedPilotRuntime {
 
   snapshot() {
     const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles } = this.observeConnection(this.connections[0]!);
+    const external = this.externallyControlled(profiles);
     return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles,
       engines: this.connections.map(({ residentId }) => {
-        if (!this.externalResidents.includes(residentId)) return { residentId, driver: 'RULES' as const };
+        if (!external.has(residentId)) return { residentId, driver: 'RULES' as const };
         const lastCall = this.lastExternalCallAt.get(residentId);
         return { residentId, driver: 'EXTERNAL' as const, connected: lastCall !== undefined && serverTime - lastCall <= 120000 };
       }),
