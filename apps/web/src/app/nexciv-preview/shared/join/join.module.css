@@ -36,16 +36,17 @@
 .field input::placeholder { color: #b7af9f; }
 .appearances { border: 0; margin: 0; min-width: 0; padding: 0; font-size: .875rem; }
 .appearances legend { padding: 0 0 7px; }
-.appearances>div { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+.appearances>div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .appearance {
-  min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
-  padding: 8px; min-height: 76px; cursor: pointer; border: 1px solid var(--line); border-radius: 5px; background: #212428;
+  min-width: 0; display: grid; grid-template-columns: auto 44px minmax(0, 1fr); align-items: center; gap: 8px;
+  padding: 6px; min-height: 58px; cursor: pointer; border: 1px solid var(--line); border-radius: 5px; background: #212428;
   color: var(--ink); font: inherit; letter-spacing: 0;
   transition: border-color .16s, background-color .16s;
 }
 .appearance input { margin: 0; accent-color: var(--gold); }
 .appearance img, .profile img { border-radius: 4px; background: #33312b; object-fit: cover; }
 .appearance:has(:checked) { background: #382e1b; border-color: #dbab42; }
+.appearance:has(:focus-visible) { outline: 2px solid var(--gold); outline-offset: 2px; }
 .appearance:hover { border-color: #dbab42; }
 .primary, .secondary {
   min-height: 44px; padding: 8px 16px; border: 1px solid transparent; border-radius: 5px;
@@ -80,6 +81,10 @@
   .layout { grid-template-columns: minmax(0, 1fr); }
   .cityView { min-height: 200px; max-height: 260px; height: 27vw; border-right: 0; border-bottom: 1px solid var(--line); }
   .desk { margin: 0 auto; }
+}
+@media (max-width: 370px) {
+  .appearance { grid-template-columns: auto 36px minmax(0, 1fr); gap: 5px; }
+  .appearance img { width: 36px; height: 36px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .appearance, .primary, .secondary { transition: none; }

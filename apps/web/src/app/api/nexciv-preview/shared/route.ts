@@ -4,7 +4,7 @@ import path from 'node:path';
 import { SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema, type SharedPilotResidentId } from '@agent-republic/domain';
 import { SharedPilotRuntime, type SharedAgentCommand } from '../../../../lib/shared-pilot-runtime';
 import { SharedPilotError } from '../../../../lib/shared-pilot-store';
-import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS } from '../../../../lib/shared-pilot-profiles';
+import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, isSharedPilotAvatar } from '../../../../lib/shared-pilot-profiles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -122,7 +122,7 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
     const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim() : '';
     const { avatar, invite } = body;
     if (Object.keys(body).length !== 4 || !SHARED_PILOT_NAME.test(name)
-      || (avatar !== 'citizen' && avatar !== 'builder') || typeof invite !== 'string' || !SHARED_PILOT_SECRET.test(invite)) {
+      || !isSharedPilotAvatar(avatar) || typeof invite !== 'string' || !SHARED_PILOT_SECRET.test(invite)) {
       return json({ error: '请填写邀请、角色名和外观。' }, 400);
     }
     const residentId = config.inviteResidents.find((id) => matches(config.invites[id], invite));

@@ -119,7 +119,7 @@ export function JoinCity() {
             <div>
               {appearances.map(([id, preset]) => <label className={styles.appearance} key={id}>
                 <input type="radio" name="avatar" value={id} checked={avatar === id} onChange={() => setAvatar(id)} />
-                <Image src={preset.portrait} alt="" width={60} height={60} />
+                <Image src={preset.portrait} alt="" width={44} height={44} />
                 <span>{preset.label}</span>
               </label>)}
             </div>

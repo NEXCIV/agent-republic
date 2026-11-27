@@ -11,12 +11,12 @@ import { positionOnWalk, type CityRoute, type CityWalk } from './city-movement';
 import { CITY_MAP, planCityWalk } from './city-navigation';
 import { advanceSocial, emptySocialState, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
 import { advanceSurvey, emptySurveyState, performSurvey, publicSurvey, SURVEY_CHECKPOINTS, surveyActive, SurveyActionError, type SurveyState, type SurveyReceipt } from './shared-pilot-survey';
-import { SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, type SharedPilotProfile, type SharedPilotProfileView } from './shared-pilot-profiles';
+import { SHARED_AVATARS, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, type SharedPilotProfile, type SharedPilotProfileView } from './shared-pilot-profiles';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
 const APPLICATION_ID = 0x4e585350; // NXSP
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 const CREDENTIAL_LIFETIME = 3600000;
 const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
@@ -31,7 +31,7 @@ const V3_TABLES = [...V2_TABLES, 'shared_pilot_survey'];
 const EXPECTED_TABLES = [...V3_TABLES, 'shared_pilot_profiles'].sort();
 const PROFILE_TABLE = `CREATE TABLE shared_pilot_profiles (
   resident_id TEXT PRIMARY KEY REFERENCES shared_pilot_residents(id),
-  name TEXT NOT NULL, avatar TEXT NOT NULL CHECK(avatar IN ('citizen','builder')),
+  name TEXT NOT NULL, avatar TEXT NOT NULL CHECK(avatar IN (${Object.keys(SHARED_AVATARS).map((id) => `'${id}'`).join(',')})),
   session_hash TEXT NOT NULL UNIQUE, session_expires_at INTEGER NOT NULL,
   invite_hash TEXT NOT NULL UNIQUE, access_hash TEXT UNIQUE, access_expires_at INTEGER
 );`;
@@ -180,7 +180,7 @@ export class SharedPilotStore {
     this.db = new sqlite.DatabaseSync(file);
     try {
       // Reject unrelated DBs before setting WAL or running any schema changes.
-      let migrateFrom: 1 | 2 | 3 | undefined;
+      let migrateFrom: 1 | 2 | 3 | 4 | undefined;
       if (existing) {
         const application = Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
@@ -188,6 +188,7 @@ export class SharedPilotStore {
         if (application === APPLICATION_ID && version === 1 && JSON.stringify(tables) === JSON.stringify(V1_TABLES)) migrateFrom = 1;
         if (application === APPLICATION_ID && version === 2 && JSON.stringify(tables) === JSON.stringify(V2_TABLES)) migrateFrom = 2;
         if (application === APPLICATION_ID && version === 3 && JSON.stringify(tables) === JSON.stringify(V3_TABLES)) migrateFrom = 3;
+        if (application === APPLICATION_ID && version === 4 && JSON.stringify(tables) === JSON.stringify(EXPECTED_TABLES)) migrateFrom = 4;
         if (!migrateFrom && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
           throw new SharedPilotError('INCOMPATIBLE_DB', 'Refusing to open a non-pilot database.');
         }
@@ -245,9 +246,13 @@ export class SharedPilotStore {
     }
   }
 
-  private migratePilot(version: 1 | 2 | 3) {
+  private migratePilot(version: 1 | 2 | 3 | 4) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      if (this.db.prepare('PRAGMA user_version').get()?.user_version === SCHEMA_VERSION) {
+        this.db.exec('COMMIT');
+        return;
+      }
       if (version === 1) {
         this.db.exec('CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
         this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
@@ -256,7 +261,19 @@ export class SharedPilotStore {
         this.db.exec('CREATE TABLE shared_pilot_survey (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
         this.db.prepare('INSERT INTO shared_pilot_survey (id,state) VALUES (1,?)').run(JSON.stringify(emptySurveyState()));
       }
-      this.db.exec(PROFILE_TABLE);
+      if (version === 4) {
+        this.db.exec(`
+          ALTER TABLE shared_pilot_profiles RENAME TO shared_pilot_profiles_v4;
+          ${PROFILE_TABLE}
+          INSERT INTO shared_pilot_profiles (
+            resident_id, name, avatar, session_hash, session_expires_at, invite_hash, access_hash, access_expires_at
+          ) SELECT resident_id, name, avatar, session_hash, session_expires_at, invite_hash, access_hash, access_expires_at
+            FROM shared_pilot_profiles_v4;
+          DROP TABLE shared_pilot_profiles_v4;
+        `);
+      } else {
+        this.db.exec(PROFILE_TABLE);
+      }
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
