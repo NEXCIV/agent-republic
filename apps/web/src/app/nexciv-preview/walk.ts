@@ -17,7 +17,7 @@ import { createInstallationKit, createPilotLamp } from './lighting-pilot';
 import { THEATRE_CLOCK, THEATRE_STAGE } from '../../lib/theatre-layout';
 import { createTheatreLighting } from './theatre-lighting';
 import { createWestPool } from './west-reflecting-pool';
-import { createDuskReflection, lightOverview, lightOverviewPaving } from './overview-dusk';
+import { createDuskReflection, lightOverview, lightStreetSurfaces } from './overview-dusk';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -185,22 +185,6 @@ function disposeModel(asset: THREE.Object3D, sharedTexture?: THREE.Texture) {
   for (const material of materials) material.dispose();
   for (const map of maps) map.dispose();
   for (const mesh of meshes) mesh.dispose();
-}
-
-function prepareEnvironment(asset: THREE.Object3D, anisotropy = 1) {
-  const pavement = new Set<THREE.Object3D>();
-  asset.getObjectByName('NEXCIV_paving')?.traverse((object) => pavement.add(object));
-  asset.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) return;
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    const terrain = object.name === 'NEXCIV_terrain' || object.userData.previewTier === 'land';
-    object.castShadow = !materials.some((material) => material.transparent) && !terrain && !pavement.has(object);
-    object.receiveShadow = true;
-    for (const material of materials) {
-      if (!(material instanceof THREE.MeshStandardMaterial) || !material.map) continue;
-      material.map.anisotropy = Math.max(anisotropy, material.map.anisotropy);
-    }
-  });
 }
 
 function createStreetSky(horizon: THREE.Color) {
@@ -593,7 +577,29 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let model: THREE.Object3D | undefined;
   let citywide: THREE.Object3D | undefined;
   let duskReflection: THREE.DataTexture | undefined;
-  let overviewLampMap: THREE.Texture | undefined;
+  const streetLighting: THREE.IUniform<THREE.Texture | null> = { value: null };
+  const lightingAtlas = new THREE.TextureLoader().load(`${ASSET_PATH}overview-lamp-wash.png?v=2`, texture => {
+    if (!ended && !contextLost) streetLighting.value = texture;
+  }, undefined, () => { /* The original GLB materials also work without the optional lighting bake. */ });
+
+  function prepareEnvironment(asset: THREE.Object3D, anisotropy: number, overview = false) {
+    const pavement = new Set<THREE.Object3D>();
+    const finishes = new Set<THREE.MeshStandardMaterial>();
+    asset.getObjectByName('NEXCIV_paving')?.traverse(object => pavement.add(object));
+    asset.traverse(object => {
+      if (!(object instanceof THREE.Mesh)) return;
+      const materials = Array.isArray(object.material) ? object.material : [object.material];
+      const terrain = object.name === 'NEXCIV_terrain' || object.userData.previewTier === 'land';
+      object.castShadow = !materials.some(material => material.transparent) && !terrain && !pavement.has(object);
+      object.receiveShadow = true;
+      for (const material of materials) {
+        if (!(material instanceof THREE.MeshStandardMaterial)) continue;
+        finishes.add(material);
+        if (material.map) material.map.anisotropy = Math.max(anisotropy, material.map.anisotropy);
+      }
+    });
+    lightStreetSurfaces(finishes, streetLighting, overview);
+  }
   let overviewStatus: DistrictStatus = 'idle';
   let north: THREE.Object3D | undefined;
   let updateCouncilNotice: ReturnType<typeof addCouncilNotice>;
@@ -1697,16 +1703,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (ended || contextLost) { disposeModel(asset); return; }
       citywide = asset;
       asset.visible = false;
-      prepareEnvironment(asset);
+      prepareEnvironment(asset, 1, true);
       softenRetailWindows(asset);
       addLakeRipples(asset, lakeTime, true);
       duskReflection = createDuskReflection(sunset.position.clone().sub(sunset.target.position).normalize());
-      const paving = lightOverview(asset, duskReflection);
-      new THREE.TextureLoader().load(`${ASSET_PATH}overview-lamp-wash.png`, texture => {
-        if (ended || contextLost) { texture.dispose(); return; }
-        overviewLampMap = texture;
-        lightOverviewPaving(paving, texture);
-      }, undefined, () => { /* Street fixtures remain visible if the optional ground wash is unavailable. */ });
+      lightOverview(asset, duskReflection);
       asset.traverse((node) => {
         const match = LANDMARK_NAMES.find(([prefix]) => node.name.startsWith(prefix));
         if (match) registerLandmark(match[1], node);
@@ -2102,7 +2103,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       fishingGear?.dispose();
       if (citywide) disposeModel(citywide, duskReflection);
       duskReflection?.dispose();
-      overviewLampMap?.dispose();
+      lightingAtlas.dispose();
       for (const { asset } of Object.values(districts)) {
         if (asset) disposeModel(asset);
       }

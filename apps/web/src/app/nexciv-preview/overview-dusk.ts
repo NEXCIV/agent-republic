@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-// Only the overview GLB receives this pass. Streets, façades and lamps all stay in world metres.
+// The bake and all GLB detail levels share world metres.
 const PAVING = /(?:square_pavers|civic_paving|asphalt|pavement|concrete_gray|granite joints|volcanic paver|crosswalk|entry paving|entrance paving|forecourt|bluestone pavers|city gravel|quay limestone|paving stone|tactile crossing)/i;
 
 /** Linear HDR sky for the copper dome, water and brass. Three prefilters it once for rough surfaces. */
@@ -65,7 +65,6 @@ export function lightOverview(asset: THREE.Group, sky: THREE.Texture) {
   flood(0xffc064, 5700, 57, new THREE.Vector3(-14, 8, -79), new THREE.Vector3(0, 17, -95), 0.64);
   flood(0xffbd66, 990, 31, new THREE.Vector3(7.2, 0.75, -81.9), new THREE.Vector3(4, 6.6, -88), 0.69);
   flood(0xffcb65, 1120, 34, new THREE.Vector3(-4.25, 0.94, 2.72), new THREE.Vector3(-3.3, 9.1, -4.25), 0.76);
-  return [...materials].filter(mat => PAVING.test(mat.name));
 }
 
 function lightFountainJets(mat: THREE.MeshStandardMaterial) {
@@ -85,11 +84,14 @@ function lightFountainJets(mat: THREE.MeshStandardMaterial) {
   };
 }
 
-export function lightOverviewPaving(materials: THREE.MeshStandardMaterial[], wash: THREE.Texture) {
+export function lightStreetSurfaces(materials: Set<THREE.MeshStandardMaterial>, atlas: THREE.IUniform<THREE.Texture | null>, overview: boolean) {
   for (const mat of materials) {
-    mat.customProgramCacheKey = () => 'nexciv-overview-lamp-wash';
+    const paving = PAVING.test(mat.name);
+    const finish = shopFinish(mat.name);
+    if (!paving && !finish) continue;
+    mat.customProgramCacheKey = () => `nexciv-dusk-surface-${paving ? (overview ? 'road' : 'pavement') : finish}`;
     mat.onBeforeCompile = shader => {
-      shader.uniforms.streetIrradiance = { value: wash };
+      shader.uniforms.streetIrradiance = atlas;
       shader.vertexShader = 'varying vec3 vLampSurface;\n' + shader.vertexShader.replace('#include <project_vertex>', `
         vec4 lampSurface = vec4(transformed, 1.0);
         #ifdef USE_INSTANCING
@@ -98,15 +100,43 @@ export function lightOverviewPaving(materials: THREE.MeshStandardMaterial[], was
         vLampSurface = (modelMatrix * lampSurface).xyz;
         #include <project_vertex>
       `);
-      shader.fragmentShader = 'uniform sampler2D streetIrradiance;\nvarying vec3 vLampSurface;\n' +
-        shader.fragmentShader.replace('#include <lights_fragment_end>', `
+      const sample = 'vec3 streetLight = texture2D(streetIrradiance, vec2(vLampSurface.x, -vLampSurface.z) / 352.0 + 0.5).rgb;';
+      shader.fragmentShader = 'uniform sampler2D streetIrradiance;\nvarying vec3 vLampSurface;\n' + shader.fragmentShader;
+      if (paving) {
+        shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', `
           #include <lights_fragment_end>
-          vec2 lampUv = vec2(vLampSurface.x, -vLampSurface.z) / 352.0 + 0.5;
+          ${sample}
           float receiver = 1.0 - smoothstep(0.8, 2.0, vLampSurface.y);
-          float pool = texture2D(streetIrradiance, lampUv).r * receiver;
-          reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(1.80, 0.91, 0.30) * pool;
+          vec3 spill = vec3(3.4, 1.62, 0.55) * streetLight.g;
+          ${overview ? 'spill += vec3(1.80, 0.91, 0.30) * streetLight.r;' : ''}
+          reflectedLight.indirectDiffuse += diffuseColor.rgb * receiver * spill;
         `);
+      } else {
+        shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `
+          #include <emissivemap_fragment>
+          ${sample}
+          float ceiling = 8.0 * streetLight.b;
+          float groundFloor = smoothstep(0.5, 1.0, ceiling) * (1.0 - smoothstep(ceiling - 0.12, ceiling + 0.12, vLampSurface.y));
+          float relativeHeight = clamp(vLampSurface.y / max(ceiling, 0.5), 0.0, 1.0);
+          float variation = 0.5 + 0.5 * sin(dot(vLampSurface.xz, vec2(0.057, 0.092)));
+          vec3 lamplight = mix(vec3(1.0, 0.48, 0.17), vec3(1.0, 0.73, 0.42), variation);
+          totalEmissiveRadiance += lamplight * groundFloor * (${finish});
+        `);
+      }
     };
     mat.needsUpdate = true;
   }
+}
+
+// Treat the real interior, opal fittings and bronze canopy differently from the transparent glazing.
+function shopFinish(name: string) {
+  if (/Warm interior plaster|MAT_SHOP_Plaster/i.test(name))
+    return '0.14 + (0.40 + 2.45 * relativeHeight) * (0.19 + 0.81 * smoothstep(0.008, 0.38, streetLight.g))';
+  if (/Facade_Warm opal|MAT_SHOP_Opal/i.test(name)) return '2.6';
+  if (/Facade_Smoke glass|NEXCIV browser glazing|NEXCIV starter glazing/i.test(name))
+    return 'mix(0.48, 2.8, smoothstep(40.0, 150.0, length(vViewPosition))) * (0.25 + relativeHeight) * (0.32 + streetLight.g)';
+  if (/Facade_Brushed brass|MAT_SHOP_Brass/i.test(name))
+    return '2.8 * smoothstep(0.40, 0.78, streetLight.g) * smoothstep(0.63, 0.78, relativeHeight)';
+  if (/Facade_Oiled oak|MAT_SHOP_Oak/i.test(name)) return '0.24';
+  return '';
 }
