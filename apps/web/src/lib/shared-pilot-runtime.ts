@@ -4,6 +4,7 @@ import { SharedPilotError, SharedPilotStore } from './shared-pilot-store';
 import { meetingActive, nextSpeaker } from './shared-pilot-social';
 import { SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS, surveyActive } from './shared-pilot-survey';
 import type { SharedPilotProfile } from './shared-pilot-profiles';
+import { chooseModelAction, SharedPilotModelRun, type ModelConfig } from './shared-pilot-model';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
@@ -23,6 +24,7 @@ export class SharedPilotRuntime {
   private timer?: ReturnType<typeof setInterval>;
   private failure = false;
   private readonly lastExternalCallAt = new Map<SharedPilotResidentId, number>();
+  private readonly modelRuns = new Map<SharedPilotResidentId, SharedPilotModelRun>();
 
   constructor(file: string, clock: () => number = Date.now, private readonly socialEnabled = true,
     private readonly externalResidents: readonly SharedPilotResidentId[] = []) {
@@ -61,8 +63,48 @@ export class SharedPilotRuntime {
   }
   setProfileKey(session: string, issue: boolean, profileResidents: readonly SharedPilotResidentId[]) {
     const result = this.store.setProfileKey(session, issue, profileResidents);
+    this.modelRuns.get(result.residentId)?.stop();
+    this.modelRuns.delete(result.residentId);
     this.lastExternalCallAt.delete(result.residentId);
     return { key: result.key, expiresAt: result.expiresAt, hasKey: result.hasKey };
+  }
+
+  private authorizedProfile(session: string, profileResidents: readonly SharedPilotResidentId[]) {
+    const profile = this.store.profile(session).profile;
+    if (!profile || !profileResidents.includes(profile.residentId)) throw new SharedPilotError('AUTH_REQUIRED', '请在创建角色的浏览器重新打开入城页。');
+    return profile;
+  }
+
+  modelProfile(residentId: SharedPilotResidentId) {
+    return {
+      modelRun: this.modelRuns.get(residentId)?.view ?? null,
+      mcpConnected: Date.now() - (this.lastExternalCallAt.get(residentId) ?? 0) <= 120000 && !this.modelRuns.has(residentId),
+    };
+  }
+
+  startModel(session: string, profileResidents: readonly SharedPilotResidentId[], config: ModelConfig) {
+    const { residentId } = this.authorizedProfile(session, profileResidents);
+    if (this.modelRuns.get(residentId)?.active) throw new SharedPilotError('CONFLICT', 'Agent 已启动，请先暂停当前运行。');
+    const connection = this.connections.find((candidate) => candidate.residentId === residentId)!;
+    this.setProfileKey(session, false, profileResidents);
+    const observe = () => {
+      this.authorizedProfile(session, profileResidents);
+      return this.observeConnection(connection);
+    };
+    const run = new SharedPilotModelRun(config, observe, (command) => {
+      const observation = observe();
+      this.runExternal(residentId, connection.token, command, observation);
+    }, chooseModelAction);
+    this.modelRuns.set(residentId, run);
+    run.start();
+    this.start();
+    return this.modelProfile(residentId);
+  }
+
+  stopModel(session: string, profileResidents: readonly SharedPilotResidentId[]) {
+    const { residentId } = this.authorizedProfile(session, profileResidents);
+    this.modelRuns.get(residentId)?.stop();
+    return this.modelProfile(residentId);
   }
 
   private observeConnection(connection: RuleConnection) {
@@ -221,6 +263,8 @@ export class SharedPilotRuntime {
     const external = this.externallyControlled(profiles);
     return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles,
       engines: this.connections.map(({ residentId }) => {
+        const run = this.modelRuns.get(residentId);
+        if (run) return { residentId, driver: 'MODEL' as const, status: run.view.status };
         if (!external.has(residentId)) return { residentId, driver: 'RULES' as const };
         const lastCall = this.lastExternalCallAt.get(residentId);
         return { residentId, driver: 'EXTERNAL' as const, connected: lastCall !== undefined && serverTime - lastCall <= 120000 };
@@ -229,7 +273,12 @@ export class SharedPilotRuntime {
     };
   }
 
-  close() { clearInterval(this.timer); this.timer = undefined; this.store.close(); }
+  close() {
+    clearInterval(this.timer); this.timer = undefined;
+    for (const run of this.modelRuns.values()) run.stop();
+    this.modelRuns.clear();
+    this.store.close();
+  }
 }
 
 export type SharedPilotView = ReturnType<SharedPilotRuntime['snapshot']>;

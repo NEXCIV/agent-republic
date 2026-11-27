@@ -100,9 +100,22 @@
 .profile span, .hint { color: var(--muted); font-size: .8125rem; line-height: 1.5; }
 .profile span { margin-top: 4px; }
 .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.connectionModes { min-width: 0; margin: 0; padding: 0; border: 0; }
+.connectionModes legend { padding: 0 0 8px; font-size: .875rem; }
+.connectionModes>div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.connectionModes label { position: relative; display: grid; gap: 7px; padding: 14px 12px; min-height: 82px; border: 1px solid var(--line); border-radius: 5px; background: #212428; cursor: pointer; }
+.connectionModes label:has(:checked) { border-color: var(--gold); background: #382e1b; }
+.connectionModes label:has(:focus-visible) { outline: 2px solid var(--gold); outline-offset: 2px; }
+.connectionModes input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.connectionModes strong { color: #f5e0a5; font-size: 1rem; }
+.connectionModes span { font-size: .8125rem; color: var(--muted); line-height: 1.4; }
+.runStatus, .modelStatus { display: grid; gap: 6px; padding: 12px; margin: 0; border: 1px solid var(--line); border-radius: 5px; background: #212428; font-size: .875rem; }
+.modelStatus span { overflow-wrap: anywhere; color: var(--muted); font-size: .8125rem; }
+.modelStatus span.error { margin: 0; color: #ffc59b; }
+.modelStatus strong { color: #efd488; }
 .secret { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 6px 8px; }
 .secret input { font-family: ui-monospace, monospace; }
-.secret p { grid-column: 1 / -1; }
+.secret p, .secret .primary { grid-column: 1 / -1; }
 .hint { margin: 0; }
 .instructions { border-top: 1px solid var(--line); padding-top: 10px; font-size: .875rem; }
 .instructions summary { cursor: pointer; color: #efd488; }

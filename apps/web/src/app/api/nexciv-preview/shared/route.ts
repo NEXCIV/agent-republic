@@ -5,10 +5,14 @@ import { SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema, sharedPilotSoc
 import { SharedPilotRuntime, type SharedAgentCommand } from '../../../../lib/shared-pilot-runtime';
 import { SharedPilotError } from '../../../../lib/shared-pilot-store';
 import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, isSharedPilotAvatar } from '../../../../lib/shared-pilot-profiles';
+import { parseModelConfig } from '../../../../lib/shared-pilot-model';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { file: string; external: string; runtime: SharedPilotRuntime } };
+// Preserve running agents across development route recompilation. Bump when
+// the in-memory runtime contract changes.
+const PILOT_RUNTIME_VERSION = 2;
+const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
 
@@ -46,12 +50,12 @@ function matches(expected: string | undefined, supplied: string) {
 function pilotFor(file: string, externalResidents: readonly SharedPilotResidentId[]) {
   const external = externalResidents.join(',');
   if (!state.nexcivSharedPilot || state.nexcivSharedPilot.file !== file || state.nexcivSharedPilot.external !== external
-    || !(state.nexcivSharedPilot.runtime instanceof SharedPilotRuntime)) {
+    || state.nexcivSharedPilot.version !== PILOT_RUNTIME_VERSION) {
     state.nexcivSharedPilot?.runtime.close();
     state.nexcivSharedPilot = undefined;
     const pilot = new SharedPilotRuntime(file, Date.now, true, externalResidents);
     pilot.start();
-    state.nexcivSharedPilot = { file, external, runtime: pilot };
+    state.nexcivSharedPilot = { version: PILOT_RUNTIME_VERSION, file, external, runtime: pilot };
   }
   return state.nexcivSharedPilot.runtime;
 }
@@ -68,7 +72,8 @@ export function GET(request: NextRequest) {
     const pilot = pilotFor(file, config.externalResidents);
     if (profile) {
       const view = pilot.profile(request.cookies.get(profileCookie)?.value ?? '');
-      return json(view.profile && config.profileResidents.includes(view.profile.residentId) ? view : { profile: null, hasKey: false });
+      if (!view.profile || !config.profileResidents.includes(view.profile.residentId)) return json({ profile: null, hasKey: false, modelRun: null, mcpConnected: false });
+      return json({ ...view, ...pilot.modelProfile(view.profile.residentId), mcpScript: path.resolve(process.cwd(), '../../scripts/nexciv-shared-mcp.mjs') });
     }
     return json({ ...pilot.snapshot(), profilesEnabled: config.profileResidents.length > 0 });
   } catch {
@@ -123,7 +128,8 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
       return json({ error: '请填写角色名并选择外观。' }, 400);
     }
     const claimed = pilot.claimProfile({ name, avatar }, config.profileResidents, session);
-    const response = json({ profile: claimed.profile, hasKey: claimed.hasKey }, 201);
+    const response = json({ profile: claimed.profile, hasKey: claimed.hasKey, ...pilot.modelProfile(claimed.profile.residentId),
+      mcpScript: path.resolve(process.cwd(), '../../scripts/nexciv-shared-mcp.mjs') }, 201);
     response.cookies.set(profileCookie, claimed.session, {
       httpOnly: true, sameSite: 'strict', secure: request.nextUrl.protocol === 'https:',
       path: '/api/nexciv-preview/shared', maxAge: SHARED_PILOT_SESSION_SECONDS,
@@ -132,6 +138,14 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
   }
   if (Object.keys(body).length === 1 && (body.action === 'issue' || body.action === 'revoke')) {
     return json(pilot.setProfileKey(session, body.action === 'issue', config.profileResidents));
+  }
+  if (body.action === 'startModel' && Object.keys(body).length === 4) {
+    const modelConfig = parseModelConfig(body);
+    if (!modelConfig) return json({ error: '请填写有效的公网 HTTPS API 地址、模型名称和 API Key。' }, 400);
+    return json(pilot.startModel(session, config.profileResidents, modelConfig));
+  }
+  if (body.action === 'stopModel' && Object.keys(body).length === 1) {
+    return json(pilot.stopModel(session, config.profileResidents));
   }
   return json({ error: '角色操作无效。' }, 400);
 }
@@ -157,8 +171,10 @@ export async function POST(request: NextRequest) {
     if (!command) return json({ error: '共享 Agent 动作无效。' }, 400);
     return json(residentId ? pilot.actAsExternal(residentId, command) : pilot.actWithProfileKey(supplied, config.profileResidents, command));
   } catch (error) {
-    if (error instanceof SharedPilotError && error.code === 'AUTH_REQUIRED') return json({ error: '登录已过期或 Agent 凭据无效。' }, 401);
-    if (error instanceof SharedPilotError) return json({ error: error.message, code: error.code }, 409);
+    if (error instanceof SharedPilotError || (error instanceof Error && error.name === 'SharedPilotError' && 'code' in error)) {
+      if (error.code === 'AUTH_REQUIRED') return json({ error: '登录已过期或 Agent 凭据无效。' }, 401);
+      return json({ error: error.message, code: error.code }, 409);
+    }
     return json({ error: '共享 Agent 服务暂不可用。' }, 503);
   }
 }
