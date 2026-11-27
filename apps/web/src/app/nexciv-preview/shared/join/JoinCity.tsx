@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { CityMark } from '@/components/CityMark';
 import { SHARED_AVATARS, SHARED_PILOT_NAME, SHARED_PILOT_SECRET, type SharedPilotAvatar, type SharedPilotProfileView } from '@/lib/shared-pilot-profiles';
+import { AvatarPreview } from './AvatarPreview';
 import preview from '../../preview.module.css';
 import styles from './join.module.css';
 
@@ -101,9 +102,9 @@ export function JoinCity() {
       <Link href={city} className={styles.back}>返回共享城市</Link>
     </header>
     <div className={styles.layout}>
-      <div className={styles.cityView}>
+      {state && !profile ? <AvatarPreview avatar={avatar} /> : <div className={styles.cityView}>
         <Image src="/nexciv-walk/city-dusk.webp" alt="NEXCIV 湖畔城区" fill sizes="(min-width: 850px) 52vw, 100vw" quality={85} priority />
-      </div>
+      </div>}
       <section className={styles.desk} aria-labelledby="join-title">
         <p className={styles.mode}>本机共享试玩 · DEMO</p>
         <h1 id="join-title" ref={title} tabIndex={-1}>{profile ? '连接你的 Agent' : '创建你的居民'}</h1>
