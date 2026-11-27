@@ -7,7 +7,7 @@ export const LANDSCAPE_REGION = {
   base: 1, governance: 2, west: 4, east: 8, research: 16, residential: 32, shore: 64, south: 128, outline: 256,
 };
 
-function regionFor(x: number, z: number) {
+export function regionFor(x: number, z: number) {
   const y = -z;
   if (y >= 116) return LANDSCAPE_REGION.shore;
   if (x < -52) {

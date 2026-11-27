@@ -36,6 +36,12 @@
 
 [网页全城前后对比及两种新楼近景](renders/NEXCIV_Web_Landscape_Comparison.jpg)。1440 × 810 的固定中景短测由 140 FPS / 483 次绘制调用变为 130 FPS / 575 次；两处新楼街景短测为 144 FPS / 150 次与 102 FPS / 437 次。可运行 `blender --background --factory-startup --python scripts/build_nexciv_city_landscape.py` 重建模型和位置清单。
 
+### 道路车流
+
+19 辆轿车和厢式车沿外围干道、街区道路和 Nexus 环路的双向车道循环行驶。车辆减速转弯，保持约 6.5 米的车心间距，居民进入前方车道时停车等候。城区俯视与街景共享同一套车辆位置，近景只显示已加载路段上的车辆。暂停动画或系统开启减少动态效果时，车辆静止。
+
+`city-traffic.glb` 复用 Blender 道路母版的五份车型网格，文件约 80 KB，同款车批量绘制。资源获取成功后才移除原场景中合批的静态车辆，获取失败时保留原场景。运行 `blender --background --factory-startup --python scripts/build_nexciv_traffic.py` 可重建车辆和路线，生成时以射线检查了 18,928 个轮迹采样点。1440 × 810 的 Chromium 短测为全城 105 FPS、广场中景 127 FPS、街景 144 FPS。
+
 ### 中央广场至咖啡街
 
 在共享城市中打开「地点与居民 → Corner Market → 聚焦建筑」，可以同时看到转角商店、斑马线和对街的咖啡露台。商店一层的遮阳篷、窗后陈列架和咖啡摊的柜台灯沿步行方向布置。双居民会面点旁有一张站桌，露台内有四张双人桌。南侧背景使用同一座城市里的花园与沿街建筑。[俯视与街面同机位对比，左图改造前、右图改造后](renders/NEXCIV_Coffee_Promenade_Comparison.jpg)
