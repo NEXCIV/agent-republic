@@ -10,7 +10,7 @@ import type { CafeSnapshot } from '../../lib/cafe-life';
 import { cityWalkTiming, type CityMovement, type CityObservation, type CityRegion } from '../../lib/city-movement';
 import type { CityPoint } from '../../lib/cafe-geometry';
 import type { SharedPilotView } from '../../lib/shared-pilot-runtime';
-import { SHARED_AVATARS } from '../../lib/shared-pilot-profiles';
+import { SHARED_AVATARS, type SharedPilotAvatar } from '../../lib/shared-pilot-profiles';
 import type { LightingPilot } from '../../lib/city-activities';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
@@ -61,6 +61,7 @@ export type WalkController = {
   syncCity: (observation: CityObservation | null) => void;
   syncShared: (snapshot: SharedPilotView | null) => void;
   view: (mode: View, id?: FollowId) => void;
+  enterResident: (id: SharedResident, avatar: SharedPilotAvatar) => void;
   select: (selection: WalkSelection | null) => void;
   focus: (selection: WalkSelection) => void;
   zoom: (factor: number) => void;
@@ -94,6 +95,8 @@ const DISTRICT_FILES: Record<District, [string, string]> = {
 const FOLLOW_YAW = -2.54;
 const FOLLOW_PITCH = 0.39;
 const FOLLOW_DISTANCE = 5.6;
+const ENTRY_DURATION_MS = 4200;
+const ENTRY_STREET_DISTANCE = 64;
 const ASSET_PATH = '/nexciv-walk/';
 const RETAIL_PREFIX = 'HI3DGardenRoofRetail';
 const RETAIL_DETAIL = 'garden-roof-retail-detail.glb';
@@ -551,7 +554,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let selection: WalkSelection | null = null;
   let framedLandmark: WalkLandmarkId | undefined;
   const retailPlacements: { mid: THREE.Object3D; bounds: THREE.Sphere; close?: THREE.Object3D }[] = [];
-  const tween = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const tween = !reducedMotion.matches;
   const pointers = new Map<number, { x: number; y: number; startX: number; startY: number; dragging: boolean }>();
   const aborter = new AbortController();
   let ended = false;
@@ -582,7 +586,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const navigation = createNavigation();
   const marketGreeting = createMarketGreeting();
   let marketGuest: { asset: GLTF; patrol: Patrol } | undefined;
-  const sharedActors = new Map<SharedResident, { asset: GLTF; patrol: Patrol }>();
+  const sharedActors = new Map<SharedResident, { file: string; asset: GLTF; patrol: Patrol }>();
   const sharedRequests = new Map<SharedResident, { file: string }>();
   let sharedSnapshot: SharedPilotView | null = null;
   let sharedReceivedAt = performance.now();
@@ -611,6 +615,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let followPitch = FOLLOW_PITCH;
   let followDistance = FOLLOW_DISTANCE;
   let followHeight: number | undefined;
+  let entryTarget: { id: SharedResident; file: string } | undefined;
+  let entryFlight: { elapsed: number; aim: THREE.Vector3; distance: number; yaw: number; pitch: number; wide: boolean } | undefined;
   let measurements = 0;
   let measuredAt = performance.now();
   let lastFrame = measuredAt;
@@ -745,6 +751,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function setView(next: View, id = followed) {
+    entryTarget = undefined;
+    entryFlight = undefined;
     const viewChanged = mode !== next || Boolean(framedLandmark);
     framedLandmark = undefined;
     if (id !== followed) {
@@ -768,6 +776,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (target.kind === 'person' || (root && isRendered(root))) setView('follow', target.id);
       return;
     }
+    entryTarget = undefined;
+    entryFlight = undefined;
     if (mode === 'follow' && followedPatrol()) {
       viewFocus.copy(aim);
       orbitDistance = camera.position.distanceTo(aim);
@@ -1222,38 +1232,38 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
     }
 
+    if (entryTarget) {
+      const actor = sharedActors.get(entryTarget.id);
+      const overviewSettled = overviewStatus === 'unavailable'
+        || Boolean(citywide?.visible && Math.abs(orbitDistance - desiredDistance) < 8);
+      if (actor?.file === entryTarget.file && actor.patrol.root.visible && overviewSettled) {
+        const offset = camera.position.clone().sub(viewFocus);
+        const distance = offset.length();
+        const wide = Boolean(citywide?.visible);
+        const id = entryTarget.id;
+        setView('follow', id);
+        resetFollowCamera();
+        selection = { kind: 'resident', id };
+        if (!reducedMotion.matches && distance > FOLLOW_DISTANCE) {
+          entryFlight = { elapsed: 0, aim: viewFocus.clone(), distance, wide,
+            yaw: Math.atan2(offset.x, offset.z), pitch: Math.asin(offset.y / distance) };
+        }
+      }
+    }
+    const flight = entryFlight;
+    const progress = flight ? Math.min(flight.elapsed / ENTRY_DURATION_MS, 1) : 1;
+    const approaching = flight && progress < 1 && !reducedMotion.matches;
+    const travel = THREE.MathUtils.smootherstep(progress, 0, 1);
     const patrol = followedPatrol();
     const following = mode === 'follow' && patrol;
     const district = mode !== 'overview' && mode !== 'follow' ? districts[mode] : undefined;
     const framedLandmarkLoaded = framedLandmark === 'works' || framedLandmark === 'registry' ? districts.east.asset
       : framedLandmark === 'center' ? districts.research.asset : framedLandmark === 'governance' ? north : model;
-    const wide = Boolean(citywide && (mode === 'overview' && (!framedLandmark || !framedLandmarkLoaded)
+    let wide = Boolean(citywide && (mode === 'overview' && (!framedLandmark || !framedLandmarkLoaded)
       || (citywide.visible && (mode === 'follow' && !patrol
         || district && (district.status === 'loading' || orbitDistance > 192)))));
-    if (citywide && citywide.visible !== wide) {
-      citywide.visible = wide;
-      street.visible = !wide;
-      sunset.visible = wide;
-      sun.visible = !wide;
-      scene.background = wide ? citySky : streetSky;
-      fog.color.copy(wide ? citySky : horizon);
-      ambient.intensity = wide ? 0.72 : 0.84;
-      scene.environmentIntensity = wide ? 0.25 : 0.28;
-      renderer.toneMappingExposure = wide ? 0.82 : 0.88;
-      renderer.shadowMap.needsUpdate = true;
-    }
     const seeingLake = Boolean(districts.shore.asset && (mode === 'shore' || (following && patrol.root.position.z < -132)));
-    // Use more of the depth buffer for the surfaces visible from the high camera.
-    const near = following ? 0.18 : Math.max(1, orbitDistance * 0.055);
-    const far = wide ? 920 : seeingLake ? 520 : 285;
-    if (camera.near !== near || camera.far !== far) {
-      camera.near = near;
-      camera.far = far;
-      camera.updateProjectionMatrix();
-    }
     if (following) {
-      fog.near = seeingLake ? 82 : 48;
-      fog.far = seeingLake ? 340 : 139;
       const feet = patrol.root.position;
       followHeight = followHeight === undefined || !tween ? feet.y : THREE.MathUtils.damp(followHeight, feet.y, 12, dt);
       aim.set(feet.x, followHeight + 0.94, feet.z);
@@ -1328,12 +1338,27 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
       const pitch = sharedPair ? (surveyPair ? .53 : Math.min(.65, followPitch)) : Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
         - 0.12 * greetingFraming - 0.07 * residenceFrame - 0.20 * hallFrame - 0.11 * shoreFrame);
+      let framedDistance = distance;
+      let framedYaw = yaw;
+      let framedPitch = pitch;
+      let target = aim;
+      if (approaching) {
+        // Keep descending along an orbit, so the camera approaches above the roofs.
+        framedDistance = flight.distance * (distance / flight.distance) ** travel;
+        wide = flight.wide && framedDistance > ENTRY_STREET_DISTANCE;
+        const yawDelta = Math.atan2(Math.sin(yaw - flight.yaw), Math.cos(yaw - flight.yaw));
+        framedYaw = flight.yaw + yawDelta * THREE.MathUtils.smootherstep(progress, .12, .9);
+        framedPitch = THREE.MathUtils.lerp(flight.pitch, pitch, THREE.MathUtils.smootherstep(progress, .3, 1));
+        target = viewFocus.lerpVectors(flight.aim, aim, THREE.MathUtils.smootherstep(progress, 0, .82));
+      }
       camera.position.set(
-        aim.x + distance * Math.sin(yaw) * Math.cos(pitch),
-        aim.y + distance * Math.sin(pitch),
-        aim.z + distance * Math.cos(yaw) * Math.cos(pitch),
+        target.x + framedDistance * Math.sin(framedYaw) * Math.cos(framedPitch),
+        target.y + framedDistance * Math.sin(framedPitch),
+        target.z + framedDistance * Math.cos(framedYaw) * Math.cos(framedPitch),
       );
-      camera.lookAt(aim);
+      camera.lookAt(target);
+      fog.near = wide ? 395 : seeingLake ? 82 : 48;
+      fog.far = wide ? 770 : seeingLake ? 340 : 139;
     } else {
       fog.near = wide ? 395 : seeingLake ? 177 : north || sideDistrictLoaded() ? 165 : 110;
       fog.far = wide ? 770 : seeingLake ? 510 : north || sideDistrictLoaded() ? 275 : 235;
@@ -1350,6 +1375,29 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         viewFocus.z + distance * Math.cos(orbitYaw) * Math.cos(orbitPitch),
       );
       camera.lookAt(viewFocus);
+    }
+    // Use the bounded frame delta so a slow terrain upload cannot skip the descent.
+    if (approaching) flight.elapsed += dt * 1000;
+    else if (flight) entryFlight = undefined;
+    if (citywide && citywide.visible !== wide) {
+      citywide.visible = wide;
+      street.visible = !wide;
+      sunset.visible = wide;
+      sun.visible = !wide;
+      scene.background = wide ? citySky : streetSky;
+      fog.color.copy(wide ? citySky : horizon);
+      ambient.intensity = wide ? 0.72 : 0.84;
+      scene.environmentIntensity = wide ? 0.25 : 0.28;
+      renderer.toneMappingExposure = wide ? 0.82 : 0.88;
+      renderer.shadowMap.needsUpdate = true;
+    }
+    // Keep enough depth precision in the wide view and avoid clipping near the resident.
+    const near = following && !wide ? 0.18 : Math.max(1, orbitDistance * (approaching ? 0.026 : 0.055));
+    const far = wide ? 920 : seeingLake ? 520 : 285;
+    if (camera.near !== near || camera.far !== far) {
+      camera.near = near;
+      camera.far = far;
+      camera.updateProjectionMatrix();
     }
     let worksDistance = Infinity;
     if (!document.hidden && !wide) {
@@ -1827,12 +1875,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const patrol = createAgentPatrol(asset, [start, facing], [facing[0], facing[2]]);
       patrol.root.visible = false;
       removePrevious();
-      sharedActors.set(id, { asset, patrol });
+      sharedActors.set(id, { file, asset, patrol });
       actorLayer.add(patrol.root);
     } catch {
       if (asset) disposeModel(asset.scene);
       if (current()) {
         removePrevious();
+        if (entryTarget?.id === id && entryTarget.file === file) entryTarget = undefined;
         callbacks.agent(id, { status: 'unavailable', progress: 0 });
       }
       return;
@@ -1904,11 +1953,18 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       updateCouncilReceipt();
     },
     view: setView,
+    enterResident(id, avatar) {
+      if (!sharedMode) return;
+      if (mode !== 'overview' || framedLandmark) setView('overview');
+      entryTarget = { id, file: SHARED_AVATARS[avatar].asset };
+    },
     select(target) { selection = target; },
     focus: focusSelection,
     zoom,
     play(enabled) { playing = enabled; },
     reset() {
+      entryTarget = undefined;
+      entryFlight = undefined;
       resetOrbit();
       orbitDistance = desiredDistance;
       resetFollowCamera();

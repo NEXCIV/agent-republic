@@ -6,10 +6,12 @@ import { usePathname } from 'next/navigation';
 import { CityMark } from '@/components/CityMark';
 import { SHARED_PILOT_MAX_TURNS } from '@agent-republic/domain';
 import type { SharedPilotView } from '../../../lib/shared-pilot-runtime';
+import type { SharedPilotProfile } from '../../../lib/shared-pilot-profiles';
 import { CITY_PLACES } from '../../../lib/city-movement';
 import { createWalk, type DistrictStatus, type WalkController } from '../walk';
 import base from '../preview.module.css';
 import styles from './shared.module.css';
+import { EntryCameraContext } from './entry-camera';
 
 type ResidentId = '01' | '02';
 type CameraView = 'overview' | 'meeting' | 'survey' | ResidentId;
@@ -29,6 +31,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<'connecting' | 'live' | 'stale'>('connecting');
   const [message, setMessage] = useState('');
   const [view, setView] = useState<CameraView>('overview');
+  const [entryProfile, setEntryProfile] = useState<SharedPilotProfile | null>(null);
   const watchedMeeting = useRef<string | undefined>(undefined);
   const watchedSurvey = useRef<string | undefined>(undefined);
   const [staticMode, setStaticMode] = useState(false);
@@ -39,6 +42,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const [failedAgents, setFailedAgents] = useState<ResidentId[]>([]);
 
   const focus = useCallback((id: CameraView) => {
+    setEntryProfile(null);
     setView(id);
     world.current?.view(id === 'overview' ? 'overview' : 'follow', id === 'overview' ? undefined : id === 'meeting' || id === 'survey' ? '01' : id);
     world.current?.select(id === 'overview' || id === 'meeting' || id === 'survey' ? null : { kind: 'resident', id });
@@ -95,6 +99,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
         district: () => {}, overview: setOverview, fps: setFps,
         onSelect: (item) => {
           if (item?.kind === 'resident' && (item.id === '01' || item.id === '02')) {
+            setEntryProfile(null);
             setView(item.id); controller?.select(item); controller?.view('follow', item.id);
           }
         },
@@ -112,6 +117,17 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const loadingCity = !staticMode && scene !== 'fallback' && !showCity;
   const previewStatus = staticMode || scene === 'fallback' ? '2D 城市预览'
     : showCity ? '3D 城市已就绪' : '正在加载 3D 城市…';
+  useEffect(() => {
+    if (joining || !entryProfile) return;
+    const { residentId, avatar } = entryProfile;
+    if (staticMode || scene === 'fallback' || failedAgents.includes(residentId)) {
+      setEntryProfile(null);
+    } else if (showCity && snapshot?.profiles.some((profile) => profile.residentId === residentId && profile.avatar === avatar)) {
+      world.current?.enterResident(residentId, avatar);
+      setView(residentId);
+      setEntryProfile(null);
+    }
+  }, [entryProfile, failedAgents, joining, scene, showCity, snapshot, staticMode]);
   const social = snapshot?.social;
   const meeting = social?.meeting;
   const survey = snapshot?.survey;
@@ -124,15 +140,15 @@ export function SharedCity({ children }: { children: ReactNode }) {
     ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text })),
     ...(survey?.events ?? [])] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
   useEffect(() => {
-    if (joining || !live3d || meeting?.status !== 'talking' || watchedMeeting.current === meeting.id) return;
+    if (joining || entryProfile || !live3d || meeting?.status !== 'talking' || watchedMeeting.current === meeting.id) return;
     watchedMeeting.current = meeting.id;
     if (view === 'overview') focus('meeting');
-  }, [focus, joining, live3d, meeting?.id, meeting?.status, view]);
+  }, [entryProfile, focus, joining, live3d, meeting?.id, meeting?.status, view]);
   useEffect(() => {
-    if (joining || !live3d || task?.status !== 'surveying' || watchedSurvey.current === task.id) return;
+    if (joining || entryProfile || !live3d || task?.status !== 'surveying' || watchedSurvey.current === task.id) return;
     watchedSurvey.current = task.id;
     if (view === 'overview' || view === 'meeting') focus('survey');
-  }, [focus, joining, live3d, task?.id, task?.status, view]);
+  }, [entryProfile, focus, joining, live3d, task?.id, task?.status, view]);
   return <div className={base.page}>
     <section className={`${base.viewer} ${styles.viewer}`} data-joining={joining} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
@@ -147,7 +163,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
         <button type="button" onClick={() => { if (!staticMode && scene !== 'fallback') setStaticMode(true); else { setScene('loading'); setOverview('idle'); setView('overview'); setFailedAgents([]); setStaticMode(false); setRenderAttempt((attempt) => attempt + 1); } }}>{staticMode || scene === 'fallback' ? '开启 3D' : '2D'}</button>
         {!joining && <Link href="/nexciv-preview" prefetch={false}>独立试玩</Link>}
       </header>
-      {children}
+      <EntryCameraContext.Provider value={setEntryProfile}>{children}</EntryCameraContext.Provider>
       {!joining && <>
       <aside className={styles.residents} aria-label="两名共享居民">
         <div className={styles.panelHead}><h1>同城居民</h1><span>{snapshot?.engines.length ?? 0} / 2</span></div>

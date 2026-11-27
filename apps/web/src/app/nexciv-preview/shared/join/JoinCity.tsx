@@ -3,10 +3,11 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useContext, useEffect, useRef, useState, type FormEvent } from 'react';
 import { SHARED_AVATARS, SHARED_PILOT_NAME, type SharedPilotAvatar, type SharedPilotProfileView } from '@/lib/shared-pilot-profiles';
 import type { ModelRunView } from '@/lib/shared-pilot-model';
 import { AvatarPreview } from './AvatarPreview';
+import { EntryCameraContext } from '../entry-camera';
 import styles from './join.module.css';
 
 const city = '/nexciv-preview/shared';
@@ -25,6 +26,7 @@ const runLabels: Record<ModelRunView['status'], string> = {
 
 export function JoinCity() {
   const router = useRouter();
+  const prepareEntry = useContext(EntryCameraContext);
   const [state, setState] = useState<ProfileView | null>(null);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [failure, setFailure] = useState('');
@@ -81,11 +83,12 @@ export function JoinCity() {
   }, [residentId, pending]);
 
   useEffect(() => {
-    if ((autoEnter === 'api' && run?.status === 'running') || (autoEnter === 'mcp' && state?.mcpConnected)) {
+    if (profile && ((autoEnter === 'api' && run?.status === 'running') || (autoEnter === 'mcp' && state?.mcpConnected))) {
       setAutoEnter(null);
+      prepareEntry(profile);
       router.replace(city);
     } else if (autoEnter === 'api' && run && ['error', 'paused', 'finished'].includes(run.status)) setAutoEnter(null);
-  }, [autoEnter, run, state?.mcpConnected, router]);
+  }, [autoEnter, prepareEntry, profile, run, state?.mcpConnected, router]);
 
   async function change(action: 'claim' | 'issue' | 'revoke' | 'startModel' | 'stopModel') {
     setFailure('');
@@ -171,7 +174,7 @@ export function JoinCity() {
       <div className={styles.profile}>
         <Image src={appearance.portrait} alt="" width={64} height={64} />
         <div><strong>{profile.name}</strong><span>{profile.residentId} 号居民 · {appearance.label}外观</span></div>
-        <Link className={styles.back} href={city}>进入城市</Link>
+        <Link className={styles.back} href={city} onNavigate={() => prepareEntry(profile)}>进入城市</Link>
       </div>
       <fieldset className={styles.connectionModes} disabled={pending}>
         <legend>选择接入方式</legend>
