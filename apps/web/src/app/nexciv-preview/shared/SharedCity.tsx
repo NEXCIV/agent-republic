@@ -124,7 +124,7 @@ export function SharedCity() {
     watchedSurvey.current = task.id;
     if (view === 'overview' || view === 'meeting') focus('survey');
   }, [focus, live3d, task?.id, task?.status, view]);
-  return <main className={base.page}>
+  return <div className={base.page}>
     <section className={`${base.viewer} ${styles.viewer}`} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
       <img className={base.poster} src="/nexciv-walk/city-dusk.webp" alt="湖畔城区俯视图" />
@@ -201,5 +201,5 @@ export function SharedCity() {
         <div className={styles.journalFooter}>{snapshot?.running === false ? '本轮规则活动暂未继续' : '链下规则模拟 · 非链上交易'} {live3d && fps > 0 && <span>{fps} FPS</span>}</div>
       </aside>
     </section>
-  </main>;
+  </div>;
 }

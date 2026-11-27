@@ -15,8 +15,7 @@ const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 const CSS = path.join(ROOT, 'apps', 'web', 'src', 'app', 'globals.css');
 const source = readFileSync(CSS, 'utf8');
 
-// Only the :root block defines global tokens; scoped dark sections redeclare
-// some variables and must not overwrite the light-page values under test.
+// Check the common shell tokens without picking up local component overrides.
 const rootBlock = source.match(/:root\s*\{([\s\S]*?)\}/);
 const rootCss = rootBlock === null ? source : rootBlock[1];
 

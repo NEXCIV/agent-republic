@@ -1,26 +1,15 @@
 import Link from 'next/link';
-import { PageHeader } from '@/components/PageHeader';
+import styles from './route-state.module.css';
 
 export default function NotFound() {
   return (
-    <PageHeader
-      eyebrow="404 · Off the plan"
-      title={
-        <>
-          Nothing <em>here</em>
-        </>
-      }
-      lede="This route is not part of the District 01 plan. Everything real lives on the confirmed ledger — pick a landmark below."
-      meta={['Chain 56 / Read-only']}
-    >
-      <div className="hero-actions" style={{ marginTop: 0 }}>
-        <Link className="button button--primary" href="/">
-          Return to the plan
-        </Link>
-        <Link className="button" href="/world">
-          Enter District 01
-        </Link>
+    <section className={styles.state} aria-labelledby="route-missing-title" lang="zh-CN">
+      <h1 id="route-missing-title">找不到这个页面</h1>
+      <p>链接可能已失效。你可以返回首页或进入城市试玩。</p>
+      <div className={styles.actions}>
+        <Link className="button button--primary" href="/">返回首页</Link>
+        <Link className="button" href="/nexciv-preview">进入城市</Link>
       </div>
-    </PageHeader>
+    </section>
   );
 }

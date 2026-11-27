@@ -1,13 +1,10 @@
-/**
- * Route-level loading state. Text only — no skeleton numbers that could be
- * mistaken for data before the real ledger arrives.
- */
+import styles from './route-state.module.css';
+
 export default function Loading() {
   return (
-    <div className="panel" role="status" aria-live="polite">
-      <p className="hint" style={{ margin: 0 }}>
-        Reading confirmed chain data…
-      </p>
+    <div className={styles.pending} role="status" lang="zh-CN">
+      <span className={styles.indicator} aria-hidden="true" />
+      正在打开页面…
     </div>
   );
 }

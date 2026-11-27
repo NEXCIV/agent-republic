@@ -19,27 +19,12 @@
   border: 1px solid #8f793f; border-radius: 5px; color: #f4d788; font-size: .875rem; white-space: nowrap;
 }
 .links a:hover, .connect:hover { color: #ffe185; }
+.main { flex: 1 0 auto; }
+:global(body):has([data-fullscreen-shell]) > .header { display: none; }
+:global(.page-shell):has(> [data-fullscreen-shell], > .console) { padding: 0; }
 .console {
-  --paper: #141619;
-  --paper-raised: #212428;
-  --paper-sunk: #292d32;
-  --ink: #f5eddf;
-  --ink-soft: #e1d8c6;
-  --ink-muted: #c6c0b3;
-  --rule: #575447;
-  --rule-strong: #81735a;
-  --teal: #ecd18a;
-  --danger: #ffc59b;
-  --danger-soft: #422c25;
-  --radius-control: 5px;
-  --radius-panel: 8px;
-  min-height: calc(100svh - 68px);
   padding: clamp(28px, 5vw, 70px) max(20px, calc((100% - 1140px) / 2)) 72px;
-  color: var(--ink);
-  background: var(--paper);
-  color-scheme: dark;
 }
-:global(.page-shell):has(> .console) { padding: 0; }
 @media (max-width: 640px) {
   .header { flex-wrap: wrap; gap: 4px 12px; }
   .links { order: 1; flex: 1 0 100%; justify-content: space-between; }

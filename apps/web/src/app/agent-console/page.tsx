@@ -152,7 +152,7 @@ export default function MyAgentPage() {
       {notice !== null ? <div className="panel hint">{notice}</div> : null}
       {error !== null ? <div className="error-banner">{error}</div> : null}
 
-      {state === 'loading' ? <p className="hint">Loading the owner console…</p> : null}
+      {state === 'loading' ? <p className="hint" role="status">正在加载 Agent 工作台…</p> : null}
 
       {state === 'unauthenticated' ? (
         <div className="panel">

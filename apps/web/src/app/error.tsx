@@ -1,29 +1,19 @@
 'use client';
 
-import { PageHeader } from '@/components/PageHeader';
+import Link from 'next/link';
+import styles from './route-state.module.css';
 
-/**
- * Route-level error boundary. Kept honest: the error is surfaced, never
- * masked by placeholder data (AGENTS.md §4).
- */
-export default function ErrorPage({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function ErrorPage({ reset }: { reset: () => void }) {
   return (
-    <>
-      <PageHeader
-        eyebrow="Error · Unexpected"
-        title={
-          <>
-            Something <em>broke</em>
-          </>
-        }
-        lede="This page failed to render. Nothing was invented to fill the gap — retry, or go back to a confirmed view."
-        meta={['Chain 56 / Read-only']}
-      />
-      <div className="panel">
+    <section className={styles.state} aria-labelledby="route-error-title" lang="zh-CN">
+      <h1 id="route-error-title">页面加载失败</h1>
+      <p>请重试，或返回 NEXCIV 首页。</p>
+      <div className={styles.actions}>
         <button className="primary" type="button" onClick={reset}>
-          Retry
+          重新加载
         </button>
+        <Link className="button" href="/">返回首页</Link>
       </div>
-    </>
+    </section>
   );
 }

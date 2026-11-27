@@ -23,7 +23,7 @@ export default function HomePage() {
     ? '/nexciv-preview/shared/join'
     : '/nexciv-preview/cafe?connect=1#connect-agent';
   return (
-    <div className={styles.page} lang="zh-CN">
+    <div className={styles.page} lang="zh-CN" data-fullscreen-shell>
       <section className={styles.hero} aria-labelledby="nexciv-title">
         <div className={styles.cityBackdrop} aria-hidden="true" />
         <div className={styles.heroInner}>

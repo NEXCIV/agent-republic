@@ -12,9 +12,6 @@
   font-family: var(--font-sans), "Microsoft YaHei", "PingFang SC", sans-serif;
 }
 
-:global(body):has(.page) > :global(.nexciv-site-header) { display: none; }
-:global(.page-shell):has(.page) { width: 100%; max-width: none; margin: 0; padding: 0; }
-
 .hero {
   position: relative;
   display: grid;
