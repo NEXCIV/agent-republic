@@ -2,16 +2,52 @@ import * as THREE from 'three';
 import { CAFE_COUNTER, CAFE_CROSSING_X } from '../../lib/cafe-geometry';
 export { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, joinCafeToPier } from '../../lib/cafe-geometry';
 
+// Soft pools under the fixtures also read at city scale, where a bulb is smaller than one pixel.
+export function createPromenadeLightPools() {
+  const size = 64;
+  const pixels = new Uint8Array(size * size * 4);
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      const u = (col + 0.5) * 2 / size - 1;
+      const v = (row + 0.5) * 2 / size - 1;
+      const falloff = Math.max(0, 1 - u * u - v * v) ** 3;
+      pixels.set([255, 255, 255, Math.round(255 * falloff)], (row * size + col) * 4);
+    }
+  }
+  const map = new THREE.DataTexture(pixels, size, size);
+  map.magFilter = THREE.LinearFilter;
+  map.minFilter = THREE.LinearFilter;
+  map.needsUpdate = true;
+  const fixtures = [
+    // x, pavement height, z, width and depth in metres
+    [12.6, 0.184, 72.4, 3.7, 2.6],
+    [20.9, 0.184, 73.8, 5.5, 3.4], [26.9, 0.184, 73.8, 5.5, 3.4],
+    [4.15, 0.18, 25.2, 2.15, 2.15], [-1.15, 0.18, 25.2, 2.15, 2.15],
+  ] as const;
+  const geometry = new THREE.PlaneGeometry().rotateX(-Math.PI / 2);
+  const pools = new THREE.InstancedMesh(geometry, new THREE.MeshBasicMaterial({
+    map, color: '#ffc07c', opacity: 0.25, blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1,
+  }), fixtures.length);
+  const matrix = new THREE.Matrix4();
+  fixtures.forEach(([x, y, z, width, depth], i) => {
+    pools.setMatrixAt(i, matrix.makeScale(width, 1, depth).setPosition(x, y + .006, z));
+  });
+  pools.name = 'Dusk light on promenade paving';
+  return pools;
+}
+
 export function createCafePaving() {
   const pavement = CAFE_COUNTER[1];
   const crossingX = CAFE_CROSSING_X;
   const corner = new THREE.Group();
   corner.name = 'Cafe corner apron and crossing';
-  const west = 8.45;
-  const north = 70.20;
-  const columns = 12;
+  // West and north meet the two surveyed sidewalk edges. The terrace starts at x = 17.93.
+  const west = 7.75;
+  const north = 70.25;
+  const columns = 13;
   const rows = 8;
-  const tileWidth = 0.79;
+  const tileWidth = (17.93 - west) / columns;
   const tileDepth = 0.68;
   const width = columns * tileWidth;
   const depth = rows * tileDepth;

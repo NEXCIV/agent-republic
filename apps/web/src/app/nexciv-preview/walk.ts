@@ -3,7 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
-import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, joinCafeToPier } from './cafe-corner';
+import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, createPromenadeLightPools, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
 import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING, COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
 import type { CafeSnapshot } from '../../lib/cafe-life';
@@ -115,7 +115,7 @@ const LANDMARK_FRAMING: Record<WalkLandmarkId, { center: CityPoint; yaw: number;
   works: { center: [95, 6, 82], yaw: -2.76, distance: 33 },
   center: { center: [-98.6, 6, -64.6], yaw: 1.05, distance: 31 },
   governance: { center: [0, 7, -95], yaw: 0.20, distance: 36 },
-  market: { center: [18.5, 6, 51], yaw: -0.35, distance: 30 },
+  market: { center: [18, 3.8, 60.5], yaw: -1.03, distance: 42 },
 };
 const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_01_Governance_Hall', 'governance'],
@@ -437,7 +437,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   sunset.shadow.normalBias = 0.10;
   scene.add(sunset, sunset.target);
   const marketLamp = new THREE.PointLight('#ffc478', 180, 15, 2);
-  marketLamp.position.set(13.6, 3.2, 54.1);
+  marketLamp.position.set(13.6, 2.8, 53.7);
   street.add(marketLamp);
 
   const generator = new THREE.PMREMGenerator(renderer);
@@ -474,6 +474,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const observedPosition = new THREE.Vector3();
   const observedFacing = new THREE.Vector3();
   const cafeProps = new THREE.Group();
+  const promenade = new THREE.Group();
+  let kioskProxy: THREE.Object3D | undefined;
+  let kioskDetail: THREE.Object3D | undefined;
+  let southGardens: THREE.Object3D | undefined;
+  let cafeStreetRequested = false;
   const lightingProps = new THREE.Group();
   scene.add(lightingProps);
   let cafeSnapshot: CafeSnapshot | null = null;
@@ -1400,6 +1405,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       camera.updateProjectionMatrix();
     }
     let worksDistance = Infinity;
+    const closeToCafe = !wide && camera.position.distanceToSquared(counter) < 87 ** 2;
+    if (closeToCafe && !cafeStreetRequested) loadCafeStreet();
+    if (kioskDetail && kioskDetail.visible !== closeToCafe) {
+      kioskDetail.visible = closeToCafe;
+      if (kioskProxy) kioskProxy.visible = !closeToCafe;
+      renderer.shadowMap.needsUpdate = true;
+    }
     if (!document.hidden && !wide) {
       updateStreetShadow(following ? aim : viewFocus, Boolean(following) || orbitDistance < 66);
       camera.updateMatrixWorld();
@@ -1590,6 +1602,52 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const response = await fetch(`${ASSET_PATH}${name}`, { signal, priority });
     if (!response.ok) throw new Error(`Missing preview asset ${name}`);
     return response;
+  }
+
+  function loadPromenadeAsset(file: string, install: (asset: THREE.Group) => void, priority: RequestPriority = 'low') {
+    request(file, priority).then(response => response.arrayBuffer()).then(bytes => loader.parseAsync(bytes, ASSET_PATH))
+      .then(({ scene: asset }) => {
+        if (ended || contextLost) { disposeModel(asset); return; }
+        prepareEnvironment(asset, streetAnisotropy);
+        install(asset);
+        renderer.shadowMap.needsUpdate = true;
+      }).catch(() => { /* The existing streets and activity anchors remain usable. */ });
+  }
+
+  function loadCafeStreet() {
+    cafeStreetRequested = true;
+    loadPromenadeAsset('coffee-stall.glb', asset => {
+      kioskDetail = asset;
+      asset.rotation.y = Math.PI;
+      asset.scale.setScalar(2.75 / 97.84);
+      asset.position.set(...CAFE_STALL);
+      asset.visible = false;
+      promenade.add(asset);
+    });
+    loadPromenadeAsset('cafe-south-gardens.glb', asset => {
+      southGardens = asset;
+      street.add(asset);
+    });
+  }
+
+  function addPromenade() {
+    scene.add(promenade);
+    promenade.add(createCafePaving(), createPromenadeLightPools());
+    loadPromenadeAsset('coffee-promenade.glb', asset => {
+      kioskProxy = asset.getObjectByName('Coffee_kiosk_distance_mesh');
+      if (kioskProxy) kioskProxy.visible = !kioskDetail?.visible;
+      promenade.add(asset);
+    }, 'auto');
+    loadPromenadeAsset('cafe-bench.glb', asset => {
+      asset.rotation.y = Math.PI;
+      asset.position.copy(seat);
+      promenade.add(asset);
+    });
+    const cafeLamp = new THREE.PointLight('#ffc68c', 6.5, 5.5);
+    cafeLamp.position.set(counter.x, 1.96, counter.z + .55);
+    const terraceLamp = new THREE.PointLight('#ffd396', 28, 9);
+    terraceLamp.position.set(24, 3.03, 74.6);
+    street.add(cafeLamp, terraceLamp);
   }
 
   function loadCitywide() {
@@ -1906,25 +1964,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     prepareEnvironment(model, streetAnisotropy);
     softenRetailWindows(model);
     street.add(model);
+    addPromenade();
     if (cafeMode || sharedMode) {
       street.add(cafeProps);
-      cafeProps.add(createCafePaving());
       if (fishingGear) cafeProps.add(fishingGear.group);
-      for (const file of ['cafe-bench.glb', 'coffee-stall.glb']) {
-        request(file).then((response) => response.arrayBuffer())
-        .then((bytes) => loader.parseAsync(bytes, ASSET_PATH)).then(({ scene: prop }) => {
-          if (ended || contextLost) { disposeModel(prop); return; }
-          prop.rotation.y = Math.PI;
-          if (file === 'cafe-bench.glb') prop.position.copy(seat);
-          else {
-            prop.scale.setScalar(2.75 / 97.84);
-            prop.position.set(...CAFE_STALL);
-            prepareEnvironment(prop, streetAnisotropy);
-          }
-          cafeProps.add(prop);
-          renderer.shadowMap.needsUpdate = true;
-        }).catch(() => { if (!ended && !contextLost) callbacks.fallback(); });
-      }
     }
     connectPrimary();
     renderer.shadowMap.needsUpdate = true;
@@ -1998,6 +2041,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (model) disposeModel(model);
       if (north) disposeModel(north);
       disposeModel(cafeProps);
+      disposeModel(promenade);
+      if (southGardens) disposeModel(southGardens);
       disposeModel(lightingProps);
       fishingGear?.dispose();
       if (citywide) disposeModel(citywide);

@@ -33,7 +33,12 @@ from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
 from civrum_lakeside_blocks import PALETTE, STONE, make_office
 from civrum_lakeside_landmarks import AGENT_CENTER, REGISTRY, place_agent_center
-from refine_nexciv_public_works import ENTRANCE_DETAILS, ROOF_DETAILS, WORKS, refine_public_works
+from refine_nexciv_public_works import (
+    ENTRANCE_DETAILS,
+    ROOF_DETAILS,
+    WORKS,
+    refine_public_works,
+)
 from refine_nexciv_registry import refine_registry
 from refine_nexciv_works_railing import RAILING
 
@@ -196,6 +201,7 @@ CHUNKS = {
     "base": "nexus-market.glb",
     "street": "nexus-street-detail.glb",
     "market": "corner-market-detail.glb",
+    "cafe-gardens": "cafe-south-gardens.glb",
     "governance": "governance-north-council-notice.glb",
     "hall": "governance-hall-detail.glb",
     "retail": "garden-roof-retail-detail.glb",
@@ -230,6 +236,12 @@ def in_slice(obj, matrix, area):
     top_x = max(p.x for p in points)
     central_x = top_x > WEST and low_x < EAST
     base = central_x and top_y > SOUTH and low_y < NORTH
+    if area == "cafe-gardens":
+        # The base chunk ends at the café counter. Keep its southern sightline
+        # connected to the same two garden blocks seen in the city overview.
+        return central_x and low_y < -72 and top_y > -151 and (
+            not base or obj.name.startswith("South garden |")
+        )
     governance = central_x and top_y > NORTH and NORTH <= low_y < GOVERNANCE_NORTH
     if area == "east":
         return not (base or governance) and top_x > EAST and low_x < 143 and top_y > -125 and low_y < 44
@@ -260,7 +272,7 @@ def world_geometry(scene, graph, area):
     if area in {"shore", "citywide"}:
         named_layers.update(SHORE_LAYER_NAMES)
         named_layers.update(("05_Street_Assets", "08 | Lakeside tower", "20 | NEXCIV Waterfront Tower"))
-    if area == "citywide":
+    if area in {"citywide", "cafe-gardens"}:
         named_layers.add("16 | South garden shop")
     candidates = {ob for name in named_layers for ob in layers[name].objects if ob.name in scene.objects}
     lot_types = {
@@ -276,6 +288,8 @@ def world_geometry(scene, graph, area):
         scenery = (
             area in {"east", "west"} and obj.name.startswith("Civic reflecting pool")
         ) or (area == "west" and obj.name.startswith("Forum |"))
+        if area == "cafe-gardens" and obj.name.startswith("South garden |"):
+            scenery = True
         if citywide and obj.name.startswith(SKIP[2:]):
             scenery = True
         if obj.hide_render or obj.hide_viewport or (obj.name.startswith(SKIP) and not (civic_paving or scenery)):
@@ -554,7 +568,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
     transparent = {glass}
     solid_window = material("NEXCIV starter glazing", "505553", 0.24, 0.32)
     texture_limit = {
-        "base": 512, "retail": 2048, "registry": 4096, "works": 6144, "center": 4096, "hall": 4096, "citywide": 768,
+        "base": 512, "cafe-gardens": 256, "retail": 2048, "registry": 4096, "works": 6144, "center": 4096, "hall": 4096, "citywide": 768,
     }.get(chunk, 1024)
     pbr = {}
     textures = {}
@@ -632,6 +646,8 @@ def stage_assets(scene, graph, chunk, library=DEST):
     area = {"registry": "east", "works": "east", "center": "research", "hall": "governance"}.get(chunk, chunk)
     for source, transform, tier in world_geometry(scene, graph, area):
         name = source.original.name
+        if chunk == "cafe-gardens" and name.startswith(("Courtyard | roses", "Shop 40 | Original Hi3D roof plants")):
+            continue
         if chunk == "retail" and not name.startswith(GARDEN_RETAIL):
             continue
         if chunk == "registry" and EAST_HEROES.get(name) != chunk:
@@ -680,7 +696,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
             if key not in facades:
                 facade_finishes()
                 fine = chunk in ("hall", "retail") or (
-                    facade in ("midrise", "residence") and chunk not in ("base", "citywide")
+                    facade in ("midrise", "residence") and chunk not in ("base", "citywide", "cafe-gardens")
                 )
                 rebuilt = council_hall(fine) if facade == "hall" else street_block(facade, fine)
                 fit_mesh(rebuilt, source)
@@ -758,6 +774,8 @@ def stage_assets(scene, graph, chunk, library=DEST):
             parts.append((asset, 14000))
         elif chunk == "shore" and len(mesh.polygons) > 20000:
             parts.append((asset, 12000))
+        elif chunk == "cafe-gardens" and len(mesh.polygons) > 3000:
+            parts.append((asset, 1800))
         elif chunk == "citywide":
             face_limit = 12000
             if name.startswith(("Park woodland", "Far bank woodland")):
@@ -856,7 +874,7 @@ def stage_assets(scene, graph, chunk, library=DEST):
         ground.scale = scale
         ground.data.materials.append(material("NEXCIV ground", "55564F", 0.89))
         root.objects.link(ground)
-    if chunk == "citywide":
+    if chunk in {"citywide", "cafe-gardens"}:
         group_overview_instances(root)
     bpy.ops.object.select_all(action="DESELECT")
     for obj in root.objects:
@@ -969,7 +987,7 @@ def main():
         root = stage_assets(scene, graph, chunk, args.output)
         path = args.output / filename
         with precise_meshopt_positions():
-            export_chunk(path, gpu_instances=chunk == "citywide", jpeg_quality=91 if chunk == "works" else 83)
+            export_chunk(path, gpu_instances=chunk in {"citywide", "cafe-gardens"}, jpeg_quality=91 if chunk == "works" else 83)
         print(f"PREVIEW {chunk}: {len(root.objects)} nodes, {path.stat().st_size:,} bytes", flush=True)
         for obj in list(root.objects):
             bpy.data.objects.remove(obj, do_unlink=True)
