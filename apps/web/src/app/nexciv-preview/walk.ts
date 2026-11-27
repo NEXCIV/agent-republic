@@ -18,6 +18,7 @@ import { THEATRE_CLOCK, THEATRE_STAGE } from '../../lib/theatre-layout';
 import { createTheatreLighting } from './theatre-lighting';
 import { createWestPool } from './west-reflecting-pool';
 import { createDuskReflection, lightOverview, lightStreetSurfaces } from './overview-dusk';
+import { landscapeVisibility, LANDSCAPE_REGION, substituteLandscapeRetail } from './city-landscape';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -173,6 +174,7 @@ function disposeModel(asset: THREE.Object3D, sharedTexture?: THREE.Texture) {
   const meshes = new Set<THREE.BufferGeometry>();
   asset.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
+    if (object instanceof THREE.InstancedMesh) object.dispose();
     meshes.add(object.geometry);
     const list: THREE.Material[] = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of list) {
@@ -576,6 +578,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let contextLost = false;
   let model: THREE.Object3D | undefined;
   let citywide: THREE.Object3D | undefined;
+  let cityLandscape: THREE.Object3D | undefined;
+  let updateLandscape: ReturnType<typeof landscapeVisibility> | undefined;
   let duskReflection: THREE.DataTexture | undefined;
   const streetLighting: THREE.IUniform<THREE.Texture | null> = { value: null };
   const lightingAtlas = new THREE.TextureLoader().load(`${ASSET_PATH}overview-lamp-wash.png?v=2`, texture => {
@@ -608,6 +612,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
     });
     lightStreetSurfaces(finishes, streetLighting, overview, pavingPalette, pavingReady);
+    if (cityLandscape) substituteLandscapeRetail(asset);
   }
   let overviewStatus: DistrictStatus = 'idle';
   let north: THREE.Object3D | undefined;
@@ -912,6 +917,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (!retailPlacements.length) return;
     for (const placement of retailPlacements) {
       const { mid, bounds } = placement;
+      if (mid.userData.landscapeReplacement) continue;
       const distance = camera.position.distanceTo(bounds.center);
       const showing = placement.close?.visible ?? false;
       const near = distance < (showing ? 86 : 76);
@@ -1446,6 +1452,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       renderer.shadowMap.needsUpdate = true;
     }
     westPromenade.visible = wide || Boolean(districts.west.asset);
+    if (updateLandscape) {
+      const visibleRegions = wide ? 0x1ff : LANDSCAPE_REGION.base
+        | (north ? LANDSCAPE_REGION.governance : 0)
+        | (southGardens ? LANDSCAPE_REGION.south : 0)
+        | (districts.west.asset ? LANDSCAPE_REGION.west : 0)
+        | (districts.east.asset ? LANDSCAPE_REGION.east : 0)
+        | (districts.research.asset ? LANDSCAPE_REGION.research : 0)
+        | (districts.residential.asset ? LANDSCAPE_REGION.residential : 0)
+        | (districts.shore.asset ? LANDSCAPE_REGION.shore : 0);
+      if (updateLandscape(visibleRegions)) renderer.shadowMap.needsUpdate = true;
+    }
     // Keep enough depth precision in the wide view and avoid clipping near the resident.
     const near = following && !wide ? 0.18 : Math.max(1, orbitDistance * (approaching ? 0.026 : 0.055));
     const far = wide ? 920 : seeingLake ? 520 : 285;
@@ -2026,6 +2043,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (node.name.startsWith('Forum')) registerLandmark('forum', node);
       }
     });
+    loadPromenadeAsset('city-landscape.glb', asset => {
+      cityLandscape = asset;
+      substituteLandscapeRetail(scene);
+      scene.add(asset);
+      updateLandscape = landscapeVisibility(asset);
+    }, 'auto');
     if (cafeMode || sharedMode) {
       street.add(cafeProps);
       if (fishingGear) cafeProps.add(fishingGear.group);
@@ -2107,6 +2130,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       westPool.geometry.dispose();
       westPool.dispose();
       disposeModel(westPromenade);
+      if (cityLandscape) disposeModel(cityLandscape);
       if (southGardens) disposeModel(southGardens);
       disposeModel(lightingProps);
       fishingGear?.dispose();
