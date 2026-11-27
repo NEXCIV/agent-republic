@@ -97,4 +97,10 @@ SQLite 试验库 v3 只新增调研表，保留既有移动与会面记录。任
 
 专项验证：`node node_modules/vitest/vitest.mjs run apps/web/test/shared-pilot-survey.test.ts apps/web/test/shared-pilot-social.test.ts apps/web/test/shared-pilot-store.test.ts apps/web/test/shared-pilot-runtime.test.ts packages/domain/test/shared-city-pilot.test.ts`。试点保留最近 12 份已完成共同报告、最近 60 条调研公开事件及每名居民最多 300 条调研请求回执；共享页面展示当前任务及上一份已完成报告（若有）。
 
+## H. 02 号本机 MCP 试验（E3-05）
+
+在本机启动器和 `scripts/nexciv-shared-mcp.mjs` 的进程环境中提供相同的 `NEXCIV_SHARED_AGENT_KEY`。该值由操作者用 32 个随机字节生成并编码为 base64url。启用后，原控制器继续驱动 01，02 的决策由持有该凭据的本机 MCP 客户端提交。`observe_shared_city` 返回试点共同行程、会面、调研及 02 自己的记忆。`act_in_shared_city` 走相同的移动、社交与调研规则。授权主体由服务端固定为 02，网页只消费公开投影，并显示该 MCP 最近是否调用过试点服务。
+
+解除试验时使用默认配置重启本机进程。既有移动、会面和报告随同一 SQLite 存档恢复。正式账号绑定与受邀用户接入继续按 §A 验收。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。

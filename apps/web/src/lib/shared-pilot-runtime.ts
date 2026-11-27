@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { SHARED_PILOT_LINES, SHARED_PILOT_RESIDENT_IDS, type SharedPilotPlaceId, type SharedPilotResidentId } from '@agent-republic/domain';
+import { SHARED_PILOT_LINES, SHARED_PILOT_RESIDENT_IDS, type SharedPilotMoveRequest, type SharedPilotPlaceId, type SharedPilotResidentId, type SharedPilotSocialRequest, type SharedPilotSurveyRequest } from '@agent-republic/domain';
 import { SharedPilotStore } from './shared-pilot-store';
 import { meetingActive, nextSpeaker } from './shared-pilot-social';
 import { SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS, surveyActive } from './shared-pilot-survey';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
+export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
   '02': ['cafe', 'works', 'plaza', 'governance'],
@@ -20,8 +21,9 @@ export class SharedPilotRuntime {
   private readonly notBefore: number;
   private timer?: ReturnType<typeof setInterval>;
   private failure = false;
+  private lastExternalCallAt: number | null = null;
 
-  constructor(file: string, clock: () => number = Date.now, private readonly socialEnabled = true) {
+  constructor(file: string, clock: () => number = Date.now, private readonly socialEnabled = true, private readonly external02 = false) {
     this.store = new SharedPilotStore(file, clock);
     try {
       this.connections = SHARED_PILOT_RESIDENT_IDS.map((residentId) => ({
@@ -31,6 +33,26 @@ export class SharedPilotRuntime {
     } catch (error) {
       this.store.close();
       throw error;
+    }
+  }
+
+  /** The local HTTP adapter authenticates the MCP client before calling this method. */
+  actAs02(command: SharedAgentCommand) {
+    if (!this.external02) throw new Error('External resident 02 is unavailable');
+    const token = this.connections[1]!.token;
+    const observation = this.store.observe(token);
+    this.lastExternalCallAt = observation.serverTime;
+    switch (command.action) {
+      case 'observe':
+        return observation;
+      case 'moveTo':
+        return this.store.moveTo(token, command);
+      case 'invite':
+      case 'respond':
+      case 'say':
+        return this.store.socialAction(token, command);
+      default:
+        return this.store.surveyAction(token, command);
     }
   }
 
@@ -121,6 +143,7 @@ export class SharedPilotRuntime {
   tick() {
     if (this.failure) return;
     for (const connection of this.connections) {
+      if (this.external02 && connection.residentId === '02') continue;
       const observation = this.store.observe(connection.token);
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation)) continue;
@@ -137,7 +160,7 @@ export class SharedPilotRuntime {
     this.timer = setInterval(() => {
       try {
         this.tick();
-        if (this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS)) {
+        if (!this.external02 && this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS)) {
           const { social, survey } = this.snapshot();
           if (meetingActive(social.meeting) || surveyActive(survey.task)) return;
           clearInterval(this.timer); this.timer = undefined;
@@ -150,7 +173,9 @@ export class SharedPilotRuntime {
   snapshot() {
     const { mode, provenance, serverTime, revision, residents, events, social, survey } = this.store.observe(this.connections[0]!.token);
     return { mode, provenance, serverTime, revision, residents, events, social, survey,
-      engines: this.connections.map(({ residentId }) => ({ residentId, driver: 'RULES' as const })),
+      engines: this.connections.map(({ residentId }) => this.external02 && residentId === '02'
+        ? { residentId, driver: 'MCP' as const, connected: this.lastExternalCallAt !== null && serverTime - this.lastExternalCallAt <= 120000 }
+        : { residentId, driver: 'RULES' as const }),
       running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting) || surveyActive(survey.task)),
     };
   }

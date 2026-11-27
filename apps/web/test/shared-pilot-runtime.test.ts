@@ -1,12 +1,45 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { SharedPilotRuntime } from '../src/lib/shared-pilot-runtime';
-import { GET } from '../src/app/api/nexciv-preview/shared/route';
+import { GET, POST } from '../src/app/api/nexciv-preview/shared/route';
 
 describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('two connected rule agents in a shared local city', () => {
+  it('reserves 02 for an authorized external agent and rejects a browser, caller-supplied identity, or a wrong key', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'nexciv-shared-mcp-'));
+    const key = randomBytes(32).toString('base64url');
+    const global = globalThis as typeof globalThis & { nexcivSharedPilot?: { runtime: SharedPilotRuntime } };
+    const command = (body: unknown, secret = key, extra: Record<string, string> = {}) => POST(new NextRequest('http://127.0.0.1:3142/api/nexciv-preview/shared', {
+      method: 'POST', headers: { host: '127.0.0.1:3142', authorization: `Bearer ${secret}`, 'content-type': 'application/json', ...extra }, body: JSON.stringify(body),
+    }));
+
+    try {
+      vi.stubEnv('NODE_ENV', 'test');
+      vi.stubEnv('NEXCIV_SHARED_PILOT_DB', join(folder, 'shared.sqlite'));
+      expect((await command({ action: 'observe' })).status).toBe(404);
+      vi.stubEnv('NEXCIV_SHARED_AGENT_KEY', key);
+      expect((await command({ action: 'observe' }, randomBytes(32).toString('base64url'))).status).toBe(401);
+      expect((await command({ action: 'observe' }, key, { origin: 'http://127.0.0.1:3142' })).status).toBe(403);
+      expect((await command({ action: 'observe' }, key, { host: 'other.example' })).status).toBe(403);
+      expect((await command({ action: 'moveTo', requestId: randomUUID(), destination: { place: 'works' }, residentId: '01' })).status).toBe(400);
+      const receipt = await (await command({ action: 'moveTo', requestId: randomUUID(), destination: { place: 'works' } })).json();
+      expect(receipt.residentId).toBe('02');
+      const view = global.nexcivSharedPilot!.runtime.snapshot();
+      expect(view.engines[1]).toMatchObject({ residentId: '02', driver: 'MCP', connected: true });
+      expect(view.residents[0]?.movement).toBeNull();
+      expect(view.residents[1]?.movement?.destination.place).toBe('works');
+      expect(JSON.stringify(view)).not.toContain(key);
+    } finally {
+      global.nexcivSharedPilot?.runtime.close();
+      global.nexcivSharedPilot = undefined;
+      vi.unstubAllEnvs();
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
   it('keeps the shared viewer opt-in, local and read-only', async () => {
     const folder = mkdtempSync(join(tmpdir(), 'nexciv-shared-http-'));
     const local = globalThis as typeof globalThis & { nexcivSharedPilot?: { runtime: SharedPilotRuntime } };

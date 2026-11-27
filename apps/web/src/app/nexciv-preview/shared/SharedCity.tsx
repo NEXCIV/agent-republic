@@ -129,8 +129,9 @@ export function SharedCity() {
       </header>
       <aside className={styles.residents} aria-label="两名共享居民">
         <div className={styles.panelHead}><h1>同城居民</h1><span>{snapshot?.engines.length ?? 0} / 2</span></div>
-        <p className={styles.explain}>两个独立规则 Agent · 共用一个城市存档</p>
+        <p className={styles.explain}>两名居民 · 共用一个城市存档</p>
         {(['01', '02'] as const).map((id) => {
+          const engine = snapshot?.engines.find(({ residentId }) => residentId === id);
           const resident = snapshot?.residents.find(({ residentId }) => residentId === id);
           const movement = resident?.movement;
           const moving = movement?.status === 'walking';
@@ -142,7 +143,7 @@ export function SharedCity() {
           const inspection = task?.status === 'surveying' ? task.inspections[id] : undefined;
           const waitingSurvey = task?.status === 'accepted' && survey?.arrived.includes(id);
           return <article key={id} className={styles.resident} data-resident={id}>
-            <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{names[id]}</b><small>{resident ? '规则 Agent 已接入' : '连接中'}</small></div>
+            <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{names[id]}</b><small>{engine?.driver === 'MCP' ? (engine.connected ? 'MCP Agent 最近活跃' : '等待 MCP Agent') : resident ? '规则 Agent 已接入' : '连接中'}</small></div>
               <button type="button" disabled={!live3d || failedAgents.includes(id)} aria-pressed={view === id} onClick={() => focus(id)}>跟随</button></div>
             <strong role="status" data-resident-status={id}>{resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
             {inspection ? <div className={styles.progress}><progress aria-label={`${id} 号现场观察进度`} max={8} value={inspection.finding ? 8 : Math.min(8, Math.max(0, ((snapshot?.serverTime ?? 0) - (inspection.startedAt ?? snapshot?.serverTime ?? 0)) / 1000))} /><span>{inspection.finding ? '已记录' : '观察'}</span></div>
