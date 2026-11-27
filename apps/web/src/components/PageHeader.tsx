@@ -1,11 +1,6 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-
-/**
- * Shared header band for inner pages — a compact echo of the homepage hero
- * (dark ground, eyebrow, display title, lede, meta strip) so every route
- * lands on the same visual language.
- */
+import styles from './page-header.module.css';
 export function PageHeader({
   eyebrow,
   title,
@@ -22,23 +17,23 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="page-hero">
+    <header className={styles.header}>
       {back ? (
-        <Link className="page-hero__back" href={back.href}>
+        <Link className={styles.back} href={back.href}>
           ← {back.label}
         </Link>
       ) : null}
-      <p className="eyebrow">{eyebrow}</p>
-      <h1 className="page-hero__title">{title}</h1>
-      {lede ? <p className="lede">{lede}</p> : null}
-      {children ? <div className="page-hero__children">{children}</div> : null}
+      <h1 className={styles.title}>{title}</h1>
+      {lede ? <p className={styles.description}>{lede}</p> : null}
+      {children ? <div className={styles.actions}>{children}</div> : null}
       {meta.length > 0 ? (
-        <div className="page-hero__meta">
+        <div className={styles.meta}>
+          <span>{eyebrow}</span>
           {meta.map((item) => (
             <span key={item}>{item}</span>
           ))}
         </div>
-      ) : null}
+      ) : <p className={styles.meta}>{eyebrow}</p>}
     </header>
   );
 }

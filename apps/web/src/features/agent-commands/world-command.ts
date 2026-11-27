@@ -2,7 +2,7 @@ import { LANDMARK_IDS, type LandmarkId } from '@agent-republic/domain';
 import { LANDMARK_LABELS } from '../world-3d/webgl';
 
 export function commandLink(kind: 'visit' | 'meet', id: string): string {
-  return `/my-agent?${kind}=${encodeURIComponent(id)}#command-title`;
+  return `/agent-console?${kind}=${encodeURIComponent(id)}#command-title`;
 }
 
 export function draftFromWorld(visit: string | null, meet: string | null): string {

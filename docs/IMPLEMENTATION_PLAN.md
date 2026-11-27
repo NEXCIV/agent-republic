@@ -152,7 +152,7 @@ flowchart LR
 | E3-04 | deterministic Policy Engine | 无转账、无限授权或非白名单调用 |
 | E3-05 | 两 Agent 的有限轮协商和审核 | 公开文本有 `AI_SIMULATED` 标签 |
 | E3-06 | 记忆/复盘与链事件链接 | 不会把 pending 当成功 |
-| E3-07 | `/my-agent` 控制台 / pause / 替换 | owner 受保护，旧记录可查 |
+| E3-07 | `/agent-console` 控制台 / pause / 替换 | owner 受保护，旧记录可查 |
 
 E3-07 包含 Personal Agent Command。绑定用户可以提交自然语言任务，查看自己的计划、各步结果和报告。验收覆盖收件人独立回应、紧急任务结束后恢复原任务、暂停、配置替换、重复提交、后台重启和 DEMO 隔离。运行方式见 [指令控制台](civrum/03_ENGINEERING_BLUEPRINT.md#个人-agent-指令)。
 

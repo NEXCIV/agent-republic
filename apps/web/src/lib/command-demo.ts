@@ -1,4 +1,4 @@
-/** Imported exclusively by /my-agent/demo. No wallet, network or private console state. */
+/** Imported exclusively by /agent-console/demo. No wallet, network or private console state. */
 import {
   commandRequestSchema, worldFrameV1Schema, type CommandRequest, type CommandRecord, type AgentLocation,
 } from '@agent-republic/domain';

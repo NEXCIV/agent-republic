@@ -12,6 +12,14 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  * @type {import('next').NextConfig}
  */
 const nextConfig = {
+  async redirects() {
+    return [
+      { source: '/my-agent', has: [{ type: 'query', key: 'visit' }], destination: '/agent-console', permanent: false },
+      { source: '/my-agent', has: [{ type: 'query', key: 'meet' }], destination: '/agent-console', permanent: false },
+      { source: '/my-agent/demo', destination: '/agent-console/demo', permanent: false },
+      { source: '/my-agent', destination: '/nexciv-preview/shared/join', permanent: false },
+    ];
+  },
   // The explicit shared-city local pilot can run beside the existing preview.
   ...(process.env.NEXCIV_SHARED_PILOT_DB && process.env.NODE_ENV !== 'production' ? { distDir: 'cache/shared-next' } : {}),
   webpack: (config) => {

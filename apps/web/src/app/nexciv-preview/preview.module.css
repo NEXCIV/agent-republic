@@ -8,10 +8,7 @@
   --gold: #f0b90b;
   --edge: clamp(14px, 3.5vw, 48px);
 }
-:global(body):has(.page) > :global(.site-header),
-:global(body):has(.page) > :global(.scroll-progress),
-:global(body):has(.page) > :global(.skip-link),
-:global(body):has(.page) > footer { display: none; }
+:global(body):has(.page) > :global(.nexciv-site-header) { display: none; }
 :global(.page-shell):has(.page) { width: 100%; max-width: none; margin: 0; padding: 0; }
 .skip { position: absolute; z-index: 3; top: .5rem; left: var(--edge); transform: translateY(-200%); background: #141619; padding: 12px; }
 .skip:focus { transform: none; }

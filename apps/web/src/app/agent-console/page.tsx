@@ -140,17 +140,13 @@ export default function MyAgentPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Agent Core · District 01"
-        title={
-          <>
-            My <em>agent</em>
-          </>
-        }
-        lede="Give your agent a task, follow its progress and read its report. Your verified owner binding also gives you
-        access to its goals, personality and configuration history."
-        meta={['Owner from verified binding', 'Immutable versions', 'Never holds keys']}
+        eyebrow="正式身份 · Agent 工作台"
+        title="Agent 指令与设置"
+        lede="已绑定身份的玩家可以提交指令、查看执行报告，以及管理 Agent 的目标和配置。"
+        meta={['已验证的持有人身份', '配置保留历史版本']}
       >
-        <Link className="button" href="/my-agent/demo">Try the command demo</Link>
+        <Link className="button" href="/agent-console/demo">试用指令演示</Link>
+        <Link className="button" href="/nexciv-preview/shared/join">角色与接入</Link>
       </PageHeader>
 
       {notice !== null ? <div className="panel hint">{notice}</div> : null}
@@ -189,8 +185,7 @@ export default function MyAgentPage() {
 
       {state === 'unavailable' ? (
         <div className="error-banner">
-          The agent console API is currently unavailable. This page never shows placeholder configuration — reload
-          when the API is back.
+          正式工作台服务暂未连接。本机试玩可以从「角色与接入」继续。
         </div>
       ) : null}
 

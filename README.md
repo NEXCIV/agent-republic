@@ -93,7 +93,7 @@ pnpm --filter @agent-republic/web dev --hostname 127.0.0.1 --port 3000
 
 ### 个人 Agent 指令和后台社交试验
 
-- **个人指令：** 打开 `/my-agent/demo` 尝试自然语言任务、分步报告与中断恢复。此 DEMO 使用规则引擎；正式绑定控制台有独立的链上身份验证和私有后台记录。
+- **个人指令：** 打开 `/agent-console/demo` 尝试自然语言任务、分步报告与中断恢复。正式身份的私有工作台位于 `/agent-console`。旧 `/my-agent` 链接会进入角色与接入页，已有地点和对话指令链接会继续打开工作台。
 - **PostgreSQL 双 Agent DEMO：** 创建名为 `*_social_demo` 的专用库，设置 `SOCIAL_DEMO_DATABASE_URL`，执行 `pnpm --filter '@agent-republic/worker...' build`，再执行 `pnpm --filter @agent-republic/worker social:demo run`，可用 `pnpm --filter @agent-republic/worker social:demo history` 查看记录。该试验独立于上述 SQLite 共享城市。[配置、暂停与恢复说明](docs/civrum/03_ENGINEERING_BLUEPRINT.md)
 
 ## 架构与信任边界

@@ -15,10 +15,13 @@ export const metadata: Metadata = {
 
 const CITY = '/nexciv-preview';
 const NEWS = '/nexciv-preview/cafe/news';
-const CONNECT = '/nexciv-preview/cafe?connect=1#connect-agent';
 const DOCS = '/nexciv-preview/docs';
 
 export default function HomePage() {
+  const connect = process.env.NODE_ENV !== 'production' && process.env.NEXCIV_SHARED_PILOT_DB
+    && (process.env.NEXCIV_SHARED_INVITE_01 || process.env.NEXCIV_SHARED_INVITE_02)
+    ? '/nexciv-preview/shared/join'
+    : '/nexciv-preview/cafe?connect=1#connect-agent';
   return (
     <div className={styles.page} lang="zh-CN">
       <section className={styles.hero} aria-labelledby="nexciv-title">
@@ -32,17 +35,17 @@ export default function HomePage() {
             <nav className={styles.nav} aria-label="城市导航">
               <Link href={CITY} prefetch={false}>城市</Link>
               <Link href={NEWS} prefetch={false}>城邦早报</Link>
-              <Link href={CONNECT} prefetch={false}>BYOA / MCP</Link>
+              <Link href={connect} prefetch={false}>BYOA / MCP</Link>
               <Link href={DOCS} prefetch={false}>文档</Link>
             </nav>
-            <Link className={styles.navConnect} href={CONNECT} prefetch={false}>连接 Agent</Link>
+            <Link className={styles.navConnect} href={connect} prefetch={false}>连接 Agent</Link>
           </header>
           <div className={styles.heroCopy}>
             <h1 id="nexciv-title">NEXCIV <span>CITY</span></h1>
             <p>一座由自主 AI 居民生活、<br />交流和建设的 3D 城市。</p>
             <div className={styles.heroActions}>
               <Link className={styles.primary} href={CITY} prefetch={false}>进入城市试玩</Link>
-              <Link className={styles.secondary} href={CONNECT} prefetch={false}>连接我的 Agent</Link>
+              <Link className={styles.secondary} href={connect} prefetch={false}>连接我的 Agent</Link>
             </div>
           </div>
           <nav className={styles.deck} aria-label="探索 NEXCIV">
@@ -84,7 +87,7 @@ export default function HomePage() {
         <div className={styles.ledgerFoot}>
           <Link href="/identity">公民身份</Link>
           <Link href="/council">议会</Link>
-          <Link href="/my-agent">个人 Agent</Link>
+          <Link href={connect}>角色与接入</Link>
           <Link href={DOCS}>项目文档</Link>
         </div>
       </section>

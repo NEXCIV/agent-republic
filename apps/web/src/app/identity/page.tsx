@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/PageHeader';
  *
  * This page is protocol documentation: it states the citizenship rules from
  * AGENTS.md §3 and never invents holder counts or on-chain numbers. Wallet
- * verification lives on /my-agent; this page stays read-only.
+ * verification lives on /agent-console; this page stays read-only.
  */
 
 // Official fixed Agent ID contract (AGENTS.md §3); the env override exists so
@@ -14,7 +14,7 @@ import { PageHeader } from '@/components/PageHeader';
 const AGENT_ID_ADDRESS =
   process.env.NEXT_PUBLIC_AGENT_ID_ADDRESS ?? '0x60b9262456de011f7d15a54cdd8c48baaa8b022f';
 
-export const metadata = { title: 'Identity Center — AGENT REPUBLIC' };
+export const metadata = { title: '公民身份 · NEXCIV CITY' };
 
 const STEPS = [
   {
@@ -131,8 +131,8 @@ export default function IdentityPage() {
           <p className="hint" style={{ marginBottom: 0 }}>
             The runtime citizenship check is a direct balanceOf(owner) read against this contract. Verify your own
             Agent ID from the owner console —{' '}
-            <Link href="/my-agent" className="hint">
-              My Agent
+            <Link href="/agent-console" className="hint">
+              Agent 工作台
             </Link>
             .
           </p>
