@@ -6,7 +6,7 @@ import { CityGlyph } from './CityGlyph';
 import { CityLoading } from './CityLoading';
 import { LightingMission } from './LightingMission';
 import { CafeShift, shiftLabel } from './CafeShift';
-import { CityExplorer } from './CityExplorer';
+import { CityExplorer, landmarkName } from './CityExplorer';
 import { WORKS_MANAGER, CityVisitPanel } from './CityVisitPanel';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
@@ -313,7 +313,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   const focusActive = Boolean(selection && (inspectionCamera
     ? inspectionCamera.kind === selection.kind && inspectionCamera.id === selection.id
     : selection.kind === 'resident' && view === 'follow' && selection.id === selected));
-  const cameraLandmark = inspectionCamera?.kind === 'building' ? PLACES[inspectionCamera.id] : undefined;
+  const cameraLandmark = inspectionCamera?.kind === 'building' ? landmarkName(inspectionCamera.id) : undefined;
   const visitMovement = visitObservation?.movement;
   const visitActivity = visitObservation?.recentActivities.find(({ requestId }) => requestId === visitMovement?.requestId);
   const managerPresent = visitMovement?.status !== 'walking' && Boolean(visitObservation?.nearby?.people.some(({ id }) => id === WORKS_MANAGER.id));

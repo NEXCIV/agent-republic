@@ -290,8 +290,7 @@ def counter_table(g):
         g.slab(circle(0.055, 12, x + dx, y), FLOOR + 1.155, FLOOR + 1.156, SOIL)
 
 
-def main():
-    bpy.ops.wm.read_factory_settings(use_empty=True)
+def prepare_finishes():
     for idx, (name, tint) in enumerate(FINISHES):
         mat = material(
             "MAT_" + PALETTE[idx][0],
@@ -301,6 +300,11 @@ def main():
             2.3 if idx == OPAL else 0.69 if idx == HONEY else 0,
         )
         mat.use_backface_culling = idx not in (PINE, LINEN)
+
+
+def main():
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    prepare_finishes()
     terrace, display = Geometry(), Geometry()
     paving(terrace)
     canopy(terrace)

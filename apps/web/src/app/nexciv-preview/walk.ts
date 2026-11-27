@@ -16,6 +16,7 @@ import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
 import { THEATRE_CLOCK, THEATRE_STAGE } from '../../lib/theatre-layout';
 import { createTheatreLighting } from './theatre-lighting';
+import { createWestPool } from './west-reflecting-pool';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -24,7 +25,7 @@ export type View = 'overview' | 'follow' | District;
 export type DistrictStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 export type AgentId = ResidentId;
 export type FollowId = AgentId | '02';
-export type WalkLandmarkId = 'registry' | 'works' | 'center' | 'governance' | 'market';
+export type WalkLandmarkId = 'registry' | 'works' | 'center' | 'governance' | 'market' | 'forum' | 'west-pool';
 const WORKS_MANAGER = 'works.manager';
 type ActorId = FollowId | typeof WORKS_MANAGER;
 export type WalkSelection = { kind: 'building'; id: WalkLandmarkId }
@@ -110,12 +111,14 @@ const DETAIL_FILES = {
 };
 type Detail = keyof typeof DETAIL_FILES;
 const LANDMARK_DETAILS = ['registry', 'works', 'center', 'hall'] as const;
-const LANDMARK_FRAMING: Record<WalkLandmarkId, { center: CityPoint; yaw: number; distance: number }> = {
-  registry: { center: [80, 4, -23.5], yaw: -0.45, distance: 27 },
-  works: { center: [95, 6, 82], yaw: -2.76, distance: 33 },
-  center: { center: [-98.6, 6, -64.6], yaw: 1.05, distance: 31 },
+const LANDMARK_FRAMING: Record<WalkLandmarkId, { center: CityPoint; yaw: number; distance: number; pitch?: number; district?: District }> = {
+  registry: { center: [80, 4, -23.5], yaw: -0.45, distance: 27, district: 'east' },
+  works: { center: [95, 6, 82], yaw: -2.76, distance: 33, district: 'east' },
+  center: { center: [-98.6, 6, -64.6], yaw: 1.05, distance: 31, district: 'research' },
   governance: { center: [0, 7, -95], yaw: 0.20, distance: 36 },
   market: { center: [18, 3.8, 60.5], yaw: -1.03, distance: 42 },
+  forum: { center: [-95, 1.5, 87], yaw: 2.76, distance: 33, district: 'west' },
+  'west-pool': { center: [-80.6, 0.74, 32.5], yaw: -0.16, distance: 24.8, pitch: 0.16, district: 'west' },
 };
 const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_01_Governance_Hall', 'governance'],
@@ -475,6 +478,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const observedFacing = new THREE.Vector3();
   const cafeProps = new THREE.Group();
   const promenade = new THREE.Group();
+  const westPromenade = new THREE.Group();
+  const westPool = createWestPool(lakeTime);
+  westPromenade.add(westPool);
+  westPromenade.visible = false;
+  scene.add(westPromenade);
   let kioskProxy: THREE.Object3D | undefined;
   let kioskDetail: THREE.Object3D | undefined;
   let southGardens: THREE.Object3D | undefined;
@@ -738,8 +746,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function resetOrbit() {
     if (framedLandmark) {
-      const { yaw, distance } = LANDMARK_FRAMING[framedLandmark];
-      [orbitYaw, orbitPitch, desiredDistance] = [yaw, 0.53, distance];
+      const { yaw, distance, pitch = 0.53 } = LANDMARK_FRAMING[framedLandmark];
+      [orbitYaw, orbitPitch, desiredDistance] = [yaw, pitch, distance];
       return;
     }
     if (mode !== 'overview' && mode !== 'follow') {
@@ -789,11 +797,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
     mode = 'overview';
     framedLandmark = target.id;
-    landmarkTarget.set(...LANDMARK_FRAMING[target.id].center);
+    const framing = LANDMARK_FRAMING[target.id];
+    landmarkTarget.set(...framing.center);
     resetOrbit();
-    if (target.id === 'works' || target.id === 'registry') loadDistrict('east', true);
+    if (framing.district) loadDistrict(framing.district, true);
     else if (target.id === 'governance') loadNorth(true);
-    else if (target.id === 'center') loadDistrict('research', true);
     else loadDetail('market');
   }
 
@@ -1062,7 +1070,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function animate(now: number) {
     if (ended || contextLost || !model) return;
     const dt = document.hidden ? 0 : Math.min((now - lastFrame) / 1000, 0.075);
-    if (playing && tween && (districts.shore.asset || citywide)) lakeTime.value += dt;
+    if (playing && tween && (districts.shore.asset || districts.west.asset || citywide)) lakeTime.value += dt;
     lastFrame = now;
     measurements++;
     if (now - measuredAt >= 1200) {
@@ -1262,8 +1270,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const patrol = followedPatrol();
     const following = mode === 'follow' && patrol;
     const district = mode !== 'overview' && mode !== 'follow' ? districts[mode] : undefined;
-    const framedLandmarkLoaded = framedLandmark === 'works' || framedLandmark === 'registry' ? districts.east.asset
-      : framedLandmark === 'center' ? districts.research.asset : framedLandmark === 'governance' ? north : model;
+    const framedDistrict = framedLandmark && LANDMARK_FRAMING[framedLandmark].district;
+    const framedLandmarkLoaded = framedDistrict ? districts[framedDistrict].asset : framedLandmark === 'governance' ? north : model;
     let wide = Boolean(citywide && (mode === 'overview' && (!framedLandmark || !framedLandmarkLoaded)
       || (citywide.visible && (mode === 'follow' && !patrol
         || district && (district.status === 'loading' || orbitDistance > 192)))));
@@ -1396,6 +1404,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       renderer.toneMappingExposure = wide ? 0.82 : 0.88;
       renderer.shadowMap.needsUpdate = true;
     }
+    westPromenade.visible = wide || Boolean(districts.west.asset);
     // Keep enough depth precision in the wide view and avoid clipping near the resident.
     const near = following && !wide ? 0.18 : Math.max(1, orbitDistance * (approaching ? 0.026 : 0.055));
     const far = wide ? 920 : seeingLake ? 520 : 285;
@@ -1503,7 +1512,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.006, 0.16, 1.18);
     } else {
       orbitYaw -= dx * 0.006;
-      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, 0.48, 1.45);
+      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, framedLandmark === 'west-pool' ? 0.14 : 0.48, 1.45);
     }
   }
 
@@ -1965,6 +1974,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     softenRetailWindows(model);
     street.add(model);
     addPromenade();
+    registerLandmark('west-pool', westPool);
+    loadPromenadeAsset('west-forum-promenade.glb', asset => {
+      westPromenade.add(asset);
+      for (const node of asset.children) {
+        if (node.name.startsWith('Forum')) registerLandmark('forum', node);
+      }
+    });
     if (cafeMode || sharedMode) {
       street.add(cafeProps);
       if (fishingGear) cafeProps.add(fishingGear.group);
@@ -2042,6 +2058,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (north) disposeModel(north);
       disposeModel(cafeProps);
       disposeModel(promenade);
+      westPool.removeFromParent();
+      westPool.geometry.dispose();
+      westPool.dispose();
+      disposeModel(westPromenade);
       if (southGardens) disposeModel(southGardens);
       disposeModel(lightingProps);
       fishingGear?.dispose();

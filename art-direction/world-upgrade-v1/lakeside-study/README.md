@@ -16,6 +16,12 @@
 
 在仓库根目录运行 Blender 的 `-b --factory-startup --python-exit-code 2 -P scripts/build_nexciv_coffee_promenade.py` 可重建街景布置。南花园沿用 `scripts/export_nexciv_walk_preview.py -- --chunk cafe-gardens` 导出流程。
 
+### 西侧剧场与喷泉步道
+
+在共享城市的「地点与居民」里选「社区剧场 → 聚焦建筑」可看到北门与六层看台，选「西区喷泉步道 → 查看水景」可从水池南端近看喷流、街树和建筑的倒影。看台两侧和后方的三条楼梯嵌有暖色踏步灯，舞台演出灯沿用剧场场次控制。水池南端的石铺地和地面铜箭头沿居民原有路线通往剧场。[四个网页机位的改造前后对照](renders/NEXCIV_West_Theatre_Promenade_Comparison.jpg)
+
+网页为近远景共用一份 0.32 MB 的布置模型，含 18,460 个三角面。池边的平面反射每秒最多采样十次，随镜头拉远淡出，超过 64 米只绘制水色与水纹。沿居民路线和 01、03 号入座通道实测 239 个位置，新铺面在采样处最多高出原路面 2.4 厘米。在仓库根目录运行 Blender 的 `-b --factory-startup --python-exit-code 2 -P scripts/build_nexciv_west_forum.py` 可重建布置模型。
+
 ### 议会大厅和外围立面重建
 
 议会大厅按原地块和三拱门、铜绿穹顶的轮廓重建。浅色拱石、铜质窗框、内退玻璃、门厅地板和室内家具均可在 Blender 中选择。外围临街商住楼与屋顶花园商铺复用各自的几何模板，花园住宅单独采用层层退台和屋顶廊架。三类街楼的验收窗位在玻璃之后约 1.27 米仍能命中实体内墙。议会大厅大窗可看到纵深约 10 米的门厅。

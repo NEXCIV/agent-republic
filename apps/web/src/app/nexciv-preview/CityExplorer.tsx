@@ -9,9 +9,15 @@ const LANDMARKS = {
   works: { area: '东区', description: '这里是城市施工与现场巡查的工作点。入口外有等候区和现场管理员。' },
   governance: { area: '北区', description: '居民在这里查阅议事公告，了解正在讨论的公共项目。' },
   market: { area: '中央街区', description: '中央广场旁的街角市集。沿街可以前往咖啡摊和公共座位。' },
+  forum: { area: '西区', description: '沿喷泉步道向南，穿过北门就是露天剧场。六层看台环绕中央舞台。' },
+  'west-pool': { area: '西区', description: '剧场以北的长水池有七组喷泉。从南端沿池边看，可以看到对街的树和楼映在水里。' },
   registry: { area: '东区', description: '城市的公民登记服务地标，位于公共建设中心以北。' },
   center: { area: '研究区', description: '西北研究街区的地标，毗邻研究步道与阅览室。' },
 } satisfies Record<WalkLandmarkId, { area: string; description: string }>;
+
+export function landmarkName(id: WalkLandmarkId) {
+  return id === 'west-pool' ? '西区喷泉步道' : CITY_PLACES[id];
+}
 
 const RESIDENTS: Record<FollowId, string> = { '01': '城市居民', '02': '建设工人', '03': '研究人员' };
 
@@ -50,7 +56,7 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
 
   const landmark = selection?.kind === 'building' ? LANDMARKS[selection.id] : undefined;
   const manager = selection?.kind === 'person';
-  const name = selection?.kind === 'building' ? CITY_PLACES[selection.id]
+  const name = selection?.kind === 'building' ? landmarkName(selection.id)
     : selection?.kind === 'resident' ? residentNames?.[selection.id] ?? `${selection.id} 号居民` : manager ? '现场管理员' : '地点与居民';
   const marketGuest = selection?.kind === 'resident' && selection.id === '02' && workerStatus !== undefined;
   const canFocus = sceneState === 'ready' && (selection?.kind === 'building' || (manager && managerPresent) || (marketGuest && workerStatus)
@@ -71,7 +77,7 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
       </p>}
       <div className={styles.explorerActions}>
         <button type="button" disabled={!canFocus} aria-pressed={focusActive} onClick={() => onFocus(selection)}>
-          {selection.kind === 'building' ? '聚焦建筑' : manager ? '聚焦管理员' : '跟随居民'}
+          {selection.kind === 'building' ? (selection.id === 'west-pool' ? '查看水景' : '聚焦建筑') : manager ? '聚焦管理员' : '跟随居民'}
         </button>
         {cafeLink && selection.kind === 'building' && selection.id === 'market' && <Link href="/nexciv-preview/cafe" prefetch={false}>打开咖啡街试玩</Link>}
       </div>
@@ -80,8 +86,8 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
       <h3>地标</h3>
       <ul aria-label="地标">
         {(Object.keys(LANDMARKS) as WalkLandmarkId[]).map((id) => <li key={id}>
-          <button type="button" aria-label={CITY_PLACES[id]} onClick={() => onSelect({ kind: 'building', id })}>
-            <span>{CITY_PLACES[id]}</span><small>{LANDMARKS[id].area}</small>
+          <button type="button" aria-label={landmarkName(id)} onClick={() => onSelect({ kind: 'building', id })}>
+            <span>{landmarkName(id)}</span><small>{LANDMARKS[id].area}</small>
           </button>
         </li>)}
       </ul>
