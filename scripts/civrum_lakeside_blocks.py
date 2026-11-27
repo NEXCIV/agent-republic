@@ -54,6 +54,20 @@ def replace_infill(asset, suffix):
     asset["replaces"] = ", ".join(names)
 
 
+def office_parapet(g, roof):
+    outer = rectangle(0, 0, 10.74, 12.89)
+    inner = rectangle(0, 0, 10.26, 12.43)
+    top = roof + 0.63
+    # One cap ring keeps adjacent rails from drawing over each other at the corners.
+    g.band(outer, inner, top, GOLD)
+    for outline in (outer, inner[::-1]):
+        start = len(g.verts)
+        g.verts.extend((x, y, z) for z in (roof, top) for x, y in outline)
+        for i in range(4):
+            j = (i + 1) % 4
+            g.face((start + i, start + j, start + j + 4, start + i + 4), BASALT)
+
+
 def make_office(floors, crown):
     """A glazed office with a stepped crown, a recessed lobby and lit window bays."""
     g = Geometry()
@@ -66,14 +80,17 @@ def make_office(floors, crown):
     for level in range(floors):
         setback = 1 if level >= floors - 3 else 0
         w, d, z = 14.0 - setback * 2.5, 16.9 - setback * 3.0, 4 + level * 3.0
-        g.box(0, 0, z, w, d, 3.0, GLASS, 0.5)
+        has_gold_band = level in (floors - 4, floors - 1)
+        # End the glazing and mullions under the gold plate, clear of its top face.
+        facade_height = 2.84 if has_gold_band else 3.0
+        g.box(0, 0, z, w, d, facade_height, GLASS, 0.5)
         g.box(0, 0, z, w + 0.3, d + 0.3, 0.43, BASALT, 0.5, METAL)
         for side in (-1, 1):
             for k in range(-2, 3):
                 for is_front in (True, False):
                     axis = k * (w if is_front else d) / 5.4
                     x, y = (axis, side * d / 2) if is_front else (side * w / 2, axis)
-                    g.box(x, y, z + 0.43, 0.13, 0.13, 2.57, METAL)
+                    g.box(x, y, z + 0.43, 0.13, 0.13, facade_height - 0.43, METAL)
                     pattern = (level * 5 + k * 3 + side + is_front + crown * 3) % 11
                     if pattern not in (0, 3):
                         tint = AMBER if pattern in (1, 4, 7, 8) else COOL
@@ -81,14 +98,12 @@ def make_office(floors, crown):
                             g.box(x + 0.69, y + side * 0.024, z + 0.71, 1.17, 0.05, 1.8, tint)
                         else:
                             g.box(x + side * 0.024, y + 0.69, z + 0.71, 0.05, 1.17, 1.8, tint)
-        if level in (floors - 4, floors - 1):
-            g.box(0, 0, z + 2.84, w + 0.35, d + 0.35, 0.16, GOLD, 0.5)
+        if has_gold_band:
+            g.box(0, 0, z + facade_height, w + 0.35, d + 0.35, 3.0 - facade_height, GOLD, 0.5)
     roof = 4 + floors * 3
     g.box(0, 0, roof, 10.9, 13.2, 0.28, BASALT, 0.5)
     roof += 0.28
-    for side in (-1, 1):
-        g.box(0, side * 6.33, roof, 10.68, 0.23, 0.63, BASALT, cap=GOLD)
-        g.box(side * 5.25, 0, roof, 0.24, 12.67, 0.63, BASALT, cap=GOLD)
+    office_parapet(g, roof)
     g.box(0, 0, roof, 9.9, 12.1, 0.054, STONE, 0.29)
     for x, y in ((-3.80, -3.28), (3.80, 2.9)):
         g.box(x, y, roof + 0.055, 1.64, 4.5, 0.32, METAL, 0.17)

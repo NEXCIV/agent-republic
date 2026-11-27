@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import re
 import sys
 from collections import defaultdict
 from contextlib import contextmanager
@@ -30,7 +31,7 @@ from build_nexciv_facades import (
 from build_nexciv_facades import finishes as facade_finishes
 from build_nexciv_road_markings import ASPHALT, ROAD_Z, WHITE
 from build_nexciv_road_markings import DESTINATION as SOURCE
-from civrum_lakeside_blocks import PALETTE, STONE
+from civrum_lakeside_blocks import PALETTE, STONE, make_office
 from civrum_lakeside_landmarks import AGENT_CENTER, REGISTRY, place_agent_center
 from refine_nexciv_public_works import ENTRANCE_DETAILS, ROOF_DETAILS, WORKS, refine_public_works
 from refine_nexciv_registry import refine_registry
@@ -43,6 +44,7 @@ WORKS_DEMONSTRATOR_LIBRARY = ROOT / "art-direction/world-upgrade-v1/lakeside-stu
 WORKS_REBUILT_LIBRARY = ROOT / "art-direction/world-upgrade-v1/landmark-masters/buildings/Public_Construction_Rebuilt.blend"
 COUNCIL_NOTICE_KIOSK = "CIVRUM_PROP_INFO_KIOSK_01.002"
 COUNCIL_NOTICE_PLACEMENT = ROOT / "apps/web/src/lib/council-notice-placement.json"
+CIVIC_OFFICE_MESH = re.compile(r"Civic office \| (\d+) floors \| crown ([1-3])(?:\.\d+)?")
 WEST, EAST, SOUTH, NORTH = -52, 53, -81, 46
 GOVERNANCE_NORTH = 116
 GOVERNANCE_CROSSING_ROAD = "CIVRUM_ROAD_STRAIGHT_LOCAL.002"
@@ -693,7 +695,12 @@ def stage_assets(scene, graph, chunk, library=DEST):
         key = source.original.data
         mesh = cache.get(key) if len(source.modifiers) == 0 and source.type == "MESH" else None
         if mesh is None:
-            if market_proxy and source.type == "MESH":
+            office = CIVIC_OFFICE_MESH.fullmatch(key.name) if name.startswith("Civic setback office ") else None
+            if office:
+                # The archived road scene predates the roof fix. Keep its placement and finish overrides.
+                floors, crown = map(int, office.groups())
+                mesh = make_office(floors, crown - 1)
+            elif market_proxy and source.type == "MESH":
                 mesh = source.original.data.copy()
             else:
                 mesh = bpy.data.meshes.new_from_object(source.evaluated_get(graph), depsgraph=graph)
