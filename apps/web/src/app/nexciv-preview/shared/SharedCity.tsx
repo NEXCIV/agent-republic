@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { CityMark } from '@/components/CityMark';
 import type { SharedPilotView } from '../../../lib/shared-pilot-runtime';
-import { SHARED_AVATARS } from '../../../lib/shared-pilot-profiles';
 import { CITY_PLACES } from '../../../lib/city-movement';
 import { createWalk, type DistrictStatus, type WalkController } from '../walk';
 import base from '../preview.module.css';
@@ -16,7 +16,11 @@ type SharedCityView = SharedPilotView & { invitesEnabled: boolean };
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
 const endpoint = '/api/nexciv-preview/shared';
 
-export function SharedCity() {
+const CITY_PATH = '/nexciv-preview/shared';
+const JOIN_PATH = `${CITY_PATH}/join`;
+
+export function SharedCity({ children }: { children: ReactNode }) {
+  const joining = usePathname() === JOIN_PATH;
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const latest = useRef<SharedPilotView | null>(null);
@@ -32,9 +36,6 @@ export function SharedCity() {
   const [renderAttempt, setRenderAttempt] = useState(0);
   const [fps, setFps] = useState(0);
   const [failedAgents, setFailedAgents] = useState<ResidentId[]>([]);
-  const hasSnapshot = snapshot !== null;
-  const primaryAsset = SHARED_AVATARS[snapshot?.profiles.find(({ residentId }) => residentId === '01')?.avatar ?? 'citizen'].asset;
-  const secondaryAsset = SHARED_AVATARS[snapshot?.profiles.find(({ residentId }) => residentId === '02')?.avatar ?? 'builder'].asset;
 
   const focus = useCallback((id: CameraView) => {
     setView(id);
@@ -75,7 +76,7 @@ export function SharedCity() {
 
   useEffect(() => {
     const host = viewport.current;
-    if (!host || staticMode || !hasSnapshot) return;
+    if (!host || staticMode) return;
     setScene('loading');
     setOverview('idle');
     setView('overview');
@@ -85,9 +86,10 @@ export function SharedCity() {
       controller = createWalk(host, 'overview', true, {
         ready: () => setScene('ready'), fallback: () => setScene('fallback'),
         agent: (id, report) => {
-          if ((id === '01' || id === '02') && report.status === 'unavailable') {
-            setFailedAgents((previous) => [...new Set([...previous, id])]);
-          }
+          if (id !== '01' && id !== '02') return;
+          setFailedAgents((current) => report.status === 'unavailable'
+            ? current.includes(id) ? current : [...current, id]
+            : current.includes(id) ? current.filter((failed) => failed !== id) : current);
         },
         district: () => {}, overview: setOverview, fps: setFps,
         onSelect: (item) => {
@@ -95,14 +97,20 @@ export function SharedCity() {
             setView(item.id); controller?.select(item); controller?.view('follow', item.id);
           }
         },
-      }, false, true, { '01': primaryAsset, '02': secondaryAsset });
+      }, false, true);
       world.current = controller;
       controller.syncShared(latest.current);
     } catch { setScene('fallback'); }
     return () => { controller?.dispose(); world.current = null; };
-  }, [staticMode, renderAttempt, hasSnapshot, primaryAsset, secondaryAsset]);
+  }, [staticMode, renderAttempt]);
+
+  useEffect(() => { if (joining) focus('overview'); }, [focus, joining]);
 
   const live3d = scene === 'ready' && !staticMode;
+  const showCity = live3d && (view !== 'overview' || overview === 'ready' || overview === 'unavailable');
+  const loadingCity = !staticMode && scene !== 'fallback' && !showCity;
+  const previewStatus = staticMode || scene === 'fallback' ? '2D 城市预览'
+    : showCity ? '3D 城市已就绪' : '正在加载 3D 城市…';
   const social = snapshot?.social;
   const meeting = social?.meeting;
   const survey = snapshot?.survey;
@@ -115,28 +123,31 @@ export function SharedCity() {
     ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text })),
     ...(survey?.events ?? [])] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
   useEffect(() => {
-    if (!live3d || meeting?.status !== 'talking' || watchedMeeting.current === meeting.id) return;
+    if (joining || !live3d || meeting?.status !== 'talking' || watchedMeeting.current === meeting.id) return;
     watchedMeeting.current = meeting.id;
     if (view === 'overview') focus('meeting');
-  }, [focus, live3d, meeting?.id, meeting?.status, view]);
+  }, [focus, joining, live3d, meeting?.id, meeting?.status, view]);
   useEffect(() => {
-    if (!live3d || task?.status !== 'surveying' || watchedSurvey.current === task.id) return;
+    if (joining || !live3d || task?.status !== 'surveying' || watchedSurvey.current === task.id) return;
     watchedSurvey.current = task.id;
     if (view === 'overview' || view === 'meeting') focus('survey');
-  }, [focus, live3d, task?.id, task?.status, view]);
+  }, [focus, joining, live3d, task?.id, task?.status, view]);
   return <div className={base.page}>
-    <section className={`${base.viewer} ${styles.viewer}`} aria-label="共享城市观察">
+    <section className={`${base.viewer} ${styles.viewer}`} data-joining={joining} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
       <img className={base.poster} src="/nexciv-walk/city-dusk.webp" alt="湖畔城区俯视图" />
-      <div ref={viewport} className={base.viewport} data-live={live3d} data-overview={overview} aria-hidden={!live3d} />
+      <div ref={viewport} className={base.viewport} data-live={showCity} data-overview={overview} aria-hidden={!showCity} inert={!showCity} />
       <header className={styles.header}>
         <Link className={styles.brand} href="/"><CityMark /><span>NEXCIV <b>CITY</b></span></Link>
         <span className={styles.divider}>共享城市</span>
-        <span className={styles.connection} data-live={status === 'live'}><i />{status === 'live' ? '状态同步中' : status === 'connecting' ? '正在连接' : '连接中断'} · DEMO</span>
-        {snapshot?.invitesEnabled && <Link className={styles.join} href="/nexciv-preview/shared/join" prefetch={false}>角色与接入</Link>}
+        <span className={styles.connection} data-live={joining || loadingCity ? showCity : status === 'live'} role="status"><i />{joining || loadingCity ? previewStatus : status === 'live' ? '状态同步中' : status === 'connecting' ? '正在连接' : '连接中断'} · DEMO</span>
+        {joining ? <Link className={styles.join} href={CITY_PATH}>返回城市</Link>
+          : snapshot?.invitesEnabled && <Link className={styles.join} href={JOIN_PATH} prefetch={false}>角色与接入</Link>}
         <button type="button" onClick={() => { if (!staticMode && scene !== 'fallback') setStaticMode(true); else { setScene('loading'); setOverview('idle'); setView('overview'); setFailedAgents([]); setStaticMode(false); setRenderAttempt((attempt) => attempt + 1); } }}>{staticMode || scene === 'fallback' ? '开启 3D' : '2D'}</button>
-        <Link href="/nexciv-preview" prefetch={false}>独立试玩</Link>
+        {!joining && <Link href="/nexciv-preview" prefetch={false}>独立试玩</Link>}
       </header>
+      {children}
+      {!joining && <>
       <aside className={styles.residents} aria-label="两名共享居民">
         <div className={styles.panelHead}><h1>同城居民</h1><span>{snapshot?.engines.length ?? 0} / 2</span></div>
         <p className={styles.explain}>两名居民 · 共用一个城市存档</p>
@@ -200,6 +211,7 @@ export function SharedCity() {
         </li>)}</ol> : <p>等待居民首次行动。所有位置和事件都来自同一个服务端存档。</p>}
         <div className={styles.journalFooter}>{snapshot?.running === false ? '本轮规则活动暂未继续' : '链下规则模拟 · 非链上交易'} {live3d && fps > 0 && <span>{fps} FPS</span>}</div>
       </aside>
+      </>}
     </section>
   </div>;
 }

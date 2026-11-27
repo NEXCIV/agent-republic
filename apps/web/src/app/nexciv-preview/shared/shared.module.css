@@ -64,3 +64,7 @@
 .journalFooter { display: flex; gap: 10px; justify-content: space-between; color: #bfb8ab; font-size: 11px; border-top: 1px solid #46443d; padding-top: 9px; }
 @media (max-width: 800px) { .header { left: 10px; right: 10px; gap: 8px; } .header .divider { display: none; } .residents { left: 10px; width: 252px; } .journal { right: 10px; width: 290px; bottom: 10px; } }
 @media (max-width: 580px) { .viewer { min-height: 780px; } .residents { width: calc(100% - 20px); } .journal { width: calc(100% - 20px); } .connection { font-size: 10px; } .brand, .join { font-size: 12px; } .header:has(.join) a:last-child { display: none; } }
+@media (max-width: 580px) {
+  .viewer[data-joining="true"] { min-height: 100svh; }
+  .viewer[data-joining="true"] .header { flex-wrap: wrap; }
+}

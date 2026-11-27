@@ -10,6 +10,7 @@ import type { CafeSnapshot } from '../../lib/cafe-life';
 import { cityWalkTiming, type CityMovement, type CityObservation, type CityRegion } from '../../lib/city-movement';
 import type { CityPoint } from '../../lib/cafe-geometry';
 import type { SharedPilotView } from '../../lib/shared-pilot-runtime';
+import { SHARED_AVATARS } from '../../lib/shared-pilot-profiles';
 import type { LightingPilot } from '../../lib/city-activities';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
@@ -34,6 +35,8 @@ export type AgentStatus = Activity | 'loading' | 'unavailable';
 export type AgentReport = { status: AgentStatus; progress: number; from?: Place; destination?: Place };
 type RouteData = Connection & { target: RoutePoint };
 type Patrol = ReturnType<typeof createAgentPatrol>;
+const SHARED_RESIDENTS = ['01', '02'] as const;
+type SharedResident = (typeof SHARED_RESIDENTS)[number];
 type ActiveAgent = {
   asset: GLTF;
   patrol: Patrol;
@@ -384,7 +387,7 @@ function addCouncilNotice(asset: THREE.Object3D) {
 }
 
 export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks,
-  cafeMode = false, sharedMode = false, sharedAssets?: { '01': string; '02': string }): WalkController {
+  cafeMode = false, sharedMode = false): WalkController {
   const started = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   const canvas = renderer.domElement;
@@ -574,12 +577,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let retailRequested = false;
   const proxies = new Map<Detail, THREE.Object3D[]>();
   let actor: GLTF | undefined;
-  let actorLoading = true;
+  let actorLoading = !sharedMode;
   const agents = new Map<AgentId, ActiveAgent>();
   const navigation = createNavigation();
   const marketGreeting = createMarketGreeting();
   let marketGuest: { asset: GLTF; patrol: Patrol } | undefined;
-  let sharedOther: { asset: GLTF; patrol: Patrol } | undefined;
+  const sharedActors = new Map<SharedResident, { asset: GLTF; patrol: Patrol }>();
+  const sharedRequests = new Map<SharedResident, { file: string }>();
   let sharedSnapshot: SharedPilotView | null = null;
   let sharedReceivedAt = performance.now();
   const sharedJourneys = new Map<string, string>();
@@ -641,7 +645,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function selectableActor(id: ActorId) {
-    if (sharedMode) return id === '01' ? agents.get('01') : id === '02' ? sharedOther : undefined;
+    if (sharedMode) return id === '01' || id === '02' ? sharedActors.get(id) : undefined;
     const assignedWorker = cityObservation?.lightingPilot?.worker;
     if (id === WORKS_MANAGER) return assignedWorker ? undefined : siteHost;
     if (id === '02') return cafeMode || assignedWorker ? siteHost : marketGuest;
@@ -967,8 +971,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const projection = sharedSnapshot;
     const elapsed = Math.max(0, now - sharedReceivedAt);
     const serverTime = (projection?.serverTime ?? 0) + Math.min(elapsed, 1600);
-    for (const id of ['01', '02'] as const) {
-      const patrol = id === '01' ? agents.get('01')?.patrol : sharedOther?.patrol;
+    for (const id of SHARED_RESIDENTS) {
+      const patrol = sharedActors.get(id)?.patrol;
       const resident = projection?.residents.find(({ residentId }) => residentId === id);
       if (patrol) patrol.root.visible = Boolean(resident);
       if (!resident) continue;
@@ -1051,7 +1055,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
 
     const primaryAgent = agents.get('01');
-    const primary = primaryAgent?.patrol;
+    const primary = sharedMode ? sharedActors.get('01')?.patrol : primaryAgent?.patrol;
     const shift = cafeSnapshot?.run;
     const cityWalk = cityObservation?.movement;
     const projectedPosition = !cafeMode ? cityObservation?.position : undefined;
@@ -1372,7 +1376,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     renderer.render(scene, camera);
     const showStreetDetails = mode === 'east' || mode === 'west' || mode === 'research'
       || (mode === 'follow' && patrol && patrol.root.position.z > -44) || orbitDistance < 59;
-    const readyForDetails = !actorLoading && now - firstCityFrame > 650 && (cafeMode || !playing || !primary || primary.progress > 0);
+    const readyForDetails = !actorLoading && now - firstCityFrame > 650
+      && (sharedMode || cafeMode || !playing || !primary || primary.progress > 0);
     if (!document.hidden && readyForDetails) {
       const nearMarket = marketEntrance.distanceTo(camera.position) < 29 || (primary && marketEntrance.distanceTo(primary.root.position) < 29);
       if (nearMarket) {
@@ -1785,7 +1790,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     updateCouncilNotice?.(text, programme);
   }
 
-  request(sharedMode ? sharedAssets?.['01'] ?? 'agent-01.glb' : 'agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
+  if (!sharedMode) request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
     if (ended || contextLost) return;
     const result = await loader.parseAsync(bytes, ASSET_PATH);
     if (ended || contextLost) { disposeModel(result.scene); return; }
@@ -1795,21 +1800,45 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (!ended && !contextLost) callbacks.agent('01', { status: 'unavailable', progress: 0 });
   }).finally(() => { actorLoading = false; });
 
-  if (sharedMode) request(sharedAssets?.['02'] ?? 'agent-02.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
-    if (ended || contextLost) return;
-    const asset = await loader.parseAsync(bytes, ASSET_PATH);
-    if (ended || contextLost) { disposeModel(asset.scene); return; }
-    const start: RoutePoint = [...CAFE_COUNTER];
-    const facing: RoutePoint = [start[0], start[1], start[2] + 1];
+  async function loadSharedActor(id: SharedResident, file: string) {
+    if (sharedRequests.get(id)?.file === file) return;
+    const pending = { file };
+    sharedRequests.set(id, pending);
+    const current = () => !ended && !contextLost && sharedRequests.get(id) === pending;
+    const removePrevious = () => {
+      const previous = sharedActors.get(id);
+      if (!previous) return;
+      actorLayer.remove(previous.patrol.root);
+      previous.patrol.dispose();
+      disposeModel(previous.asset.scene);
+      sharedActors.delete(id);
+      sharedJourneys.delete(id);
+    };
+    let asset: GLTF | undefined;
     try {
+      const bytes = await (await request(file)).arrayBuffer();
+      if (!current()) return;
+      asset = await loader.parseAsync(bytes, ASSET_PATH);
+      if (!current()) { disposeModel(asset.scene); return; }
+      const start: RoutePoint = [...CAFE_COUNTER];
+      const facing: RoutePoint = [start[0], start[1], start[2] + 1];
       const patrol = createAgentPatrol(asset, [start, facing], [facing[0], facing[2]]);
       patrol.root.visible = false;
-      sharedOther = { asset, patrol };
+      removePrevious();
+      sharedActors.set(id, { asset, patrol });
       actorLayer.add(patrol.root);
-      callbacks.agent('02', { status: 'arrived', progress: 100 });
-    } catch { disposeModel(asset.scene); callbacks.agent('02', { status: 'unavailable', progress: 0 }); }
-  }).catch(() => { if (!ended && !contextLost) callbacks.agent('02', { status: 'unavailable', progress: 0 }); });
+    } catch {
+      if (asset) disposeModel(asset.scene);
+      if (current()) {
+        removePrevious();
+        callbacks.agent(id, { status: 'unavailable', progress: 0 });
+      }
+      return;
+    }
+    callbacks.agent(id, { status: 'arrived', progress: 100 });
+  }
 
+  if (sharedMode && initialView === 'overview') loadCitywide();
   Promise.all([
     request('route.json').then((response) => response.json() as Promise<RouteData>),
     request('nexus-market.glb').then((response) => response.arrayBuffer()),
@@ -1858,7 +1887,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   return {
     syncCafe(snapshot) { cafeSnapshot = snapshot; receivedAt = performance.now(); },
-    syncShared(snapshot) { sharedSnapshot = snapshot; sharedReceivedAt = performance.now(); },
+    syncShared(snapshot) {
+      sharedSnapshot = snapshot;
+      sharedReceivedAt = performance.now();
+      if (!sharedMode || !snapshot) return;
+      for (const id of SHARED_RESIDENTS) {
+        const avatar = snapshot.profiles.find((profile) => profile.residentId === id)?.avatar;
+        void loadSharedActor(id, SHARED_AVATARS[avatar ?? (id === '01' ? 'citizen' : 'builder')].asset);
+      }
+    },
     syncCity(observation) {
       cityObservation = observation;
       cityReceivedAt = performance.now();
@@ -1887,9 +1924,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         marketGuest.patrol.dispose();
         disposeModel(marketGuest.asset.scene);
       }
-      if (sharedOther) {
-        sharedOther.patrol.dispose();
-        disposeModel(sharedOther.asset.scene);
+      for (const { asset, patrol } of sharedActors.values()) {
+        patrol.dispose();
+        disposeModel(asset.scene);
       }
       if (pierRegular) {
         pierRegular.patrol.dispose();

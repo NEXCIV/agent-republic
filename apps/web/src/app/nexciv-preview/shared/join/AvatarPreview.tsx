@@ -62,37 +62,35 @@ export function AvatarPreview({ avatar }: { avatar: SharedPilotAvatar }) {
   }
 
   return <section className={styles.avatarPreview} aria-labelledby="avatar-preview-title">
-    <div className={styles.previewInner}>
-      <header className={styles.previewHeader}>
-        <h2 id="avatar-preview-title">3D 外观预览</h2>
-        <p>{label}</p>
-      </header>
-      <div className={styles.previewStage}>
-        <div ref={host} className={styles.previewCanvas} data-ready={ready}
-          onPointerDown={(event) => {
-            if (!ready || !event.isPrimary || event.button !== 0) return;
-            event.currentTarget.setPointerCapture(event.pointerId);
-            drag.current = { id: event.pointerId, x: event.clientX };
-            rotate(0);
-          }}
-          onPointerMove={(event) => {
-            if (drag.current?.id !== event.pointerId) return;
-            const delta = event.clientX - drag.current.x;
-            drag.current.x = event.clientX;
-            turntable?.rotate(delta * .012);
-          }}
-          onLostPointerCapture={() => { drag.current = null; }}
-        />
-        {!ready && <div className={styles.previewPlaceholder}>
-          <Image src={portrait} alt={`${label}正面头像`} width={128} height={128} />
-          <p role="status">{failed ? '3D 预览暂不可用' : '正在加载 3D 外观…'}</p>
-        </div>}
-      </div>
-      <div className={styles.previewControls} aria-label="旋转预览" role="group" aria-hidden={!ready}>
-        <button type="button" disabled={!ready} aria-label="向左旋转角色" onClick={() => rotate(-Math.PI / 4)}>←</button>
-        <button type="button" disabled={!ready} onClick={() => setAuto(!auto)}>{auto ? '暂停旋转' : '自动旋转'}</button>
-        <button type="button" disabled={!ready} aria-label="向右旋转角色" onClick={() => rotate(Math.PI / 4)}>→</button>
-      </div>
+    <header className={styles.previewHeader}>
+      <h2 id="avatar-preview-title">3D 外观预览</h2>
+      <p>{label}</p>
+    </header>
+    <div className={styles.previewStage}>
+      <div ref={host} className={styles.previewCanvas} data-ready={ready}
+        onPointerDown={(event) => {
+          if (!ready || !event.isPrimary || event.button !== 0) return;
+          event.currentTarget.setPointerCapture(event.pointerId);
+          drag.current = { id: event.pointerId, x: event.clientX };
+          rotate(0);
+        }}
+        onPointerMove={(event) => {
+          if (drag.current?.id !== event.pointerId) return;
+          const delta = event.clientX - drag.current.x;
+          drag.current.x = event.clientX;
+          turntable?.rotate(delta * .012);
+        }}
+        onLostPointerCapture={() => { drag.current = null; }}
+      />
+      {!ready && <div className={styles.previewPlaceholder}>
+        <Image src={portrait} alt={`${label}正面头像`} width={128} height={128} />
+        <p role="status">{failed ? '3D 预览暂不可用' : '正在加载 3D 外观…'}</p>
+      </div>}
+    </div>
+    <div className={styles.previewControls} aria-label="旋转预览" role="group" aria-hidden={!ready}>
+      <button type="button" disabled={!ready} aria-label="向左旋转角色" onClick={() => rotate(-Math.PI / 4)}>←</button>
+      <button type="button" disabled={!ready} onClick={() => setAuto(!auto)}>{auto ? '暂停旋转' : '自动旋转'}</button>
+      <button type="button" disabled={!ready} aria-label="向右旋转角色" onClick={() => rotate(Math.PI / 4)}>→</button>
     </div>
   </section>;
 }
