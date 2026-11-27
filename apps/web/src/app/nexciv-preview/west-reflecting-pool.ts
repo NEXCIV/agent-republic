@@ -7,7 +7,7 @@ const basinShader = {
   name: 'West reflecting pool',
   uniforms: {
     color: { value: null }, tDiffuse: { value: null }, textureMatrix: { value: new THREE.Matrix4() },
-    waterTime: { value: 0 }, reflectionMix: { value: 0 },
+    waterTime: { value: 0 }, reflectionMix: { value: 0 }, overviewLighting: { value: 0 },
   },
   vertexShader: `
     uniform mat4 textureMatrix;
@@ -22,7 +22,7 @@ const basinShader = {
     }`,
   fragmentShader: `
     uniform sampler2D tDiffuse;
-    uniform float waterTime, reflectionMix;
+    uniform float waterTime, reflectionMix, overviewLighting;
     varying vec2 basin;
     varying vec3 world;
     varying vec4 reflectionUv;
@@ -46,13 +46,14 @@ const basinShader = {
         float fresnel = 0.18 + 0.56 * pow(1.0 - facing, 2.2);
         water = mix(water, reflected * vec3(0.84, 0.96, 1.0), reflectionMix * fresnel);
       }
+      water += overviewLighting * vec3(0.07, 0.73, 1.65) * exp(-0.56 * r * r);
       gl_FragColor = vec4(water, 1.0);
       #include <tonemapping_fragment>
       #include <colorspace_fragment>
     }`,
 };
 
-export function createWestPool(time: { value: number }) {
+export function createWestPool(time: { value: number }, overviewLighting: { value: number }) {
   const w = WIDTH / 2, h = LENGTH / 2, c = CORNER;
   const outline = new THREE.Shape();
   outline.moveTo(-w + c, -h);
@@ -68,6 +69,7 @@ export function createWestPool(time: { value: number }) {
   surface.rotation.x = -Math.PI / 2;
   const material = surface.material as THREE.ShaderMaterial;
   material.uniforms.waterTime = time;
+  material.uniforms.overviewLighting = overviewLighting;
   const reflectionMix = { value: 0 };
   material.uniforms.reflectionMix = reflectionMix;
   const reflect = surface.onBeforeRender.bind(surface);

@@ -17,6 +17,7 @@ import { createInstallationKit, createPilotLamp } from './lighting-pilot';
 import { THEATRE_CLOCK, THEATRE_STAGE } from '../../lib/theatre-layout';
 import { createTheatreLighting } from './theatre-lighting';
 import { createWestPool } from './west-reflecting-pool';
+import { createDuskReflection, lightOverview, lightOverviewPaving } from './overview-dusk';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -77,8 +78,10 @@ const START_DISTANCE = 115;
 const EXPANDED_PITCH = 1.08;
 const EXPANDED_DISTANCE = 166;
 const CITYWIDE_FILE = 'nexciv-city-overview.glb';
-const CITYWIDE_DISTANCE = 382;
-const CITYWIDE_PITCH = 0.99;
+const CITYWIDE_DISTANCE = 362;
+const CITYWIDE_PITCH = 0.735;
+const CITYWIDE_FOV = 39;
+const STREET_FOV = 49;
 const DISTRICT_ORBIT: Record<District, [yaw: number, pitch: number, distance: number]> = {
   east: [START_YAW, 1.02, 143],
   west: [-0.18, 1.02, 130],
@@ -164,7 +167,7 @@ function createResidentMarkerMaterial(label?: string, color = '#f0b90b') {
   return new THREE.SpriteMaterial({ map, sizeAttenuation: false, depthWrite: false, depthTest: !label, fog: false, toneMapped: false });
 }
 
-function disposeModel(asset: THREE.Object3D) {
+function disposeModel(asset: THREE.Object3D, sharedTexture?: THREE.Texture) {
   const materials = new Set<THREE.Material>();
   const maps = new Set<THREE.Texture>();
   const meshes = new Set<THREE.BufferGeometry>();
@@ -175,7 +178,7 @@ function disposeModel(asset: THREE.Object3D) {
     for (const material of list) {
       materials.add(material);
       for (const property of Object.values(material)) {
-        if (property instanceof THREE.Texture) maps.add(property);
+        if (property instanceof THREE.Texture && property !== sharedTexture) maps.add(property);
       }
     }
   });
@@ -238,14 +241,14 @@ function softenRetailWindows(asset: THREE.Object3D) {
   });
 }
 
-function addLakeRipples(asset: THREE.Object3D, time: { value: number }) {
+function addLakeRipples(asset: THREE.Object3D, time: { value: number }, overview = false) {
   asset.traverse((object) => {
     if (!(object instanceof THREE.Mesh) || object.userData.previewTier !== 'water') return;
     object.castShadow = false;
     const materials = Array.isArray(object.material) ? object.material : [object.material];
     for (const material of materials) {
       if (!(material instanceof THREE.MeshStandardMaterial)) continue;
-      material.customProgramCacheKey = () => 'nexciv-lake';
+      material.customProgramCacheKey = () => overview ? 'nexciv-lake-dusk' : 'nexciv-lake';
       material.onBeforeCompile = (shader) => {
         shader.uniforms.lakeTime = time;
         shader.vertexShader = 'varying vec2 vLakePosition;\n' + shader.vertexShader.replace(
@@ -264,6 +267,19 @@ function addLakeRipples(asset: THREE.Object3D, time: { value: number }) {
           normal = normalize(normal + mat3(viewMatrix) * slope * ripple);
           diffuseColor.rgb *= 1.0 + 0.018 * (sin(waveA) + sin(waveB)) * ripple;`,
         );
+        if (overview) {
+          shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `
+            #include <emissivemap_fragment>
+            vec3 toEye = normalize(cameraPosition - vec3(vLakePosition.x, 0.0, vLakePosition.y));
+            vec3 skyRay = reflect(-toEye, vec3(0.0, 1.0, 0.0));
+            float westernSky = pow(max(0.0, dot(skyRay, normalize(vec3(-0.68, 0.30, -0.67)))), 6.0);
+            float phase = dot(vLakePosition, vec2(0.93, 2.12)) + 2.1 * sin(vLakePosition.x * 0.13)
+              + 1.4 * sin(dot(vLakePosition, vec2(0.11, 0.31))) + lakeTime * 0.30;
+            float swell = sin(phase) * (1.0 - smoothstep(0.7, 2.0, fwidth(phase)));
+            totalEmissiveRadiance += vec3(0.007, 0.017, 0.048)
+              + vec3(0.19, 0.086, 0.071) * westernSky * (0.96 + 0.04 * swell);
+          `);
+        }
       };
     }
   });
@@ -413,13 +429,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   scene.add(street);
   const actorLayer = callbacks.onSelect ? new THREE.Group() : street;
   if (actorLayer !== street) scene.add(actorLayer);
-  const citySky = new THREE.Color('#837574');
+  const citySky = new THREE.Color('#858599');
   const horizon = new THREE.Color('#aa8e7b');
   const streetSky = createStreetSky(horizon);
   scene.background = streetSky;
   const fog = new THREE.Fog(horizon, 110, 235);
   scene.fog = fog;
-  const camera = new THREE.PerspectiveCamera(49, 1, 0.18, 285);
+  const camera = new THREE.PerspectiveCamera(STREET_FOV, 1, 0.18, 285);
   const ambient = new THREE.HemisphereLight('#b5ceff', '#81705a', 0.84);
   const sun = new THREE.DirectionalLight('#ffbb78', 2.35);
   const sunOffset = new THREE.Vector3(-105, 73, 71);
@@ -428,8 +444,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   sun.shadow.mapSize.setScalar(host.clientWidth <= 600 ? 1024 : 2048);
   sun.shadow.bias = -0.00016;
   scene.add(ambient, sun, sun.target);
-  const sunset = new THREE.DirectionalLight('#ffb56e', 2.65);
-  sunset.position.set(-210, 145, 120);
+  const sunset = new THREE.DirectionalLight('#ffc184', 2.72);
+  sunset.position.set(-218, 80, 34);
   sunset.target.position.set(0, 0, -22);
   sunset.castShadow = true;
   sunset.visible = false;
@@ -452,7 +468,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   generator.dispose();
 
   const focus = new THREE.Vector3(0, 0, 24);
-  const citywideFocus = new THREE.Vector3(0, 0, 9);
+  const citywideFocus = new THREE.Vector3(0, 0, 29);
   const districtFocus: Record<District, THREE.Vector3> = {
     east: new THREE.Vector3(83, 0, 44),
     west: new THREE.Vector3(-83, 0, 61),
@@ -479,7 +495,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const cafeProps = new THREE.Group();
   const promenade = new THREE.Group();
   const westPromenade = new THREE.Group();
-  const westPool = createWestPool(lakeTime);
+  const overviewWaterLights = { value: 0 };
+  const westPool = createWestPool(lakeTime, overviewWaterLights);
   westPromenade.add(westPool);
   westPromenade.visible = false;
   scene.add(westPromenade);
@@ -575,6 +592,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let contextLost = false;
   let model: THREE.Object3D | undefined;
   let citywide: THREE.Object3D | undefined;
+  let duskReflection: THREE.DataTexture | undefined;
+  let overviewLampMap: THREE.Texture | undefined;
   let overviewStatus: DistrictStatus = 'idle';
   let north: THREE.Object3D | undefined;
   let updateCouncilNotice: ReturnType<typeof addCouncilNotice>;
@@ -654,10 +673,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     renderer.shadowMap.needsUpdate = true;
   }
 
+  let wideFov = CITYWIDE_FOV;
   function resize() {
     const width = Math.max(1, host.clientWidth);
     const height = Math.max(1, host.clientHeight);
     camera.aspect = width / height;
+    // Keep both tower rows in frame on narrower desktop windows.
+    wideFov = THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(CITYWIDE_FOV / 2))
+      * Math.max(1, 1.75 / Math.max(camera.aspect, 0.8))));
     camera.updateProjectionMatrix();
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, width <= 600 ? 1.25 : 1.6));
     renderer.setSize(width, height, false);
@@ -758,7 +781,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       [orbitYaw, orbitPitch, desiredDistance] = DISTRICT_ORBIT[mode];
       return;
     }
-    orbitYaw = citywide && mode === 'overview' ? 0.11 : START_YAW;
+    orbitYaw = citywide && mode === 'overview' ? 0.14 : START_YAW;
     orbitPitch = citywide && mode === 'overview' ? CITYWIDE_PITCH : north ? EXPANDED_PITCH : START_PITCH;
     desiredDistance = citywide && mode === 'overview' ? CITYWIDE_DISTANCE : north ? EXPANDED_DISTANCE : START_DISTANCE;
   }
@@ -1394,13 +1417,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     else if (flight) entryFlight = undefined;
     if (citywide && citywide.visible !== wide) {
       citywide.visible = wide;
+      overviewWaterLights.value = wide ? 1 : 0;
       street.visible = !wide;
       sunset.visible = wide;
       sun.visible = !wide;
       scene.background = wide ? citySky : streetSky;
       fog.color.copy(wide ? citySky : horizon);
-      ambient.intensity = wide ? 0.72 : 0.84;
-      scene.environmentIntensity = wide ? 0.25 : 0.28;
+      ambient.color.set(wide ? '#adc7ff' : '#b5ceff');
+      ambient.intensity = wide ? 0.63 : 0.84;
+      scene.environment = (wide && duskReflection) || environment.texture;
+      scene.environmentIntensity = wide ? 0.34 : 0.28;
       renderer.toneMappingExposure = wide ? 0.82 : 0.88;
       renderer.shadowMap.needsUpdate = true;
     }
@@ -1408,7 +1434,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     // Keep enough depth precision in the wide view and avoid clipping near the resident.
     const near = following && !wide ? 0.18 : Math.max(1, orbitDistance * (approaching ? 0.026 : 0.055));
     const far = wide ? 920 : seeingLake ? 520 : 285;
-    if (camera.near !== near || camera.far !== far) {
+    const fov = approaching && flight.wide ? THREE.MathUtils.lerp(wideFov, STREET_FOV, travel) : wide ? wideFov : STREET_FOV;
+    if (camera.near !== near || camera.far !== far || camera.fov !== fov) {
+      camera.fov = fov;
       camera.near = near;
       camera.far = far;
       camera.updateProjectionMatrix();
@@ -1671,7 +1699,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       asset.visible = false;
       prepareEnvironment(asset);
       softenRetailWindows(asset);
-      addLakeRipples(asset, lakeTime);
+      addLakeRipples(asset, lakeTime, true);
+      duskReflection = createDuskReflection(sunset.position.clone().sub(sunset.target.position).normalize());
+      const paving = lightOverview(asset, duskReflection);
+      new THREE.TextureLoader().load(`${ASSET_PATH}overview-lamp-wash.png`, texture => {
+        if (ended || contextLost) { texture.dispose(); return; }
+        overviewLampMap = texture;
+        lightOverviewPaving(paving, texture);
+      }, undefined, () => { /* Street fixtures remain visible if the optional ground wash is unavailable. */ });
       asset.traverse((node) => {
         const match = LANDMARK_NAMES.find(([prefix]) => node.name.startsWith(prefix));
         if (match) registerLandmark(match[1], node);
@@ -2065,7 +2100,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (southGardens) disposeModel(southGardens);
       disposeModel(lightingProps);
       fishingGear?.dispose();
-      if (citywide) disposeModel(citywide);
+      if (citywide) disposeModel(citywide, duskReflection);
+      duskReflection?.dispose();
+      overviewLampMap?.dispose();
       for (const { asset } of Object.values(districts)) {
         if (asset) disposeModel(asset);
       }
