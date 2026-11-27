@@ -581,6 +581,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const lightingAtlas = new THREE.TextureLoader().load(`${ASSET_PATH}overview-lamp-wash.png?v=2`, texture => {
     if (!ended && !contextLost) streetLighting.value = texture;
   }, undefined, () => { /* The original GLB materials also work without the optional lighting bake. */ });
+  const pavingPalette: THREE.IUniform<THREE.Texture | null> = { value: null };
+  const pavingReady = { value: 0 };
+  const pavingMap = new THREE.TextureLoader().load(`${ASSET_PATH}civic-paving.png`, texture => {
+    if (ended || contextLost) return;
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.anisotropy = streetAnisotropy;
+    pavingPalette.value = texture;
+    pavingReady.value = 1;
+  }, undefined, () => { /* Original paving remains visible if the palette is unavailable. */ });
 
   function prepareEnvironment(asset: THREE.Object3D, anisotropy: number, overview = false) {
     const pavement = new Set<THREE.Object3D>();
@@ -598,7 +607,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (material.map) material.map.anisotropy = Math.max(anisotropy, material.map.anisotropy);
       }
     });
-    lightStreetSurfaces(finishes, streetLighting, overview);
+    lightStreetSurfaces(finishes, streetLighting, overview, pavingPalette, pavingReady);
   }
   let overviewStatus: DistrictStatus = 'idle';
   let north: THREE.Object3D | undefined;
@@ -2104,6 +2113,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (citywide) disposeModel(citywide, duskReflection);
       duskReflection?.dispose();
       lightingAtlas.dispose();
+      pavingMap.dispose();
       for (const { asset } of Object.values(districts)) {
         if (asset) disposeModel(asset);
       }

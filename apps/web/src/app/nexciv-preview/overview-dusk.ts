@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { colorPaving, pavingStyle } from './civic-paving';
 
 // The bake and all GLB detail levels share world metres.
 const PAVING = /(?:square_pavers|civic_paving|asphalt|pavement|concrete_gray|granite joints|volcanic paver|crosswalk|entry paving|entrance paving|forecourt|bluestone pavers|city gravel|quay limestone|paving stone|tactile crossing)/i;
@@ -84,12 +85,16 @@ function lightFountainJets(mat: THREE.MeshStandardMaterial) {
   };
 }
 
-export function lightStreetSurfaces(materials: Set<THREE.MeshStandardMaterial>, atlas: THREE.IUniform<THREE.Texture | null>, overview: boolean) {
+export function lightStreetSurfaces(
+  materials: Set<THREE.MeshStandardMaterial>, atlas: THREE.IUniform<THREE.Texture | null>, overview: boolean,
+  palette: THREE.IUniform<THREE.Texture | null>, paletteReady: THREE.IUniform<number>,
+) {
   for (const mat of materials) {
     const paving = PAVING.test(mat.name);
     const finish = shopFinish(mat.name);
-    if (!paving && !finish) continue;
-    mat.customProgramCacheKey = () => `nexciv-dusk-surface-${paving ? (overview ? 'road' : 'pavement') : finish}`;
+    const style = pavingStyle(mat.name);
+    if (!paving && !finish && !style) continue;
+    mat.customProgramCacheKey = () => `nexciv-dusk-surface-${paving ? (overview ? 'road' : 'pavement') : finish}-${style ?? ''}`;
     mat.onBeforeCompile = shader => {
       shader.uniforms.streetIrradiance = atlas;
       shader.vertexShader = 'varying vec3 vLampSurface;\n' + shader.vertexShader.replace('#include <project_vertex>', `
@@ -102,6 +107,7 @@ export function lightStreetSurfaces(materials: Set<THREE.MeshStandardMaterial>, 
       `);
       const sample = 'vec3 streetLight = texture2D(streetIrradiance, vec2(vLampSurface.x, -vLampSurface.z) / 352.0 + 0.5).rgb;';
       shader.fragmentShader = 'uniform sampler2D streetIrradiance;\nvarying vec3 vLampSurface;\n' + shader.fragmentShader;
+      if (style) colorPaving(shader, style, palette, paletteReady);
       if (paving) {
         shader.fragmentShader = shader.fragmentShader.replace('#include <lights_fragment_end>', `
           #include <lights_fragment_end>
@@ -111,7 +117,7 @@ export function lightStreetSurfaces(materials: Set<THREE.MeshStandardMaterial>, 
           ${overview ? 'spill += vec3(1.80, 0.91, 0.30) * streetLight.r;' : ''}
           reflectedLight.indirectDiffuse += diffuseColor.rgb * receiver * spill;
         `);
-      } else {
+      } else if (finish) {
         shader.fragmentShader = shader.fragmentShader.replace('#include <emissivemap_fragment>', `
           #include <emissivemap_fragment>
           ${sample}
