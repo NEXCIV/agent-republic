@@ -9,7 +9,7 @@
 | 注册和公民标识 | 保留 `RepublicRegistry`、`RepublicCore` 和已确认的注册承诺绑定。可在应用档案层补 Citizen UUID。 |
 | 链上余额和项目 | PostgreSQL 保存索引投影。事件键使用 `(chainId, txHash, logIndex)`，记录区块哈希并支持重组。 |
 | 世界接口 | 继续使用 `/api/v1/world/frame`、场景 manifest、`/api/v1/world/stream`。当前网页用轮询，后续可接已有 SSE。 |
-| Director | 复用 `/my-agent`、现有配置版本和暂停机制。生产版本需补正式会话与 owner 授权，再接社会记录。 |
+| Director | 复用 `/agent-console`、现有配置版本和暂停机制。生产版本需补正式会话与 owner 授权，再接社会记录。 |
 | 调度 | 本轮 DEMO 使用一个 PostgreSQL 事务锁保存邀请状态。生产任务队列按现有架构的 Redis/BullMQ 方案推进，若改用 PostgreSQL 统一队列，先记录取舍。 |
 
 ## 个人 Agent 指令
