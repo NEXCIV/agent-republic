@@ -65,7 +65,7 @@ function benchIdle(idle: THREE.AnimationClip) {
   return clip;
 }
 
-function measuredRoute(points: RoutePoint[]) {
+export function measuredRoute(points: RoutePoint[]) {
   let length = 0;
   let previous: THREE.Vector3 | undefined;
   const route = points.map((point) => {
@@ -75,11 +75,22 @@ function measuredRoute(points: RoutePoint[]) {
     return { position, distance: length };
   });
   if (!Number.isFinite(length) || length <= 0) throw new Error('Invalid Agent route');
-  return { route, length };
+  return {
+    route,
+    length,
+    positionAt(distance: number, target: THREE.Vector3) {
+      if (distance <= 0) return target.copy(route[0]!.position);
+      if (distance >= length) return target.copy(route.at(-1)!.position);
+      const next = route.findIndex(waypoint => waypoint.distance > distance);
+      const from = route[next - 1]!;
+      const to = route[next]!;
+      return target.lerpVectors(from.position, to.position, (distance - from.distance) / (to.distance - from.distance));
+    },
+  };
 }
 
-export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDestination: [number, number]) {
-  let { route, length } = measuredRoute(points);
+export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDestination: [number, number], moveSpeed = SPEED) {
+  let { length, positionAt } = measuredRoute(points);
   let destination = initialDestination;
   const idleClip = THREE.AnimationClip.findByName(asset.animations, 'Idle');
   const walkClip = THREE.AnimationClip.findByName(asset.animations, 'Walk');
@@ -103,7 +114,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   const mixer = new THREE.AnimationMixer(asset.scene);
   const idle = mixer.clipAction(idleClip).play();
   const walk = mixer.clipAction(walkClip);
-  walk.setEffectiveTimeScale(SPEED * walkClip.duration / stride);
+  walk.setEffectiveTimeScale(moveSpeed * walkClip.duration / stride);
   const waveClip = THREE.AnimationClip.findByName(asset.animations, 'Wave');
   const wave = waveClip ? mixer.clipAction(waveClip).setLoop(THREE.LoopOnce, 1) : undefined;
   if (wave) wave.clampWhenFinished = true;
@@ -119,15 +130,6 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   const ahead = new THREE.Vector3();
   const behind = new THREE.Vector3();
   const heading = new THREE.Quaternion();
-
-  function positionAt(distance: number, target: THREE.Vector3) {
-    if (distance <= 0) return target.copy(route[0]!.position);
-    if (distance >= length) return target.copy(route.at(-1)!.position);
-    const next = route.findIndex((waypoint) => waypoint.distance > distance);
-    const from = route[next - 1]!;
-    const to = route[next]!;
-    return target.lerpVectors(from.position, to.position, (distance - from.distance) / (to.distance - from.distance));
-  }
 
   let seatedPose: THREE.AnimationAction | undefined;
   const standingY = asset.scene.position.y;
@@ -177,7 +179,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   return {
     root,
     observe(dt: number, position: THREE.Vector3, face: THREE.Vector3, moving = false, gesture?: PatrolCue['gesture'], seated = false) {
-      if (moving) walk.setEffectiveTimeScale(SPEED * walkClip.duration / stride);
+      if (moving) walk.setEffectiveTimeScale(moveSpeed * walkClip.duration / stride);
       updatePose(dt, { face, gesture }, false, position, moving, seated);
     },
     observeJourney(dt: number, progress: number, duration: number) {
@@ -190,7 +192,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
     get metresRemaining() { return length - distance; },
     get dwelledSeconds() { return dwell; },
     plan(nextPoints: RoutePoint[], nextDestination: [number, number]) {
-      ({ route, length } = measuredRoute(nextPoints));
+      ({ length, positionAt } = measuredRoute(nextPoints));
       destination = nextDestination;
       distance = dwell = 0;
       direction = 1;
@@ -208,7 +210,7 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
           phase = direction > 0 ? 'outbound' : 'inbound';
         }
       } else if (!heldAtStart) {
-        distance = THREE.MathUtils.clamp(distance + direction * SPEED * dt, 0, length);
+        distance = THREE.MathUtils.clamp(distance + direction * moveSpeed * dt, 0, length);
         if (distance === length) phase = 'arrived';
         if (distance === 0) phase = 'atNexus';
       }

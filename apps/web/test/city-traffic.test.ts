@@ -68,11 +68,13 @@ describe('city traffic', () => {
     const dt = 1 / 30;
     const active = () => true;
     traffic.update(0, [], active);
+    expect(traffic.blocksCrossing(car.position)).toBe(true);
     const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(car.quaternion);
     const crossing = car.position.clone().addScaledVector(direction, 10);
     for (let frame = 0; frame < 180; frame++) traffic.update(dt, [crossing], active);
     expect(car.position.distanceTo(crossing)).toBeGreaterThan(2.5);
     const stopped = car.position.clone();
+    expect(traffic.blocksCrossing(crossing)).toBe(false);
     traffic.update(dt, [crossing], active);
     expect(car.position.equals(stopped)).toBe(true);
     for (let frame = 0; frame < 45; frame++) traffic.update(dt, [], active);

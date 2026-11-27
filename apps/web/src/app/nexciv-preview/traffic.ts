@@ -119,6 +119,17 @@ export function createTraffic(asset: THREE.Group) {
 
   return {
     group,
+    blocksCrossing({ x, z }: Point) {
+      return lanes.some(({ drivers }) => drivers.some(({ body }) => {
+        if (!body.visible) return false;
+        const dx = x - body.position.x;
+        const dz = z - body.position.z;
+        if (Math.abs(dx) > 2.8 || Math.abs(dz) > 2.8) return false;
+        const cos = Math.cos(body.rotation.y);
+        const sin = Math.sin(body.rotation.y);
+        return Math.abs(dx * cos - dz * sin) < 1.12 && Math.abs(dx * sin + dz * cos) < 2.5;
+      }));
+    },
     update(dt: number, residents: readonly Point[], onLoadedRoad: (point: Point) => boolean) {
       let shadowCount = 0;
       for (const fleet of fleets) fleet.count = 0;
