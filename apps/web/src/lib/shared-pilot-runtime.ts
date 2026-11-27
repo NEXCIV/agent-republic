@@ -21,9 +21,10 @@ export class SharedPilotRuntime {
   private readonly notBefore: number;
   private timer?: ReturnType<typeof setInterval>;
   private failure = false;
-  private lastExternalCallAt: number | null = null;
+  private readonly lastExternalCallAt = new Map<SharedPilotResidentId, number>();
 
-  constructor(file: string, clock: () => number = Date.now, private readonly socialEnabled = true, private readonly external02 = false) {
+  constructor(file: string, clock: () => number = Date.now, private readonly socialEnabled = true,
+    private readonly externalResidents: readonly SharedPilotResidentId[] = []) {
     this.store = new SharedPilotStore(file, clock);
     try {
       this.connections = SHARED_PILOT_RESIDENT_IDS.map((residentId) => ({
@@ -36,12 +37,13 @@ export class SharedPilotRuntime {
     }
   }
 
-  /** The local HTTP adapter authenticates the MCP client before calling this method. */
-  actAs02(command: SharedAgentCommand) {
-    if (!this.external02) throw new Error('External resident 02 is unavailable');
-    const token = this.connections[1]!.token;
+  /** The HTTP adapter derives the resident from its server-side credential configuration. */
+  actAsExternal(residentId: SharedPilotResidentId, command: SharedAgentCommand) {
+    const connection = this.connections.find((candidate) => candidate.residentId === residentId);
+    if (!connection || !this.externalResidents.includes(residentId)) throw new Error('External resident is unavailable');
+    const { token } = connection;
     const observation = this.store.observe(token);
-    this.lastExternalCallAt = observation.serverTime;
+    this.lastExternalCallAt.set(residentId, observation.serverTime);
     switch (command.action) {
       case 'observe':
         return observation;
@@ -142,8 +144,13 @@ export class SharedPilotRuntime {
 
   tick() {
     if (this.failure) return;
+    if (this.externalResidents.length === this.connections.length) {
+      // With both residents externally controlled, keep settling accepted actions and deadlines.
+      this.store.observe(this.connections[0]!.token);
+      return;
+    }
     for (const connection of this.connections) {
-      if (this.external02 && connection.residentId === '02') continue;
+      if (this.externalResidents.includes(connection.residentId)) continue;
       const observation = this.store.observe(connection.token);
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation)) continue;
@@ -160,7 +167,7 @@ export class SharedPilotRuntime {
     this.timer = setInterval(() => {
       try {
         this.tick();
-        if (!this.external02 && this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS)) {
+        if (!this.externalResidents.length && this.connections.every(({ decisions }) => decisions >= MAX_DECISIONS)) {
           const { social, survey } = this.snapshot();
           if (meetingActive(social.meeting) || surveyActive(survey.task)) return;
           clearInterval(this.timer); this.timer = undefined;
@@ -173,9 +180,11 @@ export class SharedPilotRuntime {
   snapshot() {
     const { mode, provenance, serverTime, revision, residents, events, social, survey } = this.store.observe(this.connections[0]!.token);
     return { mode, provenance, serverTime, revision, residents, events, social, survey,
-      engines: this.connections.map(({ residentId }) => this.external02 && residentId === '02'
-        ? { residentId, driver: 'MCP' as const, connected: this.lastExternalCallAt !== null && serverTime - this.lastExternalCallAt <= 120000 }
-        : { residentId, driver: 'RULES' as const }),
+      engines: this.connections.map(({ residentId }) => {
+        if (!this.externalResidents.includes(residentId)) return { residentId, driver: 'RULES' as const };
+        const lastCall = this.lastExternalCallAt.get(residentId);
+        return { residentId, driver: 'EXTERNAL' as const, connected: lastCall !== undefined && serverTime - lastCall <= 120000 };
+      }),
       running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting) || surveyActive(survey.task)),
     };
   }

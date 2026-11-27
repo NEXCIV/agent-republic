@@ -28,13 +28,71 @@ describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('two connected rule 
       const receipt = await (await command({ action: 'moveTo', requestId: randomUUID(), destination: { place: 'works' } })).json();
       expect(receipt.residentId).toBe('02');
       const view = global.nexcivSharedPilot!.runtime.snapshot();
-      expect(view.engines[1]).toMatchObject({ residentId: '02', driver: 'MCP', connected: true });
+      expect(view.engines[1]).toMatchObject({ residentId: '02', driver: 'EXTERNAL', connected: true });
       expect(view.residents[0]?.movement).toBeNull();
       expect(view.residents[1]?.movement?.destination.place).toBe('works');
       expect(JSON.stringify(view)).not.toContain(key);
     } finally {
       global.nexcivSharedPilot?.runtime.close();
       global.nexcivSharedPilot = undefined;
+      vi.unstubAllEnvs();
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('maps two independent external keys to their own residents, and rejects ambiguous credentials', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'nexciv-shared-two-clients-'));
+    const key01 = randomBytes(32).toString('base64url');
+    const key02 = randomBytes(32).toString('base64url');
+    const local = globalThis as typeof globalThis & { nexcivSharedPilot?: { runtime: SharedPilotRuntime } };
+    const url = 'http://127.0.0.1:3142/api/nexciv-preview/shared';
+    const host = '127.0.0.1:3142';
+    const command = (key: string, body: unknown) => POST(new NextRequest(url, {
+      method: 'POST', headers: { host, authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }));
+    const view = () => GET(new NextRequest(url, { headers: { host } }));
+    try {
+      vi.stubEnv('NODE_ENV', 'test');
+      vi.stubEnv('NEXCIV_SHARED_PILOT_DB', join(folder, 'shared.sqlite'));
+      vi.stubEnv('NEXCIV_SHARED_AGENT_01_KEY', key01);
+      vi.stubEnv('NEXCIV_SHARED_AGENT_02_KEY', key01);
+      expect((await command(key01, { action: 'observe' })).status).toBe(503);
+      vi.stubEnv('NEXCIV_SHARED_AGENT_02_KEY', 'invalid');
+      expect((await command(key01, { action: 'observe' })).status).toBe(503);
+
+      vi.stubEnv('NEXCIV_SHARED_AGENT_02_KEY', key02);
+      expect((await command(key01, { action: 'observe', residentId: '02' })).status).toBe(400);
+      expect(await (await command(key01, { action: 'observe' })).json()).toMatchObject({ viewerResidentId: '01' });
+      expect(await (await command(key02, { action: 'observe' })).json()).toMatchObject({ viewerResidentId: '02' });
+      const requestId = randomUUID();
+      const first = { action: 'moveTo', requestId, destination: { place: 'governance' } };
+      const second = { action: 'moveTo', requestId, destination: { place: 'works' } };
+      const [a, b] = await Promise.all([command(key01, first), command(key02, second)]);
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      const receipt = await a.json();
+      expect(receipt.residentId).toBe('01');
+      expect(await b.json()).toMatchObject({ residentId: '02' });
+      expect(await (await command(key01, first)).json()).toEqual(receipt);
+      expect((await command(key01, second)).status).toBe(409);
+      const publicView = await view().json();
+      expect(publicView.engines).toEqual([
+        { residentId: '01', driver: 'EXTERNAL', connected: true },
+        { residentId: '02', driver: 'EXTERNAL', connected: true },
+      ]);
+      expect(publicView.events.map(({ residentId }: { residentId: string }) => residentId).sort()).toEqual(['01', '02']);
+      expect(publicView).not.toHaveProperty('privateSocial');
+      expect(publicView).not.toHaveProperty('viewerResidentId');
+      expect(JSON.stringify(publicView)).not.toMatch(new RegExp(`${key01}|${key02}|${requestId}`));
+
+      const replacement = randomBytes(32).toString('base64url');
+      vi.stubEnv('NEXCIV_SHARED_AGENT_01_KEY', replacement);
+      expect((await command(key01, { action: 'observe' })).status).toBe(401);
+      expect(await (await command(replacement, { action: 'observe' })).json()).toMatchObject({ viewerResidentId: '01' });
+    } finally {
+      local.nexcivSharedPilot?.runtime.close();
+      local.nexcivSharedPilot = undefined;
       vi.unstubAllEnvs();
       rmSync(folder, { recursive: true, force: true });
     }

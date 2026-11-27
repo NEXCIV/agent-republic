@@ -26,23 +26,23 @@ async function send(command) {
 const requestId = z.uuidv4().optional();
 const action = z.discriminatedUnion('action', [
   z.strictObject({ requestId, action: z.literal('moveTo'), destination: z.strictObject({ place: z.enum(['cafe', 'plaza', 'governance', 'works']) }) }),
-  z.strictObject({ requestId, action: z.literal('invite'), target: z.literal('01'), venue: z.literal('cafe') }),
+  z.strictObject({ requestId, action: z.literal('invite'), target: z.enum(['01', '02']), venue: z.literal('cafe') }),
   z.strictObject({ requestId, action: z.literal('respond'), meetingId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
   z.strictObject({ requestId, action: z.literal('say'), meetingId: z.uuidv4(), line: z.enum(['greet', 'reply', 'suggest', 'farewell']) }),
   z.strictObject({ requestId, action: z.literal('proposeSurvey'), meetingId: z.uuidv4() }),
   z.strictObject({ requestId, action: z.literal('respondSurvey'), taskId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
-  z.strictObject({ requestId, action: z.literal('inspectSurvey'), taskId: z.uuidv4(), checkId: z.literal('pedestrian-passage') }),
+  z.strictObject({ requestId, action: z.literal('inspectSurvey'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
   z.strictObject({ requestId, action: z.literal('submitSurvey'), taskId: z.uuidv4() }),
 ]);
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-shared', version: '0.1.0' });
+  const server = new McpServer({ name: 'nexciv-shared', version: '0.2.0' });
   server.registerTool('observe_shared_city', {
-    description: '以 02 号读取共享居民、会面邀请、轮次、建设中心调研和 02 号自己的记忆。',
+    description: '读取授权居民的身份、自己的记忆，以及共享的居民位置、会面和建设中心调研。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以 02 号提交移动、会面回应或施工区人行通道调研动作。共用同一个请求 ID 可安全重试。',
+    description: '以授权居民提交移动、会面或调研动作。使用相同的请求 ID 重试同一动作。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send({ ...command, requestId: command.requestId ?? randomUUID() }));
   return server;

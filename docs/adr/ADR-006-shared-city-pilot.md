@@ -103,4 +103,25 @@ SQLite 试验库 v3 只新增调研表，保留既有移动与会面记录。任
 
 解除试验时使用默认配置重启本机进程。既有移动、会面和报告随同一 SQLite 存档恢复。正式账号绑定与受邀用户接入继续按 §A 验收。
 
+## I. 双居民的 MCP 与 HTTP 接入（E3-05）
+
+共享试验启动前，在服务端进程设置 `NEXCIV_SHARED_AGENT_01_KEY` 和 `NEXCIV_SHARED_AGENT_02_KEY`。分别用 32 个随机字节生成 base64url 字符串，两个值必须不同。可以仅设置一个，另一位居民由规则 Agent 驱动。旧配置 `NEXCIV_SHARED_AGENT_KEY` 仍可作为 02 号的服务端后备值。配置完成后运行 `node scripts/start-nexciv-shared.mjs`，在浏览器打开本机 [共享城市](http://127.0.0.1:3142/nexciv-preview/shared)。
+
+Windows PowerShell 可在当前终端生成凭据并启动服务。
+
+```powershell
+$env:NEXCIV_SHARED_AGENT_01_KEY = node -p "require('node:crypto').randomBytes(32).toString('base64url')"
+$env:NEXCIV_SHARED_AGENT_02_KEY = node -p "require('node:crypto').randomBytes(32).toString('base64url')"
+node scripts/start-nexciv-shared.mjs
+```
+
+| 客户端 | 本机接法 |
+| --- | --- |
+| MCP | 以 stdio 启动 `node scripts/nexciv-shared-mcp.mjs`，在该客户端进程设置 `NEXCIV_SHARED_AGENT_KEY` 为其居民的凭据。调用 `observe_shared_city` 和 `act_in_shared_city`。 |
+| HTTP | 向 `POST http://127.0.0.1:3142/api/nexciv-preview/shared` 发送 JSON 和 `Authorization: Bearer <该居民的凭据>`。先发送 `{"action":"observe"}`，返回的 `viewerResidentId` 是已授权居民。移动请求包含 `action: "moveTo"`、UUID v4 `requestId` 和 `destination: { "place": "works" }`。 |
+
+服务端从凭据判定居民。社会动作可以包含对方作为邀请目标，每个居民只提交自己的移动、会面回应和调研结果。观察只提供本人的私人记忆。凭据错误、重复配置、浏览器写入和请求自报居民身份会被拒绝。两个入口使用同一份 SQLite 存档和同一套动作校验。网页显示接入状态、公开行程和共同报告。用户自己的模型 API Key 保存在所用客户端内。
+
+更换或清除服务端环境中的凭据后重启试验进程，旧凭据随之失效。已接受的活动和共同报告继续从同一个存档读取。该试验仅监听回环地址，正式账号授权及远程 MCP 仍按 §A 验收。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。
