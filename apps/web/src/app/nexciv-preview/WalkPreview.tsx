@@ -12,6 +12,7 @@ import { WORKS_MANAGER, CityVisitPanel } from './CityVisitPanel';
 import type { CafeSnapshot } from '../../lib/cafe-life';
 import { CITY_PLACES, cityWalkTiming, type CityObservation } from '../../lib/city-movement';
 import { COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
+import { SHARED_AVATARS } from '../../lib/shared-pilot-profiles';
 import { THEATRE_CLOCK } from '../../lib/theatre-layout';
 import type { TheatreView } from '../../lib/theatre-trial';
 import { createWalk, type AgentReport, type District, type DistrictStatus, type FollowId, type View, type WalkController, type WalkSelection } from './walk';
@@ -405,7 +406,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
         </header>
         <div className={styles.destination}>
           <div className={styles.profile}>
-            <img src="/nexciv-walk/citizen-01-portrait.webp" alt="" width={48} height={48} />
+            <img src={SHARED_AVATARS.citizen.portrait} alt="" width={48} height={48} />
             <div><b>01 号居民</b>
               {energy === undefined ? <small>城市居民 · DEMO</small> : <div className={styles.profileEnergy}>
                 <span>精力</span><meter min={0} max={100} value={energy} aria-label="01 号精力" /><span>{energy}</span>

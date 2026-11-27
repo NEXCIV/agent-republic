@@ -44,7 +44,7 @@
   transition: border-color .16s, background-color .16s;
 }
 .appearance input { margin: 0; accent-color: var(--gold); }
-.appearance img, .profile img { border-radius: 4px; background: #33312b; object-fit: cover; }
+.appearance img, .profile img { border-radius: 4px; background: #fff; object-fit: cover; }
 .appearance:has(:checked) { background: #382e1b; border-color: #dbab42; }
 .appearance:has(:focus-visible) { outline: 2px solid var(--gold); outline-offset: 2px; }
 .appearance:hover { border-color: #dbab42; }
