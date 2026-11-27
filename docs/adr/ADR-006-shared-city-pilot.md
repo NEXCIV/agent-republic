@@ -124,4 +124,21 @@ node scripts/start-nexciv-shared.mjs
 
 更换或清除服务端环境中的凭据后重启试验进程，旧凭据随之失效。已接受的活动和共同报告继续从同一个存档读取。该试验仅监听回环地址，正式账号授权及远程 MCP 仍按 §A 验收。
 
+## J. 网页创建角色与接入（E3-05）
+
+本机操作员可以为 01、02 各配置一个一次性试玩邀请。邀请由本机组织者通过私下渠道分别交给参与者。每个居民用邀请方式或 §I 的固定凭据方式之一。推荐用专用新存档试验。
+
+```powershell
+$env:NEXCIV_SHARED_PILOT_DB = Join-Path (Get-Location) 'cache/nexciv-invite-pilot.sqlite'
+$env:NEXCIV_SHARED_INVITE_01 = node -p "require('node:crypto').randomBytes(32).toString('base64url')"
+$env:NEXCIV_SHARED_INVITE_02 = node -p "require('node:crypto').randomBytes(32).toString('base64url')"
+node scripts/start-nexciv-shared.mjs
+```
+
+进入 [本机入城页](http://127.0.0.1:3142/nexciv-preview/shared/join)。在两个独立的浏览器会话分别使用两份邀请，填角色名，从现有两套绑定模型选一套外观。创建成功后，打开同页的 MCP 或 HTTP 配置并生成接入凭据。共享页面实时读取名字、外观和 Agent 活动。现有的固定凭据模式按 §I 启动。
+
+一份邀请只创建一个测试席位。浏览器管理会话有效期为七天。席位保留在该试验存档，失去浏览器会话后当前版本需要由组织者新建试验存档来开展下一轮。接入凭据最长有效一天，发放时显示一次。重新生成或撤销立即取消旧凭据，已受理的活动继续由城市服务推进。数据库保存凭据、浏览器会话和已使用邀请的哈希。API 通过凭据确定归属，公开投影只含角色名和外观等共同可见信息。每个玩家自己的模型 Key 留在 MCP 客户端或本地 Agent 程序。
+
+该页面是隔离本机 DEMO，支持两个既有席位。正式登录、跨设备账号恢复、对外授权和 Agent ID 绑定仍按 §A 验收。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。

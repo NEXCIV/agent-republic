@@ -96,7 +96,7 @@ describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('shared construction
     const sqlite = process.getBuiltinModule!('node:sqlite') as typeof import('node:sqlite');
     const db = new sqlite.DatabaseSync(file);
     // Fresh temporary fixture emulates a v2 file.
-    db.exec('DROP TABLE shared_pilot_survey; PRAGMA user_version=2'); db.close();
+    db.exec('DROP TABLE shared_pilot_profiles; DROP TABLE shared_pilot_survey; PRAGMA user_version=2'); db.close();
     const migrated = open();
     expect(migrated.observe(b).privateSocial.encounters).toBe(1);
     const { taskId } = migrated.surveyAction(a, { requestId: requestId(), action: 'proposeSurvey', meetingId });

@@ -8,6 +8,8 @@
 .connection i { width: 8px; height: 8px; background: #c3aa68; border-radius: 50%; }
 .connection[data-live="true"] i { background: #72d09a; box-shadow: 0 0 9px #72d09a65; }
 .header a:last-child { color: #eed28a; font-size: 13px; text-decoration: none; }
+.join { color: #f5e0a5; border-bottom: 1px solid #986f21; padding: 5px 0; font-size: 13px; white-space: nowrap; text-decoration: none; }
+.join:hover { color: #ffe498; }
 .header button,.resident button,.overview { min-height: 36px; padding: 0 12px; color: #f5e0a5; background: #292d32; border: 1px solid #6d624a; border-radius: 5px; font: inherit; font-size: 13px; cursor: pointer; }
 .header button:focus-visible,.resident button:focus-visible,.overview:focus-visible { outline: 2px solid #f0b90b; outline-offset: 3px; }
 .resident button[aria-pressed="true"],.overview[aria-pressed="true"] { border-color: #f0b90b; background: #f0b90b; color: #141619; }
@@ -20,7 +22,7 @@
 .explain,.journal p { margin: 7px 0 14px; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .resident { border-top: 1px solid #46443d; padding: 14px 0; }
 .residentIdentity { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
-.residentIdentity>div { flex: 1; }
+.residentIdentity>div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .residentIdentity b,.residentIdentity small { display: block; }
 .residentIdentity b { font-size: 14px; }
 .residentIdentity small,.position { color: #c6c1b4; font-size: 11px; }
@@ -61,4 +63,4 @@
 .journal time { font-size: 11px; color: #c5bba6; font-variant-numeric: tabular-nums; }
 .journalFooter { display: flex; gap: 10px; justify-content: space-between; color: #bfb8ab; font-size: 11px; border-top: 1px solid #46443d; padding-top: 9px; }
 @media (max-width: 800px) { .header { left: 10px; right: 10px; gap: 8px; } .header .divider { display: none; } .residents { left: 10px; width: 252px; } .journal { right: 10px; width: 290px; bottom: 10px; } }
-@media (max-width: 580px) { .viewer { min-height: 780px; } .residents { width: calc(100% - 20px); } .journal { width: calc(100% - 20px); } .connection { font-size: 10px; } .brand { font-size: 13px; } }
+@media (max-width: 580px) { .viewer { min-height: 780px; } .residents { width: calc(100% - 20px); } .journal { width: calc(100% - 20px); } .connection { font-size: 10px; } .brand, .join { font-size: 12px; } .header:has(.join) a:last-child { display: none; } }

@@ -4,12 +4,13 @@ import path from 'node:path';
 import { SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema, type SharedPilotResidentId } from '@agent-republic/domain';
 import { SharedPilotRuntime, type SharedAgentCommand } from '../../../../lib/shared-pilot-runtime';
 import { SharedPilotError } from '../../../../lib/shared-pilot-store';
+import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS } from '../../../../lib/shared-pilot-profiles';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
-const keyPattern = /^[A-Za-z0-9_-]{43}$/;
+const profileCookie = 'nexciv_shared_profile';
 
 function json(body: unknown, status = 200) {
   return NextResponse.json(body, { status, headers: { 'Cache-Control': 'private, no-store' } });
@@ -26,11 +27,22 @@ function configuredFile() {
   return process.env.NODE_ENV !== 'production' && file && path.isAbsolute(file) && path.extname(file).toLowerCase() === '.sqlite' ? path.resolve(file) : undefined;
 }
 
-function agentKeys() {
-  const first = process.env.NEXCIV_SHARED_AGENT_01_KEY || undefined;
-  const second = process.env.NEXCIV_SHARED_AGENT_02_KEY || process.env.NEXCIV_SHARED_AGENT_KEY || undefined;
-  if ((first && !keyPattern.test(first)) || (second && !keyPattern.test(second)) || (first && first === second)) return null;
-  return { '01': first, '02': second };
+function connections() {
+  const keys = { '01': process.env.NEXCIV_SHARED_AGENT_01_KEY,
+    '02': process.env.NEXCIV_SHARED_AGENT_02_KEY || process.env.NEXCIV_SHARED_AGENT_KEY };
+  const invites = { '01': process.env.NEXCIV_SHARED_INVITE_01, '02': process.env.NEXCIV_SHARED_INVITE_02 };
+  const values = [...Object.values(keys), ...Object.values(invites)].filter((value): value is string => Boolean(value));
+  if (new Set(values).size !== values.length || values.some((value) => !SHARED_PILOT_SECRET.test(value))
+    || SHARED_PILOT_RESIDENT_IDS.some((id) => keys[id] && invites[id])) return null;
+  return {
+    keys, invites,
+    externalResidents: SHARED_PILOT_RESIDENT_IDS.filter((id) => keys[id] || invites[id]),
+    inviteResidents: SHARED_PILOT_RESIDENT_IDS.filter((id) => invites[id]),
+  };
+}
+
+function matches(expected: string | undefined, supplied: string) {
+  return expected && timingSafeEqual(Buffer.from(expected), Buffer.from(supplied));
 }
 
 function pilotFor(file: string, externalResidents: readonly SharedPilotResidentId[]) {
@@ -50,16 +62,23 @@ export function GET(request: NextRequest) {
   if (!localRequest(request)) return json({ error: '共享试玩仅允许本机查看。' }, 403);
   const file = configuredFile();
   if (!file) return json({ error: '本机共享试玩尚未启动。' }, 404);
-  const keys = agentKeys();
-  if (!keys) return json({ error: '共享 Agent 凭据配置无效。' }, 503);
+  const config = connections();
+  if (!config) return json({ error: '共享 Agent 凭据配置无效。' }, 503);
+  const profile = request.nextUrl.searchParams.get('profile') === '1';
+  if (profile && !config.inviteResidents.length) return json({ error: '本机试玩尚未启用邀请。' }, 404);
   try {
-    return json(pilotFor(file, SHARED_PILOT_RESIDENT_IDS.filter((id) => keys[id])).snapshot());
+    const pilot = pilotFor(file, config.externalResidents);
+    if (profile) {
+      const view = pilot.profile(request.cookies.get(profileCookie)?.value ?? '');
+      return json(view.profile && config.inviteResidents.includes(view.profile.residentId) ? view : { profile: null, hasKey: false });
+    }
+    return json({ ...pilot.snapshot(), invitesEnabled: config.inviteResidents.length > 0 });
   } catch {
     return json({ error: '共享城市暂不可用，请确认本机试验配置。' }, 503);
   }
 }
 
-async function readCommand(request: NextRequest): Promise<SharedAgentCommand | undefined> {
+async function readBody(request: NextRequest): Promise<Record<string, unknown> | undefined> {
   if (request.headers.get('content-type')?.split(';')[0] !== 'application/json' || !request.body) return;
   const reader = request.body.getReader();
   const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -74,12 +93,7 @@ async function readCommand(request: NextRequest): Promise<SharedAgentCommand | u
       text += decoder.decode(value, { stream: true });
     }
     const body: unknown = JSON.parse(text + decoder.decode());
-    if (!body || typeof body !== 'object') return;
-    if ('action' in body && body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
-    for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema]) {
-      const parsed = schema.safeParse(body);
-      if (parsed.success) return parsed.data;
-    }
+    if (body && typeof body === 'object' && !Array.isArray(body)) return body as Record<string, unknown>;
   } catch {
     return;
   } finally {
@@ -87,24 +101,69 @@ async function readCommand(request: NextRequest): Promise<SharedAgentCommand | u
   }
 }
 
+function readCommand(body: Record<string, unknown> | undefined): SharedAgentCommand | undefined {
+  if (!body) return;
+  if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
+  for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema]) {
+    const parsed = schema.safeParse(body);
+    if (parsed.success) return parsed.data;
+  }
+}
+
+async function changeProfile(request: NextRequest, file: string, config: NonNullable<ReturnType<typeof connections>>) {
+  const origin = `${request.nextUrl.protocol}//${request.headers.get('host')}`;
+  if (request.headers.get('origin') !== origin) return json({ error: '请从当前本机城市页面操作。' }, 403);
+  if (!config.inviteResidents.length) return json({ error: '本机试玩尚未启用邀请。' }, 404);
+  const body = await readBody(request);
+  if (!body) return json({ error: '角色操作无效。' }, 400);
+  const session = request.cookies.get(profileCookie)?.value ?? '';
+  const pilot = pilotFor(file, config.externalResidents);
+  if (body.action === 'claim') {
+    const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim() : '';
+    const { avatar, invite } = body;
+    if (Object.keys(body).length !== 4 || !SHARED_PILOT_NAME.test(name)
+      || (avatar !== 'citizen' && avatar !== 'builder') || typeof invite !== 'string' || !SHARED_PILOT_SECRET.test(invite)) {
+      return json({ error: '请填写邀请、角色名和外观。' }, 400);
+    }
+    const residentId = config.inviteResidents.find((id) => matches(config.invites[id], invite));
+    if (!residentId) return json({ error: '邀请无效。请向本机试玩组织者核对。' }, 401);
+    const claimed = pilot.claimProfile({ residentId, name, avatar }, invite, session);
+    const response = json({ profile: claimed.profile, hasKey: claimed.hasKey }, 201);
+    response.cookies.set(profileCookie, claimed.session, {
+      httpOnly: true, sameSite: 'strict', secure: request.nextUrl.protocol === 'https:',
+      path: '/api/nexciv-preview/shared', maxAge: SHARED_PILOT_SESSION_SECONDS,
+    });
+    return response;
+  }
+  if (Object.keys(body).length === 1 && (body.action === 'issue' || body.action === 'revoke')) {
+    return json(pilot.setProfileKey(session, body.action === 'issue', config.inviteResidents));
+  }
+  return json({ error: '角色操作无效。' }, 400);
+}
+
 export async function POST(request: NextRequest) {
-  if (!localRequest(request) || request.headers.has('origin') || request.headers.has('sec-fetch-site')) {
+  const profile = request.nextUrl.searchParams.get('profile') === '1';
+  if (!localRequest(request) || (!profile && (request.headers.has('origin') || request.headers.has('sec-fetch-site')))) {
     return json({ error: '此动作仅供本机 Agent 客户端。' }, 403);
   }
   const file = configuredFile();
   if (!file) return json({ error: '共享 Agent 接入未启用。' }, 404);
-  const keys = agentKeys();
-  if (!keys) return json({ error: '共享 Agent 凭据配置无效。' }, 503);
-  const externalResidents = SHARED_PILOT_RESIDENT_IDS.filter((id) => keys[id]);
-  if (!externalResidents.length) return json({ error: '共享 Agent 接入未启用。' }, 404);
-  const supplied = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get('authorization') ?? '')?.[1];
-  const residentId = supplied && externalResidents.find((id) => timingSafeEqual(Buffer.from(keys[id]!), Buffer.from(supplied)));
-  if (!residentId) return json({ error: '共享 Agent 凭据无效。' }, 401);
-  const command = await readCommand(request);
-  if (!command) return json({ error: '共享 Agent 动作无效。' }, 400);
+  const config = connections();
+  if (!config) return json({ error: '共享 Agent 凭据配置无效。' }, 503);
   try {
-    return json(pilotFor(file, externalResidents).actAsExternal(residentId, command));
+    if (profile) return await changeProfile(request, file, config);
+    if (!config.externalResidents.length) return json({ error: '共享 Agent 接入未启用。' }, 404);
+    const supplied = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(request.headers.get('authorization') ?? '')?.[1];
+    if (!supplied) return json({ error: '共享 Agent 凭据无效。' }, 401);
+    const residentId = config.externalResidents.find((id) => matches(config.keys[id], supplied));
+    if (!residentId && !config.inviteResidents.length) return json({ error: '共享 Agent 凭据无效。' }, 401);
+    const pilot = pilotFor(file, config.externalResidents);
+    const body = await readBody(request);
+    const command = readCommand(body);
+    if (!command) return json({ error: '共享 Agent 动作无效。' }, 400);
+    return json(residentId ? pilot.actAsExternal(residentId, command) : pilot.actWithProfileKey(supplied, config.inviteResidents, command));
   } catch (error) {
+    if (error instanceof SharedPilotError && error.code === 'AUTH_REQUIRED') return json({ error: '登录已过期或 Agent 凭据无效。' }, 401);
     if (error instanceof SharedPilotError) return json({ error: error.message, code: error.code }, 409);
     return json({ error: '共享 Agent 服务暂不可用。' }, 503);
   }

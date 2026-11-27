@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { SHARED_PILOT_LINES, SHARED_PILOT_RESIDENT_IDS, type SharedPilotMoveRequest, type SharedPilotPlaceId, type SharedPilotResidentId, type SharedPilotSocialRequest, type SharedPilotSurveyRequest } from '@agent-republic/domain';
-import { SharedPilotStore } from './shared-pilot-store';
+import { SharedPilotError, SharedPilotStore } from './shared-pilot-store';
 import { meetingActive, nextSpeaker } from './shared-pilot-social';
 import { SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS, surveyActive } from './shared-pilot-survey';
+import type { SharedPilotProfile } from './shared-pilot-profiles';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
@@ -41,8 +42,38 @@ export class SharedPilotRuntime {
   actAsExternal(residentId: SharedPilotResidentId, command: SharedAgentCommand) {
     const connection = this.connections.find((candidate) => candidate.residentId === residentId);
     if (!connection || !this.externalResidents.includes(residentId)) throw new Error('External resident is unavailable');
-    const { token } = connection;
-    const observation = this.store.observe(token);
+    const observation = this.observeConnection(connection);
+    return this.runExternal(residentId, connection.token, command, observation);
+  }
+
+  actWithProfileKey(key: string, inviteResidents: readonly SharedPilotResidentId[], command: SharedAgentCommand) {
+    const observation = this.store.observe(key);
+    const residentId = observation.viewerResidentId;
+    if (!inviteResidents.includes(residentId)) throw new SharedPilotError('AUTH_REQUIRED', '共享 Agent 凭据无效。');
+    return this.runExternal(residentId, key, command, observation);
+  }
+
+  profile(session: string) { return this.store.profile(session); }
+  claimProfile(profile: SharedPilotProfile, invite: string, session: string) {
+    return this.store.claim(profile, invite, session);
+  }
+  setProfileKey(session: string, issue: boolean, inviteResidents: readonly SharedPilotResidentId[]) {
+    const result = this.store.setProfileKey(session, issue, inviteResidents);
+    this.lastExternalCallAt.delete(result.residentId);
+    return { key: result.key, expiresAt: result.expiresAt, hasKey: result.hasKey };
+  }
+
+  private observeConnection(connection: RuleConnection) {
+    try {
+      return this.store.observe(connection.token);
+    } catch (error) {
+      if (!(error instanceof SharedPilotError) || error.code !== 'AUTH_REQUIRED') throw error;
+      connection.token = this.store.issueCredential(connection.residentId).token;
+      return this.store.observe(connection.token);
+    }
+  }
+
+  private runExternal(residentId: SharedPilotResidentId, token: string, command: SharedAgentCommand, observation: Observation) {
     this.lastExternalCallAt.set(residentId, observation.serverTime);
     switch (command.action) {
       case 'observe':
@@ -146,12 +177,12 @@ export class SharedPilotRuntime {
     if (this.failure) return;
     if (this.externalResidents.length === this.connections.length) {
       // With both residents externally controlled, keep settling accepted actions and deadlines.
-      this.store.observe(this.connections[0]!.token);
+      this.observeConnection(this.connections[0]!);
       return;
     }
     for (const connection of this.connections) {
       if (this.externalResidents.includes(connection.residentId)) continue;
-      const observation = this.store.observe(connection.token);
+      const observation = this.observeConnection(connection);
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
@@ -178,8 +209,8 @@ export class SharedPilotRuntime {
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events, social, survey } = this.store.observe(this.connections[0]!.token);
-    return { mode, provenance, serverTime, revision, residents, events, social, survey,
+    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles } = this.observeConnection(this.connections[0]!);
+    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles,
       engines: this.connections.map(({ residentId }) => {
         if (!this.externalResidents.includes(residentId)) return { residentId, driver: 'RULES' as const };
         const lastCall = this.lastExternalCallAt.get(residentId);

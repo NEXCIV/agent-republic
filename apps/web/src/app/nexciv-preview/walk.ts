@@ -383,7 +383,8 @@ function addCouncilNotice(asset: THREE.Object3D) {
   };
 }
 
-export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks, cafeMode = false, sharedMode = false): WalkController {
+export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: boolean, callbacks: Callbacks,
+  cafeMode = false, sharedMode = false, sharedAssets?: { '01': string; '02': string }): WalkController {
   const started = performance.now();
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   const canvas = renderer.domElement;
@@ -1784,7 +1785,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     updateCouncilNotice?.(text, programme);
   }
 
-  request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
+  request(sharedMode ? sharedAssets?.['01'] ?? 'agent-01.glb' : 'agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
     if (ended || contextLost) return;
     const result = await loader.parseAsync(bytes, ASSET_PATH);
     if (ended || contextLost) { disposeModel(result.scene); return; }
@@ -1794,7 +1795,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (!ended && !contextLost) callbacks.agent('01', { status: 'unavailable', progress: 0 });
   }).finally(() => { actorLoading = false; });
 
-  if (sharedMode) request('agent-02.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
+  if (sharedMode) request(sharedAssets?.['02'] ?? 'agent-02.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
     if (ended || contextLost) return;
     const asset = await loader.parseAsync(bytes, ASSET_PATH);
     if (ended || contextLost) { disposeModel(asset.scene); return; }

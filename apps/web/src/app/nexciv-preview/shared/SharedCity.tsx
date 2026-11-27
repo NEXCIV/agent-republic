@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CityMark } from '@/components/CityMark';
 import type { SharedPilotView } from '../../../lib/shared-pilot-runtime';
+import { SHARED_AVATARS } from '../../../lib/shared-pilot-profiles';
 import { CITY_PLACES } from '../../../lib/city-movement';
 import { createWalk, type DistrictStatus, type WalkController } from '../walk';
 import base from '../preview.module.css';
@@ -11,6 +12,7 @@ import styles from './shared.module.css';
 
 type ResidentId = '01' | '02';
 type CameraView = 'overview' | 'meeting' | 'survey' | ResidentId;
+type SharedCityView = SharedPilotView & { invitesEnabled: boolean };
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
 const endpoint = '/api/nexciv-preview/shared';
 
@@ -18,7 +20,7 @@ export function SharedCity() {
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const latest = useRef<SharedPilotView | null>(null);
-  const [snapshot, setSnapshot] = useState<SharedPilotView | null>(null);
+  const [snapshot, setSnapshot] = useState<SharedCityView | null>(null);
   const [status, setStatus] = useState<'connecting' | 'live' | 'stale'>('connecting');
   const [message, setMessage] = useState('');
   const [view, setView] = useState<CameraView>('overview');
@@ -30,6 +32,9 @@ export function SharedCity() {
   const [renderAttempt, setRenderAttempt] = useState(0);
   const [fps, setFps] = useState(0);
   const [failedAgents, setFailedAgents] = useState<ResidentId[]>([]);
+  const hasSnapshot = snapshot !== null;
+  const primaryAsset = SHARED_AVATARS[snapshot?.profiles.find(({ residentId }) => residentId === '01')?.avatar ?? 'citizen'].asset;
+  const secondaryAsset = SHARED_AVATARS[snapshot?.profiles.find(({ residentId }) => residentId === '02')?.avatar ?? 'builder'].asset;
 
   const focus = useCallback((id: CameraView) => {
     setView(id);
@@ -49,7 +54,7 @@ export function SharedCity() {
           delay = 3500;
           throw new Error(typeof error?.error === 'string' ? error.error : '共享城市暂不可用。');
         }
-        const result = await response.json() as SharedPilotView;
+        const result = await response.json() as SharedCityView;
         if (controller.signal.aborted) return;
         latest.current = result;
         world.current?.syncShared(result);
@@ -70,7 +75,11 @@ export function SharedCity() {
 
   useEffect(() => {
     const host = viewport.current;
-    if (!host || staticMode) return;
+    if (!host || staticMode || !hasSnapshot) return;
+    setScene('loading');
+    setOverview('idle');
+    setView('overview');
+    setFailedAgents([]);
     let controller: WalkController | undefined;
     try {
       controller = createWalk(host, 'overview', true, {
@@ -86,12 +95,12 @@ export function SharedCity() {
             setView(item.id); controller?.select(item); controller?.view('follow', item.id);
           }
         },
-      }, false, true);
+      }, false, true, { '01': primaryAsset, '02': secondaryAsset });
       world.current = controller;
       controller.syncShared(latest.current);
     } catch { setScene('fallback'); }
     return () => { controller?.dispose(); world.current = null; };
-  }, [staticMode, renderAttempt]);
+  }, [staticMode, renderAttempt, hasSnapshot, primaryAsset, secondaryAsset]);
 
   const live3d = scene === 'ready' && !staticMode;
   const social = snapshot?.social;
@@ -124,6 +133,7 @@ export function SharedCity() {
         <Link className={styles.brand} href="/"><CityMark /><span>NEXCIV <b>CITY</b></span></Link>
         <span className={styles.divider}>共享城市</span>
         <span className={styles.connection} data-live={status === 'live'}><i />{status === 'live' ? '状态同步中' : status === 'connecting' ? '正在连接' : '连接中断'} · DEMO</span>
+        {snapshot?.invitesEnabled && <Link className={styles.join} href="/nexciv-preview/shared/join" prefetch={false}>角色与接入</Link>}
         <button type="button" onClick={() => { if (!staticMode && scene !== 'fallback') setStaticMode(true); else { setScene('loading'); setOverview('idle'); setView('overview'); setFailedAgents([]); setStaticMode(false); setRenderAttempt((attempt) => attempt + 1); } }}>{staticMode || scene === 'fallback' ? '开启 3D' : '2D'}</button>
         <Link href="/nexciv-preview" prefetch={false}>独立试玩</Link>
       </header>
@@ -132,6 +142,7 @@ export function SharedCity() {
         <p className={styles.explain}>两名居民 · 共用一个城市存档</p>
         {(['01', '02'] as const).map((id) => {
           const engine = snapshot?.engines.find(({ residentId }) => residentId === id);
+          const profile = snapshot?.profiles.find(({ residentId }) => residentId === id);
           const resident = snapshot?.residents.find(({ residentId }) => residentId === id);
           const movement = resident?.movement;
           const moving = movement?.status === 'walking';
@@ -143,7 +154,7 @@ export function SharedCity() {
           const inspection = task?.status === 'surveying' ? task.inspections[id] : undefined;
           const waitingSurvey = task?.status === 'accepted' && survey?.arrived.includes(id);
           return <article key={id} className={styles.resident} data-resident={id}>
-            <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{names[id]}</b><small>{engine?.driver === 'EXTERNAL' ? (engine.connected ? '外接 Agent 最近活跃' : '等待 Agent 接入') : resident ? '规则 Agent 已接入' : '连接中'}</small></div>
+            <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{profile?.name ?? names[id]}</b><small>{engine?.driver === 'EXTERNAL' ? (engine.connected ? '外接 Agent 最近活跃' : '等待 Agent 接入') : resident ? '规则 Agent 已接入' : '连接中'}</small></div>
               <button type="button" disabled={!live3d || failedAgents.includes(id)} aria-pressed={view === id} onClick={() => focus(id)}>跟随</button></div>
             <strong role="status" data-resident-status={id}>{resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
             {inspection ? <div className={styles.progress}><progress aria-label={`${id} 号现场观察进度`} max={8} value={inspection.finding ? 8 : Math.min(8, Math.max(0, ((snapshot?.serverTime ?? 0) - (inspection.startedAt ?? snapshot?.serverTime ?? 0)) / 1000))} /><span>{inspection.finding ? '已记录' : '观察'}</span></div>

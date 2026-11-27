@@ -11,11 +11,12 @@ import { positionOnWalk, type CityRoute, type CityWalk } from './city-movement';
 import { CITY_MAP, planCityWalk } from './city-navigation';
 import { advanceSocial, emptySocialState, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
 import { advanceSurvey, emptySurveyState, performSurvey, publicSurvey, SURVEY_CHECKPOINTS, surveyActive, SurveyActionError, type SurveyState, type SurveyReceipt } from './shared-pilot-survey';
+import { SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, type SharedPilotProfile, type SharedPilotProfileView } from './shared-pilot-profiles';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
 const APPLICATION_ID = 0x4e585350; // NXSP
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const CREDENTIAL_LIFETIME = 3600000;
 const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
@@ -26,7 +27,14 @@ const V1_TABLES = [
   'shared_pilot_credentials', 'shared_pilot_events', 'shared_pilot_meta', 'shared_pilot_moves', 'shared_pilot_residents',
 ];
 const V2_TABLES = [...V1_TABLES, 'shared_pilot_social'];
-const EXPECTED_TABLES = [...V2_TABLES, 'shared_pilot_survey'];
+const V3_TABLES = [...V2_TABLES, 'shared_pilot_survey'];
+const EXPECTED_TABLES = [...V3_TABLES, 'shared_pilot_profiles'].sort();
+const PROFILE_TABLE = `CREATE TABLE shared_pilot_profiles (
+  resident_id TEXT PRIMARY KEY REFERENCES shared_pilot_residents(id),
+  name TEXT NOT NULL, avatar TEXT NOT NULL CHECK(avatar IN ('citizen','builder')),
+  session_hash TEXT NOT NULL UNIQUE, session_expires_at INTEGER NOT NULL,
+  invite_hash TEXT NOT NULL UNIQUE, access_hash TEXT UNIQUE, access_expires_at INTEGER
+);`;
 const INITIAL_PLACES: Record<SharedPilotResidentId, SharedPilotPlaceId> = { '01': 'plaza', '02': 'cafe' };
 
 export type SharedPilotErrorCode = 'INVALID_CONFIG' | 'INCOMPATIBLE_DB' | 'INVALID_CLOCK' | 'INVALID_REQUEST'
@@ -118,7 +126,7 @@ function isolatedFilename(filename: string) {
 }
 
 function checkTime(at: number) {
-  if (!Number.isSafeInteger(at) || at < 0 || at > Number.MAX_SAFE_INTEGER - MAX_CREDENTIAL_LIFETIME) {
+  if (!Number.isSafeInteger(at) || at < 0 || at > Number.MAX_SAFE_INTEGER - SHARED_PILOT_SESSION_SECONDS * 1000) {
     throw new SharedPilotError('INVALID_CLOCK', 'Pilot clock must provide valid epoch milliseconds.');
   }
   return at;
@@ -172,13 +180,14 @@ export class SharedPilotStore {
     this.db = new sqlite.DatabaseSync(file);
     try {
       // Reject unrelated DBs before setting WAL or running any schema changes.
-      let migrateFrom: 1 | 2 | undefined;
+      let migrateFrom: 1 | 2 | 3 | undefined;
       if (existing) {
         const application = Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
         const tables = this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all().map(({ name }) => name);
         if (application === APPLICATION_ID && version === 1 && JSON.stringify(tables) === JSON.stringify(V1_TABLES)) migrateFrom = 1;
         if (application === APPLICATION_ID && version === 2 && JSON.stringify(tables) === JSON.stringify(V2_TABLES)) migrateFrom = 2;
+        if (application === APPLICATION_ID && version === 3 && JSON.stringify(tables) === JSON.stringify(V3_TABLES)) migrateFrom = 3;
         if (!migrateFrom && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
           throw new SharedPilotError('INCOMPATIBLE_DB', 'Refusing to open a non-pilot database.');
         }
@@ -222,6 +231,7 @@ export class SharedPilotStore {
         );
         CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);
         CREATE TABLE shared_pilot_survey (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);
+        ${PROFILE_TABLE}
       `);
       this.db.prepare('INSERT INTO shared_pilot_meta (id,logical_now) VALUES (1,?)').run(at);
       this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
@@ -235,15 +245,18 @@ export class SharedPilotStore {
     }
   }
 
-  private migratePilot(version: 1 | 2) {
+  private migratePilot(version: 1 | 2 | 3) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       if (version === 1) {
         this.db.exec('CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
         this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
       }
-      this.db.exec('CREATE TABLE shared_pilot_survey (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
-      this.db.prepare('INSERT INTO shared_pilot_survey (id,state) VALUES (1,?)').run(JSON.stringify(emptySurveyState()));
+      if (version < 3) {
+        this.db.exec('CREATE TABLE shared_pilot_survey (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);');
+        this.db.prepare('INSERT INTO shared_pilot_survey (id,state) VALUES (1,?)').run(JSON.stringify(emptySurveyState()));
+      }
+      this.db.exec(PROFILE_TABLE);
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
@@ -309,9 +322,13 @@ export class SharedPilotStore {
   }
 
   private authenticate(token: unknown, at: number): SharedPilotResidentId {
-    const resident = typeof token === 'string' && TOKEN_PATTERN.test(token)
-      ? this.db.prepare('SELECT resident_id FROM shared_pilot_credentials WHERE token_hash=? AND expires_at>?').get(hashToken(token), at)?.resident_id
-      : null;
+    let resident: unknown;
+    if (typeof token === 'string' && TOKEN_PATTERN.test(token)) {
+      resident = this.db.prepare('SELECT resident_id FROM shared_pilot_credentials WHERE token_hash=? AND expires_at>?').get(hashToken(token), at)?.resident_id;
+    } else if (typeof token === 'string' && SHARED_PILOT_SECRET.test(token)) {
+      resident = this.db.prepare('SELECT resident_id FROM shared_pilot_profiles WHERE access_hash=? AND access_expires_at>?')
+        .get(hashToken(`access:${token}`), at)?.resident_id;
+    }
     if (!SHARED_PILOT_RESIDENT_IDS.some((id) => id === resident)) {
       throw new SharedPilotError('AUTH_REQUIRED', 'An active shared pilot credential is required.');
     }
@@ -320,6 +337,52 @@ export class SharedPilotStore {
 
   private assertResident(residentId: SharedPilotResidentId) {
     if (!SHARED_PILOT_RESIDENT_IDS.includes(residentId)) throw new SharedPilotError('INVALID_REQUEST', 'Unknown shared pilot resident.');
+  }
+
+  private browserProfile(session: string, at: number) {
+    if (!SHARED_PILOT_SECRET.test(session)) return undefined;
+    return this.db.prepare(`SELECT resident_id AS residentId, name, avatar, access_expires_at AS expiresAt, session_expires_at AS sessionExpiresAt
+      FROM shared_pilot_profiles WHERE session_hash=? AND session_expires_at>?`)
+      .get(hashToken(`browser:${session}`), at) as (SharedPilotProfile & { expiresAt: number | null; sessionExpiresAt: number }) | undefined;
+  }
+
+  profile(session: string): SharedPilotProfileView {
+    return this.transaction((at) => {
+      const row = this.browserProfile(session, at);
+      if (!row) return { profile: null, hasKey: false };
+      const { residentId, name, avatar, expiresAt } = row;
+      return { profile: { residentId, name, avatar }, hasKey: expiresAt !== null && expiresAt > at };
+    });
+  }
+
+  claim(profile: SharedPilotProfile, invite: string, currentSession: string) {
+    return this.transaction((at) => {
+      this.assertResident(profile.residentId);
+      if (this.browserProfile(currentSession, at)) {
+        throw new SharedPilotError('CONFLICT', '当前浏览器已经创建了一个角色。');
+      }
+      const inviteHash = hashToken(`invite:${invite}`);
+      const used = this.db.prepare('SELECT 1 FROM shared_pilot_profiles WHERE resident_id=? OR invite_hash=?')
+        .get(profile.residentId, inviteHash);
+      if (used) throw new SharedPilotError('CONFLICT', '这份邀请已用于创建角色。');
+      const session = randomBytes(32).toString('base64url');
+      this.db.prepare(`INSERT INTO shared_pilot_profiles (resident_id,name,avatar,session_hash,session_expires_at,invite_hash)
+        VALUES (?,?,?,?,?,?)`).run(profile.residentId, profile.name, profile.avatar, hashToken(`browser:${session}`),
+          at + SHARED_PILOT_SESSION_SECONDS * 1000, inviteHash);
+      return { session, profile, hasKey: false };
+    });
+  }
+
+  setProfileKey(session: string, issue: boolean, inviteResidents: readonly SharedPilotResidentId[]) {
+    return this.transaction((at) => {
+      const row = this.browserProfile(session, at);
+      if (!row || !inviteResidents.includes(row.residentId)) throw new SharedPilotError('AUTH_REQUIRED', '请在创建角色的浏览器重新打开入城页。');
+      const key = issue ? randomBytes(32).toString('base64url') : null;
+      const expiresAt = key ? Math.min(at + MAX_CREDENTIAL_LIFETIME, row.sessionExpiresAt) : null;
+      this.db.prepare('UPDATE shared_pilot_profiles SET access_hash=?, access_expires_at=? WHERE resident_id=?')
+        .run(key ? hashToken(`access:${key}`) : null, expiresAt, row.residentId);
+      return { residentId: row.residentId, key, expiresAt, hasKey: issue };
+    });
   }
 
   private settle(at: number) {
@@ -494,8 +557,10 @@ export class SharedPilotStore {
         }));
       const social = this.readSocial();
       const survey = this.readSurvey();
+      const profiles = this.db.prepare('SELECT resident_id AS residentId, name, avatar FROM shared_pilot_profiles ORDER BY resident_id')
+        .all() as unknown as SharedPilotProfile[];
       return {
-        mode: 'DEMO' as const, provenance: SHARED_PILOT_PROVENANCE, viewerResidentId, serverTime: at,
+        mode: 'DEMO' as const, provenance: SHARED_PILOT_PROVENANCE, viewerResidentId, serverTime: at, profiles,
         revision: events.at(-1)?.id ?? '0', residents, events,
         social: publicSocial(social, this.socialResidents(at)),
         survey: publicSurvey(survey, this.socialResidents(at), social.meeting),

@@ -111,7 +111,7 @@ describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('shared café social
     const sqlite = process.getBuiltinModule!('node:sqlite') as typeof import('node:sqlite');
     const db = new sqlite.DatabaseSync(file);
     // This database is a fresh temporary fixture; simulate the old schema only.
-    db.exec('DROP TABLE shared_pilot_survey; DROP TABLE shared_pilot_social; PRAGMA user_version=1;'); db.close();
+    db.exec('DROP TABLE shared_pilot_profiles; DROP TABLE shared_pilot_survey; DROP TABLE shared_pilot_social; PRAGMA user_version=1;'); db.close();
     const migrated = open();
     expect(migrated.receipt(a, sent.requestId)).toEqual(sent);
     expect(migrated.observe(b).social.events).toEqual([]);
