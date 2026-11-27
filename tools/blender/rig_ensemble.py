@@ -281,7 +281,7 @@ def allow_apron_clearance(mesh, points, scale):
     mesh.update()
 
 
-def fit(character, source):
+def fit(character, source, *, mesh_weights=None):
     digest = sha256(source.read_bytes()).hexdigest()
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=str(source))
@@ -314,7 +314,8 @@ def fit(character, source):
     rig["source_asset"] = source.name
     rig["source_sha256"] = digest
     columns = {b.name: obj.vertex_groups.new(name=b.name) for b in rig.data.bones}
-    for index, field in enumerate(distributions(character, points)):
+    fields = distributions(character, points) if mesh_weights is None else mesh_weights(character, obj.data, points)
+    for index, field in enumerate(fields):
         weights = sorted(((b, w) for b, w in field.items() if w > 1e-6), key=lambda it: -it[1])[:4]
         total = sum(weight for _, weight in weights)
         for bone, weight in weights:
