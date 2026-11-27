@@ -39,6 +39,8 @@ const ROUTES = [
   '/council/1',
   '/activity',
   '/my-agent',
+  '/nexciv-preview/docs',
+  '/nexciv-preview/cafe/news',
   '/world',
   '/world?no3d=1',
   `/tx/${TX_HASH}`,
@@ -77,7 +79,9 @@ for (const viewport of VIEWPORTS) {
       scrollWidth: document.documentElement.scrollWidth,
       innerWidth: window.innerWidth,
       hasMain: document.querySelector('main#main') !== null,
-      hasNav: document.querySelector('nav[aria-label="Primary"]') !== null,
+      hasNav: document.querySelector('nav[aria-label="主导航"]') !== null
+        || (window.location.pathname === '/nexciv-preview/shared/join'
+          && document.querySelector('[data-site-header] a[href="/nexciv-preview/shared"]') !== null),
       hasSkipLink: document.querySelector('a.skip-link') !== null,
       heading: document.querySelector('h1')?.textContent?.trim() ?? '',
       links: document.querySelectorAll('a[href]').length,

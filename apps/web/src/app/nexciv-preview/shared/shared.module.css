@@ -1,21 +1,13 @@
 .viewer { --panel: rgba(20,22,25,.94); --stroke: #575447; --muted: #c6c0b3; color: #f5eddf; min-height: 570px; }
-.header { position: absolute; top: 16px; left: 24px; right: 24px; z-index: 2; display: flex; align-items: center; gap: 18px; padding: 9px 14px; min-height: 56px; background: var(--panel); border: 1px solid var(--stroke); border-radius: 9px; }
-.brand { display: inline-flex; align-items: center; gap: 9px; color: #f5eddf; font-weight: 750; letter-spacing: .075em; text-decoration: none; }
-.brand svg { width: 25px; height: 25px; color: #f0b90b; }
-.brand b { color: #f0b90b; }
-.divider { color: var(--muted); border-left: 1px solid #534f43; padding-left: 18px; }
-.connection { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: #e4d8be; white-space: nowrap; }
+.connection { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #e4d8be; white-space: nowrap; }
 .connection i { width: 8px; height: 8px; background: #c3aa68; border-radius: 50%; }
 .connection[data-live="true"] i { background: #72d09a; box-shadow: 0 0 9px #72d09a65; }
-.header a:last-child { color: #eed28a; font-size: 13px; text-decoration: none; }
-.join { color: #f5e0a5; border-bottom: 1px solid #986f21; padding: 5px 0; font-size: 13px; white-space: nowrap; text-decoration: none; }
-.join:hover { color: #ffe498; }
 .header button,.resident button,.overview { min-height: 36px; padding: 0 12px; color: #f5e0a5; background: #292d32; border: 1px solid #6d624a; border-radius: 5px; font: inherit; font-size: 13px; cursor: pointer; }
 .header button:focus-visible,.resident button:focus-visible,.overview:focus-visible { outline: 2px solid #f0b90b; outline-offset: 3px; }
 .resident button[aria-pressed="true"],.overview[aria-pressed="true"] { border-color: #f0b90b; background: #f0b90b; color: #141619; }
 .resident button:disabled,.overview:disabled { opacity: .5; cursor: default; }
 .residents,.journal { position: absolute; z-index: 1; background: var(--panel); border: 1px solid var(--stroke); border-radius: 8px; padding: 16px; box-shadow: 0 8px 20px #14161955; }
-.residents { top: 88px; left: 24px; width: 292px; }
+.residents { top: var(--view-header-end); left: var(--edge); width: 292px; }
 .panelHead { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .panelHead h1,.panelHead h2 { margin: 0; color: #f3e5be; font-size: 18px; letter-spacing: 0; }
 .panelHead span,.panelHead small { color: #d0ad57; font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -34,7 +26,8 @@
 .resident[data-resident="02"] .progress progress { accent-color: #75aaa9; }
 .overview { width: 100%; }
 .alert { color: #ffc59b; font-size: 12px; line-height: 1.5; }
-.journal { bottom: 24px; right: 24px; width: 360px; max-height: calc(100svh - 110px); overflow-y: auto; }
+.alert a { color: #ffe09a; text-decoration: underline; }
+.journal { top: var(--view-header-end); right: var(--edge); width: min(360px, calc(100% - 2 * var(--edge))); max-height: calc(100% - var(--view-header-end) - var(--dock-height)); overflow-y: auto; }
 .meeting { border-bottom: 1px solid #514b3e; margin-bottom: 12px; padding-bottom: 12px; }
 .meeting p.meetingState { color: #e5c469; font-size: 14px; font-weight: 650; margin: 8px 0; display: flex; gap: 8px; align-items: center; }
 .meetingState i { width: 7px; height: 7px; background: #d1ad57; border-radius: 50%; }
@@ -62,9 +55,8 @@
 .journal li i[data-resident="02"] { background: #79bab7; }
 .journal time { font-size: 11px; color: #c5bba6; font-variant-numeric: tabular-nums; }
 .journalFooter { display: flex; gap: 10px; justify-content: space-between; color: #bfb8ab; font-size: 11px; border-top: 1px solid #46443d; padding-top: 9px; }
-@media (max-width: 800px) { .header { left: 10px; right: 10px; gap: 8px; } .header .divider { display: none; } .residents { left: 10px; width: 252px; } .journal { right: 10px; width: 290px; bottom: 10px; } }
-@media (max-width: 580px) { .viewer { min-height: 780px; } .residents { width: calc(100% - 20px); } .journal { width: calc(100% - 20px); } .connection { font-size: 10px; } .brand, .join { font-size: 12px; } .header:has(.join) a:last-child { display: none; } }
+@media (max-width: 800px) { .residents { width: 252px; } }
+@media (max-width: 580px) { .viewer { min-height: 650px; } .residents { width: min(252px, calc(100% - 2 * var(--edge))); } .connection { font-size: 10px; } }
 @media (max-width: 580px) {
   .viewer[data-joining="true"] { min-height: 100svh; }
-  .viewer[data-joining="true"] .header { flex-wrap: wrap; }
 }

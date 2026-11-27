@@ -1,8 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
-import { CityMark } from '@/components/CityMark';
+import { SiteHeader } from '@/components/SiteNavigation';
 import { CityGlyph } from './CityGlyph';
 import { CityLoading } from './CityLoading';
 import { LightingMission } from './LightingMission';
@@ -81,10 +80,11 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   const explorerHeading = useRef<HTMLHeadingElement>(null);
   const explorerFocus = useRef<'trigger' | 'heading' | null>(null);
   const modeControl = useRef<HTMLButtonElement>(null);
-  const [explorerOpen, setExplorerOpen] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(!cafeMode);
-  const [cameraOpen, setCameraOpen] = useState(false);
-  const [shiftOpen, setShiftOpen] = useState(cafeMode);
+  const [panel, setPanel] = useState<'directory' | 'activity' | 'camera' | 'shift' | null>(cafeMode ? 'shift' : null);
+  const explorerOpen = panel === 'directory';
+  const activityOpen = panel === 'activity';
+  const cameraOpen = panel === 'camera';
+  const shiftOpen = panel === 'shift';
   const [usingStatic, setUsingStatic] = useState(false);
   const [renderAttempt, setRenderAttempt] = useState(0);
   const [selection, setSelection] = useState<WalkSelection | null>(null);
@@ -94,12 +94,12 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
     selectionRef.current = item;
     world.current?.select(item);
     setSelection(item);
-    if (item) setExplorerOpen(true);
+    if (item) setPanel('directory');
   }, []);
   const closeExplorer = useCallback(() => {
     inspect(null);
     explorerFocus.current = 'trigger';
-    setExplorerOpen(false);
+    setPanel(null);
   }, [inspect]);
   const latest = useRef<CafeSnapshot | null>(null);
   const latestCity = useRef<CityObservation | null>(null);
@@ -109,7 +109,6 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   }, []);
   const visitSession = useCityVisit(!cafeMode, syncCity);
   const seenCityJob = useRef<string | undefined>(undefined);
-  const seenTheatre = useRef<number | undefined>(undefined);
   const followedCafeId = useRef<FollowId>('01');
   const [cafeFollow, setCafeFollow] = useState<FollowId>('01');
   const followCityAgent = useCallback((id: FollowId) => {
@@ -255,17 +254,10 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
         syncCity(observation);
         setCity(observation);
         const construction = observation.lightingPilot?.worker?.activity;
-        const outing = observation.eveningWalk?.recent[0]?.activity;
-        const opensAt = observation.theatre?.booking?.opensAt;
-        const job = construction?.requestId === requestedActivity && requestedActivity ? construction
-          : outing && (!construction || outing.startedAt >= construction.startedAt) ? outing : construction;
+        const job = requestedActivity && construction?.requestId === requestedActivity ? construction : undefined;
         if (job?.agentId && seenCityJob.current !== job.requestId) {
           seenCityJob.current = job.requestId;
           followCityAgent(job.agentId);
-        }
-        if (!requestedActivity && opensAt && seenTheatre.current !== opensAt) {
-          seenTheatre.current = opensAt;
-          if (observation.theatre?.phase !== 'finished') showTheatre();
         }
       } catch {
         // Retry on the next poll, retaining the last position during a brief disconnect.
@@ -275,7 +267,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
     }
     void refresh();
     return () => { controller.abort(); clearTimeout(timer); };
-  }, [cafeMode, cityBusy, followCityAgent, requestedActivity, showTheatre, syncCity]);
+  }, [cafeMode, cityBusy, followCityAgent, requestedActivity, syncCity]);
 
   function select(next: View, id = selected) {
     world.current?.view(next, id);
@@ -287,7 +279,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   function openDirectory() {
     explorerFocus.current = 'heading';
     inspect(null);
-    setExplorerOpen(true);
+    setPanel('directory');
   }
 
   function openDetails(item: WalkSelection) {
@@ -375,7 +367,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
   function useStatic() {
     setUsingStatic(true);
     setState('fallback');
-    setCameraOpen(false);
+    if (cameraOpen) setPanel(null);
     requestAnimationFrame(() => modeControl.current?.focus({ preventScroll: true }));
   }
 
@@ -392,18 +384,18 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
       <section className={styles.viewer} aria-label="NEXCIV 实时街区">
         <img className={styles.poster} src="/nexciv-walk/city-dusk.webp" alt="NEXCIV 湖畔城区的黄昏俯视图" />
         <div ref={viewport} className={styles.viewport} data-visual data-live={sceneReady && !loadingStage} />
+        <h1 className={styles.srOnly}>{cafeMode ? '咖啡街试玩' : '独立城市试玩'}</h1>
+        <SiteHeader className={styles.hudHeader} controls={(
+          <div className={styles.tools}>
+            <span className={styles.status}><i />{loadingStage ? '城市加载中' : sceneReady ? '实时 3D' : '2D 导览'} <small>{guestView ? '游客 DEMO' : 'DEMO'}</small></span>
+            {!loadingStage && <>
+              {!cafeMode && sceneReady && <button type="button" aria-label="镜头控制" aria-expanded={cameraOpen} aria-controls="camera-controls" onClick={() => setPanel(cameraOpen ? null : 'camera')}><CityGlyph name="camera" /></button>}
+              <button ref={modeControl} type="button" onClick={sceneReady ? useStatic : start3D}>{sceneReady ? '2D' : '开启 3D'}</button>
+            </>}
+          </div>
+        )} />
         <div className={styles.hud} inert={Boolean(loadingStage)}>
         <a className={styles.skip} href="#walk-controls">跳到操作</a>
-        <header className={styles.hudHeader}>
-          <h1><Link className={styles.hudBrand} href="/" prefetch={false} aria-label="NEXCIV CITY 首页"><CityMark /><span>NEXCIV <b>CITY</b></span></Link>
-            <span className={styles.srOnly}>{cafeMode ? '咖啡街的一个班次' : '城市试玩'}</span></h1>
-          <div className={styles.tools}>
-            <span className={styles.status}><i />{sceneReady ? '实时 3D' : '2D 导览'} <small>{guestView ? '游客 DEMO' : 'DEMO'}</small></span>
-            {!cafeMode && sceneReady && <button type="button" aria-label="镜头控制" aria-expanded={cameraOpen} aria-controls="camera-controls" onClick={() => setCameraOpen(!cameraOpen)}><CityGlyph name="camera" /></button>}
-            <button ref={modeControl} type="button" onClick={sceneReady ? useStatic : start3D}>{sceneReady ? '2D' : '开启 3D'}</button>
-            {!cafeMode && <Link className={styles.connectLink} href="/nexciv-preview/cafe?connect=1#connect-agent" prefetch={false}>连接 Agent</Link>}
-          </div>
-        </header>
         <div className={styles.destination}>
           <div className={styles.profile}>
             <img src={SHARED_AVATARS.citizen.portrait} alt="" width={48} height={48} />
@@ -432,17 +424,16 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
           </div>
         </div>
         {activityOpen && <aside className={styles.pulse} aria-labelledby="pulse-title">
-          <div className={styles.panelHeading}><h2 id="pulse-title">城市动态</h2><button type="button" onClick={() => setActivityOpen(false)} aria-label="关闭城市动态">×</button></div>
+          <div className={styles.panelHeading}><h2 id="pulse-title">城市动态</h2><button type="button" onClick={() => setPanel(null)} aria-label="关闭城市动态">×</button></div>
           {updates.length ? <ul>{updates.map(({ id, text, speaker }) => <li key={id}>
             {speaker && <b>{speaker} · </b>}{text}
           </li>)}</ul> : <p>{visitMovement?.status === 'walking' ? `01 号正前往${visitMovement.name}。` : '本次试玩暂无现场活动。'}</p>}
           {!cafeMode && visitSession.connection !== 'unavailable' && <button type="button" className={styles.missionShortcut}
             onClick={() => openDetails({ kind: 'building', id: 'governance' })}>{visitPilot?.stage === 'lit' ? '湖畔加灯 · 已完成' : '湖畔加灯'}</button>}
-          <Link href="/nexciv-preview/cafe/news" prefetch={false}>查看城邦早报</Link>
         </aside>}
         {!cafeMode && <CityExplorer selection={selection} open={explorerOpen} sceneState={state}
           focusActive={focusActive} residentReport={selectedResident} residentIds={availableResidents} workerStatus={workerStatus}
-          managerPresent={managerPresent}
+          managerPresent={managerPresent} cafeLink
           heading={explorerHeading} onOpen={openDirectory} onClose={closeExplorer}
           onSelect={openDetails} onFocus={focusSelection}>
           {visitVenue && (
@@ -454,18 +445,15 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
           )}
         </CityExplorer>}
         <nav id="walk-controls" tabIndex={-1} className={styles.dock} aria-label="城市快捷操作">
-          {cafeMode ? <Link href="/nexciv-preview" prefetch={false}><CityGlyph name="places" /><span>返回街区</span></Link>
-            : <button ref={explorerTrigger} type="button" aria-expanded={explorerOpen} aria-controls="city-explorer" onClick={explorerOpen ? closeExplorer : openDirectory}><CityGlyph name="places" /><span>地点与居民</span></button>}
-          <button type="button" aria-expanded={activityOpen} onClick={() => setActivityOpen(!activityOpen)}><CityGlyph name="pulse" /><span>动态</span></button>
-          {cafeMode ? <button type="button" aria-expanded={shiftOpen} aria-controls="cafe-controls" onClick={() => setShiftOpen(!shiftOpen)}><CityGlyph name="coffee" /><span>咖啡班次</span></button>
-            : <Link href="/nexciv-preview/cafe" prefetch={false}><CityGlyph name="coffee" /><span>咖啡街</span></Link>}
-          <Link href="/nexciv-preview/cafe/news" prefetch={false}><CityGlyph name="paper" /><span>城邦早报</span></Link>
+          {!cafeMode && <button ref={explorerTrigger} type="button" aria-expanded={explorerOpen} aria-controls="city-explorer" onClick={explorerOpen ? closeExplorer : openDirectory}><CityGlyph name="places" /><span>地点与居民</span></button>}
+          <button type="button" aria-expanded={activityOpen} onClick={() => setPanel(activityOpen ? null : 'activity')}><CityGlyph name="pulse" /><span>动态</span></button>
+          {cafeMode && <button type="button" aria-expanded={shiftOpen} aria-controls="cafe-controls" onClick={() => setPanel(shiftOpen ? null : 'shift')}><CityGlyph name="coffee" /><span>咖啡班次</span></button>}
         </nav>
         {state === 'fallback' && <p className={styles.fallback} role="status">{usingStatic ? '已切换到 2D 导览。' : '3D 场景暂时无法加载。'}{cafeMode ? ' 可继续观察班次。' : ' 可从「地点与居民」继续互动。'}</p>}
       <aside id={cafeMode ? 'cafe-controls' : 'camera-controls'} className={`${styles.footer} ${cafeMode ? styles.shiftPanel : styles.cameraPanel}`}
         aria-label={cafeMode ? '咖啡街班次' : '镜头控制'} hidden={cafeMode ? !shiftOpen : !cameraOpen}>
         {cafeMode ? <>
-          <div className={styles.panelHeading}><h2>咖啡街班次</h2><button type="button" aria-label="关闭咖啡街班次" onClick={() => setShiftOpen(false)}>×</button></div>
+          <div className={styles.panelHeading}><h2>咖啡街班次</h2><button type="button" aria-label="关闭咖啡街班次" onClick={() => setPanel(null)}>×</button></div>
           {cityWalk && !watchingTheatre && <div className={styles.route}>
             <span>{followingAttendee ? '剧场行程' : cafeFollow === '03' ? '傍晚行程' : cafeFollow === '02' ? '施工路线' : movementActivity?.kind === 'survey' ? '调研路线'
               : movementActivity?.kind === 'work' ? '巡查路线' : movementActivity?.kind === 'read' ? '公告栏路线' : '全城试走'}</span>
@@ -507,7 +495,7 @@ export function WalkPreview({ cafeMode = false, requestedActivity, connectOnOpen
           </details>}
           <CafeShift onUpdate={updateCafe} connectOnOpen={connectOnOpen && !loadingStage} />
         </> : <>
-        <div className={styles.panelHeading}><h2>镜头控制</h2><button type="button" aria-label="关闭镜头控制" onClick={() => setCameraOpen(false)}>×</button></div>
+        <div className={styles.panelHeading}><h2>镜头控制</h2><button type="button" aria-label="关闭镜头控制" onClick={() => setPanel(null)}>×</button></div>
         <div className={styles.controls}>
           <div className={styles.switcher} role="group" aria-label="视角">
             <button disabled={!sceneReady} aria-pressed={!inspectionCamera && view === 'overview'} onClick={() => select('overview')}>全城</button>

@@ -21,7 +21,7 @@ const nextConfig = {
       { source: '/my-agent/demo', destination: '/agent-console/demo', permanent: false },
       {
         source: '/my-agent',
-        destination: sharedProfilesOpen ? '/nexciv-preview/shared/join' : '/nexciv-preview/cafe?connect=1#connect-agent',
+        destination: sharedProfilesOpen ? '/nexciv-preview/shared/join' : '/nexciv-preview/docs#agent',
         permanent: false,
       },
     ];

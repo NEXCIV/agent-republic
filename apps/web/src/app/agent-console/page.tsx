@@ -146,7 +146,6 @@ export default function MyAgentPage() {
         meta={['已验证的持有人身份', '配置保留历史版本']}
       >
         <Link className="button" href="/agent-console/demo">试用指令演示</Link>
-        <Link className="button" href="/nexciv-preview/shared/join">角色与接入</Link>
       </PageHeader>
 
       {notice !== null ? <div className="panel hint">{notice}</div> : null}

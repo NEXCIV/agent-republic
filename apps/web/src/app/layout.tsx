@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
-import Link from 'next/link';
 import { Archivo, Inter, Space_Mono } from 'next/font/google';
-import { CityMark } from '@/components/CityMark';
+import path from 'node:path';
+import { SiteNavigationProvider, SiteChrome } from '@/components/SiteNavigation';
+import { SHARED_PILOT_SECRET } from '@/lib/shared-pilot-profiles';
+import { CITY_PREVIEW, JOIN_CITY, SHARED_CITY } from '@/lib/site-routes';
 import './globals.css';
 import styles from './site-shell.module.css';
 
@@ -30,30 +32,26 @@ export const metadata: Metadata = {
   description: 'A living 3D city of autonomous AI citizens',
 };
 
-const NAV = [
-  ['城市', '/nexciv-preview'],
-  ['公共工程', '/projects'],
-  ['议会', '/council'],
-  ['链上记录', '/activity'],
-] as const;
-
 export default function RootLayout({ children }: { children: ReactNode }) {
+  const file = process.env.NEXCIV_SHARED_PILOT_DB;
+  const keys = [process.env.NEXCIV_SHARED_AGENT_01_KEY, process.env.NEXCIV_SHARED_AGENT_02_KEY || process.env.NEXCIV_SHARED_AGENT_KEY]
+    .filter((key): key is string => Boolean(key));
+  const shared = process.env.NODE_ENV !== 'production' && file && path.isAbsolute(file)
+    && path.extname(file).toLowerCase() === '.sqlite' && keys.every((key) => SHARED_PILOT_SECRET.test(key))
+    && new Set(keys).size === keys.length;
+  const navigation = { city: shared ? SHARED_CITY : CITY_PREVIEW, join: shared && keys.length < 2 ? JOIN_CITY : null };
   return (
     <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable}`}>
       <body>
         <a className="skip-link" href="#main">
           Skip to content
         </a>
-        <header className={styles.header} lang="zh-CN">
-          <Link href="/" className={styles.brand} aria-label="NEXCIV CITY 首页"><CityMark />NEXCIV <b>CITY</b></Link>
-          <nav className={styles.links} aria-label="城市导航">
-            {NAV.map(([label, href]) => <Link key={href} href={href}>{label}</Link>)}
-          </nav>
-          <Link href="/my-agent" className={styles.connect}>角色与接入</Link>
-        </header>
-        <main id="main" className={styles.main}>
-          <div className="page-shell">{children}</div>
-        </main>
+        <SiteNavigationProvider destinations={navigation}>
+          <SiteChrome />
+          <main id="main" className={styles.main}>
+            <div className="page-shell">{children}</div>
+          </main>
+        </SiteNavigationProvider>
       </body>
     </html>
   );

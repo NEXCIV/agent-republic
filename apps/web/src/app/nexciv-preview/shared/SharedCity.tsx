@@ -3,50 +3,87 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { CityMark } from '@/components/CityMark';
+import { SiteHeader } from '@/components/SiteNavigation';
+import { CITY_PREVIEW, JOIN_CITY, SHARED_CITY } from '@/lib/site-routes';
 import { SHARED_PILOT_MAX_TURNS } from '@agent-republic/domain';
 import type { SharedPilotView } from '../../../lib/shared-pilot-runtime';
 import type { SharedPilotProfile } from '../../../lib/shared-pilot-profiles';
 import { CITY_PLACES } from '../../../lib/city-movement';
-import { createWalk, type DistrictStatus, type WalkController } from '../walk';
+import { createWalk, type AgentReport, type DistrictStatus, type WalkController, type WalkSelection } from '../walk';
+import { CityExplorer } from '../CityExplorer';
+import { CityGlyph } from '../CityGlyph';
 import base from '../preview.module.css';
 import styles from './shared.module.css';
 import { EntryCameraContext } from './entry-camera';
 
 type ResidentId = '01' | '02';
 type CameraView = 'overview' | 'meeting' | 'survey' | ResidentId;
-type SharedCityView = SharedPilotView & { profilesEnabled: boolean };
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
+const residents = ['01', '02'] as const;
 const endpoint = '/api/nexciv-preview/shared';
 
-const CITY_PATH = '/nexciv-preview/shared';
-const JOIN_PATH = `${CITY_PATH}/join`;
-
 export function SharedCity({ children }: { children: ReactNode }) {
-  const joining = usePathname() === JOIN_PATH;
+  const joining = usePathname() === JOIN_CITY;
   const viewport = useRef<HTMLDivElement>(null);
   const world = useRef<WalkController | null>(null);
   const latest = useRef<SharedPilotView | null>(null);
-  const [snapshot, setSnapshot] = useState<SharedCityView | null>(null);
+  const [snapshot, setSnapshot] = useState<SharedPilotView | null>(null);
   const [status, setStatus] = useState<'connecting' | 'live' | 'stale'>('connecting');
   const [message, setMessage] = useState('');
   const [view, setView] = useState<CameraView>('overview');
   const [entryProfile, setEntryProfile] = useState<SharedPilotProfile | null>(null);
-  const watchedMeeting = useRef<string | undefined>(undefined);
-  const watchedSurvey = useRef<string | undefined>(undefined);
+  const [panel, setPanel] = useState<'directory' | 'activity' | null>(null);
+  const [selection, setSelection] = useState<WalkSelection | null>(null);
+  const [focusedBuilding, setFocusedBuilding] = useState<string | null>(null);
+  const explorerHeading = useRef<HTMLHeadingElement>(null);
+  const explorerTrigger = useRef<HTMLButtonElement>(null);
   const [staticMode, setStaticMode] = useState(false);
   const [scene, setScene] = useState<'loading' | 'ready' | 'fallback'>('loading');
   const [overview, setOverview] = useState<DistrictStatus>('idle');
   const [renderAttempt, setRenderAttempt] = useState(0);
   const [fps, setFps] = useState(0);
-  const [failedAgents, setFailedAgents] = useState<ResidentId[]>([]);
+  const [reports, setReports] = useState<Partial<Record<ResidentId, AgentReport>>>({});
 
   const focus = useCallback((id: CameraView) => {
     setEntryProfile(null);
     setView(id);
+    setFocusedBuilding(null);
     world.current?.view(id === 'overview' ? 'overview' : 'follow', id === 'overview' ? undefined : id === 'meeting' || id === 'survey' ? '01' : id);
     world.current?.select(id === 'overview' || id === 'meeting' || id === 'survey' ? null : { kind: 'resident', id });
   }, []);
+
+  const inspect = useCallback((item: WalkSelection | null) => {
+    if (item?.kind === 'person' || (item?.kind === 'resident' && item.id === '03')) return;
+    setSelection(item);
+    setPanel('directory');
+    world.current?.select(item);
+  }, []);
+
+  const closeExplorer = useCallback(() => {
+    setPanel(null);
+    setSelection(null);
+    world.current?.select(null);
+    explorerTrigger.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    if (panel !== 'directory') return;
+    explorerHeading.current?.focus({ preventScroll: true });
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented) closeExplorer();
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [closeExplorer, panel, selection]);
+
+  function focusSelection(item: WalkSelection) {
+    if (item.kind === 'resident' && item.id !== '03') focus(item.id);
+    else if (item.kind === 'building') {
+      setEntryProfile(null);
+      setFocusedBuilding(item.id);
+      world.current?.focus(item);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -60,7 +97,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
           delay = 3500;
           throw new Error(typeof error?.error === 'string' ? error.error : '共享城市暂不可用。');
         }
-        const result = await response.json() as SharedCityView;
+        const result = await response.json() as SharedPilotView;
         if (controller.signal.aborted) return;
         latest.current = result;
         world.current?.syncShared(result);
@@ -85,32 +122,28 @@ export function SharedCity({ children }: { children: ReactNode }) {
     setScene('loading');
     setOverview('idle');
     setView('overview');
-    setFailedAgents([]);
+    setReports({});
+    setFocusedBuilding(null);
     let controller: WalkController | undefined;
     try {
       controller = createWalk(host, 'overview', true, {
         ready: () => setScene('ready'), fallback: () => setScene('fallback'),
-        agent: (id, report) => {
-          if (id !== '01' && id !== '02') return;
-          setFailedAgents((current) => report.status === 'unavailable'
-            ? current.includes(id) ? current : [...current, id]
-            : current.includes(id) ? current.filter((failed) => failed !== id) : current);
-        },
+        agent: (id, report) => { if (id === '01' || id === '02') setReports((current) => ({ ...current, [id]: report })); },
         district: () => {}, overview: setOverview, fps: setFps,
-        onSelect: (item) => {
-          if (item?.kind === 'resident' && (item.id === '01' || item.id === '02')) {
-            setEntryProfile(null);
-            setView(item.id); controller?.select(item); controller?.view('follow', item.id);
-          }
-        },
+        onSelect: (item) => { if (item) inspect(item); },
       }, false, true);
       world.current = controller;
       controller.syncShared(latest.current);
     } catch { setScene('fallback'); }
     return () => { controller?.dispose(); world.current = null; };
-  }, [staticMode, renderAttempt]);
+  }, [inspect, staticMode, renderAttempt]);
 
-  useEffect(() => { if (joining) focus('overview'); }, [focus, joining]);
+  useEffect(() => {
+    if (!joining) return;
+    setPanel(null);
+    setSelection(null);
+    focus('overview');
+  }, [focus, joining]);
 
   const live3d = scene === 'ready' && !staticMode;
   const showCity = live3d && (view !== 'overview' || overview === 'ready' || overview === 'unavailable');
@@ -120,14 +153,14 @@ export function SharedCity({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (joining || !entryProfile) return;
     const { residentId, avatar } = entryProfile;
-    if (staticMode || scene === 'fallback' || failedAgents.includes(residentId)) {
+    if (staticMode || scene === 'fallback' || reports[residentId]?.status === 'unavailable') {
       setEntryProfile(null);
     } else if (showCity && snapshot?.profiles.some((profile) => profile.residentId === residentId && profile.avatar === avatar)) {
       world.current?.enterResident(residentId, avatar);
       setView(residentId);
       setEntryProfile(null);
     }
-  }, [entryProfile, failedAgents, joining, scene, showCity, snapshot, staticMode]);
+  }, [entryProfile, reports, joining, scene, showCity, snapshot, staticMode]);
   const social = snapshot?.social;
   const meeting = social?.meeting;
   const survey = snapshot?.survey;
@@ -139,36 +172,23 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const events = (snapshot ? [...snapshot.events.map((event) => ({ ...event, text: `${event.residentId} 号 ${event.kind === 'MOVE_STARTED' ? '出发前往' : '已到达'} ${CITY_PLACES[event.place]}` })),
     ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text })),
     ...(survey?.events ?? [])] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
-  useEffect(() => {
-    if (joining || entryProfile || !live3d || meeting?.status !== 'talking' || watchedMeeting.current === meeting.id) return;
-    watchedMeeting.current = meeting.id;
-    if (view === 'overview') focus('meeting');
-  }, [entryProfile, focus, joining, live3d, meeting?.id, meeting?.status, view]);
-  useEffect(() => {
-    if (joining || entryProfile || !live3d || task?.status !== 'surveying' || watchedSurvey.current === task.id) return;
-    watchedSurvey.current = task.id;
-    if (view === 'overview' || view === 'meeting') focus('survey');
-  }, [entryProfile, focus, joining, live3d, task?.id, task?.status, view]);
+  const residentNames = { ...names, ...Object.fromEntries(snapshot?.profiles.map((p) => [p.residentId, p.name]) ?? []) };
+  const selectedResident = selection?.kind === 'resident' && selection.id !== '03' ? selection.id : undefined;
   return <div className={base.page}>
     <section className={`${base.viewer} ${styles.viewer}`} data-joining={joining} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
       <img className={base.poster} src="/nexciv-walk/city-dusk.webp" alt="湖畔城区俯视图" />
       <div ref={viewport} className={base.viewport} data-live={showCity} data-overview={overview} aria-hidden={!showCity} inert={!showCity} />
-      <header className={styles.header}>
-        <Link className={styles.brand} href="/"><CityMark /><span>NEXCIV <b>CITY</b></span></Link>
-        <span className={styles.divider}>共享城市</span>
-        <span className={styles.connection} data-live={joining || loadingCity ? showCity : status === 'live'} role="status"><i />{joining || loadingCity ? previewStatus : status === 'live' ? '状态同步中' : status === 'connecting' ? '正在连接' : '连接中断'} · DEMO</span>
-        {joining ? <Link className={styles.join} href={CITY_PATH}>返回城市</Link>
-          : snapshot?.profilesEnabled && <Link className={styles.join} href={JOIN_PATH} prefetch={false}>角色与接入</Link>}
-        <button type="button" onClick={() => { if (!staticMode && scene !== 'fallback') setStaticMode(true); else { setScene('loading'); setOverview('idle'); setView('overview'); setFailedAgents([]); setStaticMode(false); setRenderAttempt((attempt) => attempt + 1); } }}>{staticMode || scene === 'fallback' ? '开启 3D' : '2D'}</button>
-        {!joining && <Link href="/nexciv-preview" prefetch={false}>独立试玩</Link>}
-      </header>
+      <SiteHeader className={`${base.hudHeader} ${styles.header}`} back={joining ? SHARED_CITY : undefined} controls={<>
+        <span className={styles.connection} data-live={joining || loadingCity ? showCity : status === 'live'} role="status"><i />{joining || loadingCity ? previewStatus : status === 'live' ? '同步中' : status === 'connecting' ? '正在连接' : '连接中断'} · DEMO</span>
+        <button type="button" onClick={() => { if (!staticMode && scene !== 'fallback') setStaticMode(true); else { setScene('loading'); setOverview('idle'); setStaticMode(false); setRenderAttempt((attempt) => attempt + 1); } }}>{staticMode || scene === 'fallback' ? '开启 3D' : '2D'}</button>
+      </>} />
       <EntryCameraContext.Provider value={setEntryProfile}>{children}</EntryCameraContext.Provider>
       {!joining && <>
       <aside className={styles.residents} aria-label="两名共享居民">
         <div className={styles.panelHead}><h1>同城居民</h1><span>{snapshot?.engines.length ?? 0} / 2</span></div>
         <p className={styles.explain}>两名居民 · 共用一个城市存档</p>
-        {(['01', '02'] as const).map((id) => {
+        {residents.map((id) => {
           const engine = snapshot?.engines.find(({ residentId }) => residentId === id);
           const profile = snapshot?.profiles.find(({ residentId }) => residentId === id);
           const resident = snapshot?.residents.find(({ residentId }) => residentId === id);
@@ -185,19 +205,32 @@ export function SharedCity({ children }: { children: ReactNode }) {
             <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{profile?.name ?? names[id]}</b><small>{engine?.driver === 'MODEL'
               ? ({ starting: '模型 Agent 正在启动', running: '模型 Agent 自主运行中', paused: '模型 Agent 已暂停', finished: '模型 Agent 本轮结束', error: '模型 Agent 运行失败' })[engine.status]
               : engine?.driver === 'EXTERNAL' ? (engine.connected ? '外接 Agent 最近活跃' : '等待 Agent 接入') : resident ? '规则 Agent 已接入' : '连接中'}</small></div>
-              <button type="button" disabled={!live3d || failedAgents.includes(id)} aria-pressed={view === id} onClick={() => focus(id)}>跟随</button></div>
+              <button type="button" disabled={!live3d || reports[id]?.status === 'unavailable'} aria-pressed={view === id && !focusedBuilding} onClick={() => focus(id)}>跟随</button></div>
             <strong role="status" data-resident-status={id}>{resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
             {inspection ? <div className={styles.progress}><progress aria-label={`${id} 号现场观察进度`} max={8} value={inspection.finding ? 8 : Math.min(8, Math.max(0, ((snapshot?.serverTime ?? 0) - (inspection.startedAt ?? snapshot?.serverTime ?? 0)) / 1000))} /><span>{inspection.finding ? '已记录' : '观察'}</span></div>
               : movement && <div className={styles.progress}><progress aria-label={`${id} 号行程进度`} max={100} value={progress} /><span>{progress}%</span></div>}
             {resident && <small className={styles.position}>X {resident.position[0].toFixed(1)} · Z {resident.position[2].toFixed(1)}</small>}
-            {failedAgents.includes(id) && <small>角色模型未载入，行动记录仍可查看。</small>}
+            {reports[id]?.status === 'unavailable' && <small>角色模型未载入，行动记录仍可查看。</small>}
           </article>;
         })}
-        <button className={styles.overview} type="button" disabled={!live3d} aria-pressed={view === 'overview'} onClick={() => focus('overview')}>{view === 'overview' && overview === 'loading' ? '全城地图加载中…' : '全城俯视'}</button>
-        {message && <p role="alert" className={styles.alert}>{message}</p>}
+        <button className={styles.overview} type="button" disabled={!live3d} aria-pressed={view === 'overview' && !focusedBuilding} onClick={() => focus('overview')}>{view === 'overview' && overview === 'loading' ? '全城地图加载中…' : '全城俯视'}</button>
+        {message && <p role="alert" className={styles.alert}>{message} <Link href={CITY_PREVIEW}>打开独立城市试玩</Link></p>}
         {!live3d && <p className={styles.explain}>{staticMode || scene === 'fallback' ? '2D 状态观察 · 地图为静态背景' : '正在载入实时城市模型...'}</p>}
       </aside>
-      <aside className={styles.journal} aria-label="实时城市动态">
+      <nav className={base.dock} aria-label="城市快捷操作">
+        <button ref={explorerTrigger} type="button" aria-expanded={panel === 'directory'} aria-controls="city-explorer" onClick={panel === 'directory' ? closeExplorer : () => inspect(null)}><CityGlyph name="places" /><span>地点与居民</span></button>
+        <button type="button" aria-controls="shared-city-activity" aria-expanded={panel === 'activity'} onClick={() => {
+          setPanel(panel === 'activity' ? null : 'activity');
+          setSelection(null);
+          world.current?.select(null);
+        }}><CityGlyph name="pulse" /><span>动态</span></button>
+      </nav>
+      <CityExplorer selection={selection} open={panel === 'directory'} sceneState={staticMode ? 'fallback' : scene}
+        focusActive={selection?.kind === 'building' ? focusedBuilding === selection.id : Boolean(selectedResident && view === selectedResident && !focusedBuilding)}
+        residentIds={residents} residentNames={residentNames} residentReport={selectedResident ? reports[selectedResident] : undefined}
+        managerPresent={false} heading={explorerHeading} onOpen={() => inspect(null)} onClose={closeExplorer}
+        onSelect={inspect} onFocus={focusSelection} />
+      <aside id="shared-city-activity" className={styles.journal} aria-label="实时城市动态" hidden={panel !== 'activity'}>
         {task && <section className={styles.meeting} aria-label="公共建设中心共同调研">
           <div className={styles.panelHead}><h2>公共建设中心调研</h2><small>{survey?.completed ?? 0} 次完成</small></div>
           <p className={styles.meetingState} data-survey-status={task.status}><i />{surveyTitle}{task.status === 'accepted' && ` · ${survey?.arrived.length ?? 0}/2 到场`}{task.status === 'surveying' && ` · ${submitted}/2 已记录`}</p>

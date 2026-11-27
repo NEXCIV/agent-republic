@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { CityMark } from '@/components/CityMark';
+import { SiteHeader } from '@/components/SiteNavigation';
 import { demoEndpoint } from '../../demoEndpoint';
 import type { CityNewspaperEdition, NewspaperSnapshot } from '../../../../lib/cafe-newspaper';
 import { OBSERVER_QUESTIONS, OBSERVER_SPEAKERS } from '../../../../lib/cafe-observer';
@@ -63,11 +63,7 @@ export function CafeNewspaper({ requestedIssue }: { requestedIssue?: string }) {
   const edition = snapshot?.current;
   return (
     <div className={styles.page} lang="zh-CN">
-      <header className={styles.header}>
-        <Link href="/" className={styles.brand} aria-label="NEXCIV CITY 首页"><CityMark /> NEXCIV CITY</Link>
-        <Link href="/nexciv-preview/cafe" className={styles.cafeLink}>返回咖啡街</Link>
-        <span className={styles.status}>AI SIMULATED · DEMO</span>
-      </header>
+      <SiteHeader controls={<span className={styles.status}>AI SIMULATED · DEMO</span>} />
       <section className={styles.newspaper} aria-labelledby="newspaper-title">
         <h1 id="newspaper-title">城邦早报</h1>
         {error ? <div role="status">
