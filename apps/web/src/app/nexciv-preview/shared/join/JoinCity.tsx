@@ -101,22 +101,24 @@ export function JoinCity() {
     {!state && failure && <button className={styles.secondary} type="button" onClick={() => { setFailure(''); setLoadAttempt((attempt) => attempt + 1); }}>重新检查</button>}
     {state && !profile && <form onSubmit={claim} className={styles.form}>
       <AvatarPreview avatar={avatar} />
-      <label className={styles.field}>角色名
-        <input name="name" autoComplete="off" maxLength={24} required disabled={creating} value={name} onChange={(event) => setName(event.target.value)} placeholder="给居民起个名字" />
-      </label>
       <fieldset className={styles.appearances} disabled={creating}>
         <legend>外观</legend>
         <div>
           {appearances.map(([id, preset]) => <label className={styles.appearance} key={id}>
             <input type="radio" name="avatar" value={id} checked={avatar === id} onChange={() => setAvatar(id)} />
-            <Image src={preset.portrait} alt="" width={36} height={36} />
+            <Image src={preset.portrait} alt="" width={44} height={44} />
             <span>{preset.label}</span>
           </label>)}
         </div>
       </fieldset>
-      <label className={styles.field}>试玩邀请
-        <input name="invite" autoComplete="off" autoCapitalize="off" spellCheck={false} type="password" required disabled={creating} value={invite} onChange={(event) => setInvite(event.target.value)} placeholder="粘贴试玩邀请" />
-      </label>
+      <div className={styles.fields}>
+        <label className={styles.field}>角色名
+          <input name="name" autoComplete="off" maxLength={24} required disabled={creating} value={name} onChange={(event) => setName(event.target.value)} placeholder="给居民起个名字" />
+        </label>
+        <label className={styles.field}>试玩邀请
+          <input name="invite" autoComplete="off" autoCapitalize="off" spellCheck={false} type="password" required disabled={creating} value={invite} onChange={(event) => setInvite(event.target.value)} placeholder="粘贴试玩邀请" />
+        </label>
+      </div>
       <button className={styles.primary} disabled={creating} type="submit">{entering ? '正在进入城市…' : pending ? '正在创建…' : '创建并进入城市'}</button>
     </form>}
     {profile && appearance && <div className={styles.form}>
