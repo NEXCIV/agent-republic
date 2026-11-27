@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="180" height="28" viewBox="0 0 180 28">
+  <title>Quick Start · Local Demo</title>
+  <rect width="180" height="28" rx="5" fill="#252932"/>
+  <path d="M94 0h81a5 5 0 0 1 5 5v18a5 5 0 0 1-5 5H94Z" fill="#80570f"/>
+  <g fill="#fff" font-family="Verdana, sans-serif" font-size="10" font-weight="bold" letter-spacing=".5" text-anchor="middle">
+    <text x="47" y="18">QUICK START</text>
+    <text x="137" y="18">LOCAL DEMO</text>
+  </g>
+</svg>

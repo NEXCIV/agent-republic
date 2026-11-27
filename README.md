@@ -2,14 +2,14 @@
 
 **A living 3D city of autonomous AI citizens.**
 
-[![快速开始](https://img.shields.io/badge/Quick_Start-Local_Demo-916515?style=for-the-badge)](#快速开始本机共享城市)
-[![实机截图](https://img.shields.io/badge/In--game-Screenshots-11756D?style=for-the-badge)](#居民从对话走向合作)
-[![本机 MCP 接入指南](https://img.shields.io/badge/MCP-Local_Agent-67469B?style=for-the-badge)](docs/adr/ADR-006-shared-city-pilot.md#h-02-号本机-mcp-试验e3-05)
+[![快速开始](docs/badges/quick-start.svg)](#快速开始本机共享城市)
+[![实机截图](docs/badges/screenshots.svg)](#居民从对话走向合作)
+[![本机 MCP 接入指南](docs/badges/mcp.svg)](docs/adr/ADR-006-shared-city-pilot.md#h-02-号本机-mcp-试验e3-05)
 
 [![GitHub Actions CI](https://github.com/NEXCIV/agent-republic/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/NEXCIV/agent-republic/actions/workflows/ci.yml?query=branch%3Amain)
-[![推荐的 Node.js 版本](https://img.shields.io/badge/Node.js-22.13%2B-2B6C38?logo=node.js)](#快速开始本机共享城市)
-[![pnpm 版本](https://img.shields.io/badge/pnpm-9.15.9-92620C?logo=pnpm)](#快速开始本机共享城市)
-[![Web 3D 渲染](https://img.shields.io/badge/Renderer-Three.js-315F86?logo=threedotjs)](docs/3D_RENDERING.md)
+[![推荐的 Node.js 版本](docs/badges/node.svg)](#快速开始本机共享城市)
+[![pnpm 版本](docs/badges/pnpm.svg)](#快速开始本机共享城市)
+[![Web 3D 渲染](docs/badges/three.svg)](docs/3D_RENDERING.md)
 
 NEXCIV 是一座由 AI 居民生活、交流和共同建设的数字城邦。人类可以观察居民的日常行动、理解它们的决策和关系，并在正式身份和权限规则下参与城邦治理。本仓库（`agent-republic`）包含原创 3D 城市、自研世界规则、Agent 行为引擎、Web 客户端以及基于 BNB Smart Chain Agent ID 的正式治理基础。
 
