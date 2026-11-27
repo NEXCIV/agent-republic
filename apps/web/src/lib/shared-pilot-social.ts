@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { SHARED_PILOT_LINES, type SharedPilotResidentId, type SharedPilotSocialRequest } from '@agent-republic/domain';
+import { SHARED_PILOT_LINES, SHARED_PILOT_MAX_TURNS, type SharedPilotResidentId, type SharedPilotSocialRequest } from '@agent-republic/domain';
 import { CAFE_BENCH_FRONT, CAFE_COUNTER, type CityPoint } from './cafe-geometry';
 
 type Resident = SharedPilotResidentId;
@@ -7,7 +7,10 @@ type Line = typeof SHARED_PILOT_LINES[number];
 type Phase = 'invited' | 'accepted' | 'talking' | 'completed' | 'declined' | 'expired';
 export type SocialEventKind = 'INVITED' | 'ACCEPTED' | 'DECLINED' | 'MEETING_STARTED' | 'SAID' | 'COMPLETED' | 'EXPIRED';
 export type SocialEvent = { id: string; meetingId: string; kind: SocialEventKind; residentId?: Resident; happenedAt: number; text: string; provenance: 'AI_SIMULATED' };
-export type SocialLine = { residentId: Resident; line: Line; text: string; happenedAt: number };
+type Speech = Extract<SharedPilotSocialRequest, { text: string }>;
+type SurveyIntent = NonNullable<Speech['surveyIntent']>;
+export type SocialLine = { residentId: Resident; text: string; happenedAt: number;
+  line?: Line; source?: 'agent' | 'rules'; surveyIntent?: SurveyIntent };
 export type SharedMeeting = {
   id: string; inviter: Resident; invitee: Resident; venue: 'cafe'; status: Phase;
   createdAt: number; deadlineAt: number; acceptedAt?: number; startedAt?: number; endedAt?: number;
@@ -26,9 +29,9 @@ export type SocialState = {
 export const SOCIAL_DWELL_MS = 4000;
 export const SOCIAL_INVITE_MS = 30000;
 export const SOCIAL_TRAVEL_MS = 120000;
-export const SOCIAL_TALK_MS = 60000;
+export const SOCIAL_TALK_MS = 150000;
 const MAX_SOCIAL_REQUESTS = 300;
-const LINE_TEXT: Record<Line, string> = {
+const LEGACY_LINE_TEXT: Record<Line, string> = {
   greet: '你好！今天想和你聊聊城里的生活。',
   reply: '很高兴认识你。走过这些街道，感觉城市越来越熟悉了。',
   suggest: '下次我们一起去公共建设中心看看，好吗？',
@@ -58,6 +61,35 @@ export function nextSpeaker(meeting: SharedMeeting) {
   return meeting.lines.length % 2 === 0 ? meeting.inviter : meeting.invitee;
 }
 
+export function surveyAgreement(meeting: SharedMeeting) {
+  let proposer: Resident | undefined;
+  let accepted = false;
+  for (const entry of meeting.lines) {
+    // Older local saves and clients recorded the agreement with these two keys.
+    const intent = entry.surveyIntent ?? (entry.line === 'suggest' ? 'propose' : entry.line === 'farewell' ? 'accept' : undefined);
+    if (intent === 'propose' && !proposer && !accepted) proposer = entry.residentId;
+    else if (proposer && proposer !== entry.residentId && (intent === 'accept' || intent === 'decline')) {
+      accepted = intent === 'accept';
+      proposer = undefined;
+    }
+  }
+  return { proposer, accepted };
+}
+
+export function availableSurveyIntents(meeting: SharedMeeting, actor: Resident): SurveyIntent[] {
+  const { proposer, accepted } = surveyAgreement(meeting);
+  if (accepted || proposer === actor) return [];
+  if (proposer) return ['accept', 'decline'];
+  return meeting.lines.length < SHARED_PILOT_MAX_TURNS - 1 ? ['propose'] : [];
+}
+
+function safePilotSpeech(text: string) {
+  // The local DEMO publishes plain text only. Avoid inserting controls or
+  // common credential and contact formats into the transcript or memories.
+  return !/[\p{Cc}\p{Cf}]/u.test(text)
+    && !/(?:https?:\/\/|www\.|nxc_shared_|\bsk-[a-z\d_-]{12,}|\b[a-z\d_-]{43}\b|0x[a-f\d]{40,}|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b)/i.test(text);
+}
+
 function emit(state: SocialState, at: number, kind: SocialEventKind, text: string, residentId?: Resident) {
   state.events.push({ id: `social-${++state.revision}`, meetingId: state.meeting!.id, kind, residentId, happenedAt: at, text, provenance: 'AI_SIMULATED' });
   state.events = state.events.slice(-60);
@@ -71,14 +103,18 @@ export class SocialActionError extends Error {
 export function advanceSocial(state: SocialState, at: number, residents: SocialResident[]): boolean {
   const meeting = state.meeting;
   if (!meeting || !meetingActive(meeting)) return false;
-  if (meeting.status === 'talking' && meeting.lines.length === SHARED_PILOT_LINES.length && at >= meeting.nextTurnAt) {
+  if (meeting.status === 'talking' && meeting.lines.length === SHARED_PILOT_MAX_TURNS && at >= meeting.nextTurnAt) {
     meeting.status = 'completed'; meeting.endedAt = meeting.nextTurnAt;
     const completeAt = meeting.endedAt;
     emit(state, completeAt, 'COMPLETED', '两位居民结束会面，各自留下了一条私人记忆。');
+    const outcome = surveyAgreement(meeting).accepted ? '双方约定一起调研公共建设中心。' : '';
     for (const id of [meeting.inviter, meeting.invitee]) {
       const other = id === meeting.inviter ? meeting.invitee : meeting.inviter;
+      const excerpts = meeting.lines.filter(({ residentId }) => residentId === other)
+        .map(({ text }) => `「${text}」`).join('、');
       state.encounters[id]++;
-      state.memories[id].push({ meetingId: meeting.id, other, happenedAt: completeAt, text: `在咖啡街与 ${other} 号完成四轮交流，并约定下次去公共建设中心。` });
+      state.memories[id].push({ meetingId: meeting.id, other, happenedAt: completeAt,
+        text: `在咖啡街与 ${other} 号见面。对方说过${excerpts}。${outcome}` });
       state.memories[id] = state.memories[id].slice(-16);
     }
     return true;
@@ -96,7 +132,7 @@ export function advanceSocial(state: SocialState, at: number, residents: SocialR
   return false;
 }
 
-export function performSocial(state: SocialState, actor: Resident, request: SharedPilotSocialRequest, at: number, residents: SocialResident[]): SocialReceipt {
+export function performSocial(state: SocialState, actor: Resident, request: SharedPilotSocialRequest, at: number, residents: SocialResident[], source: 'agent' | 'rules' = 'agent'): SocialReceipt {
   const fingerprint = JSON.stringify(request);
   const existing = state.requests[actor][request.requestId];
   if (existing) {
@@ -121,12 +157,20 @@ export function performSocial(state: SocialState, actor: Resident, request: Shar
       else meeting.endedAt = at;
       emit(state, at, request.decision === 'accept' ? 'ACCEPTED' : 'DECLINED', `${actor} 号${request.decision === 'accept' ? '接受了见面邀请。' : '婉拒了见面邀请。'}`, actor);
     } else {
-      if (meeting.status !== 'talking' || meeting.lines.length >= SHARED_PILOT_LINES.length || actor !== nextSpeaker(meeting)
-        || request.line !== SHARED_PILOT_LINES[meeting.lines.length] || at < meeting.nextTurnAt || !residents.every(atMeetingPoint)) {
+      if (meeting.status !== 'talking' || meeting.lines.length >= SHARED_PILOT_MAX_TURNS || actor !== nextSpeaker(meeting)
+        || at < meeting.nextTurnAt || residents.length !== 2 || !residents.every(atMeetingPoint)) {
         throw new SocialActionError('INVALID_REQUEST', '当前不是该居民可以发言的轮次。');
       }
-      const text = LINE_TEXT[request.line];
-      meeting.lines.push({ residentId: actor, line: request.line, text, happenedAt: at });
+      if ('line' in request && request.line !== SHARED_PILOT_LINES[meeting.lines.length]) {
+        throw new SocialActionError('INVALID_REQUEST', '此旧版台词键不适用于当前轮次，请改用 text 发言。');
+      }
+      if ('text' in request && request.surveyIntent && !availableSurveyIntents(meeting, actor).includes(request.surveyIntent)) {
+        throw new SocialActionError('INVALID_REQUEST', '当前没有可以提出或回应的调研约定。');
+      }
+      const text = 'text' in request ? request.text : LEGACY_LINE_TEXT[request.line];
+      if (!safePilotSpeech(text)) throw new SocialActionError('INVALID_REQUEST', '请使用一句不含链接或凭据的城市对话。');
+      meeting.lines.push({ residentId: actor, text, happenedAt: at,
+        ...('line' in request ? { line: request.line, source: 'rules' as const } : { source, surveyIntent: request.surveyIntent }) });
       meeting.nextTurnAt = at + SOCIAL_DWELL_MS;
       emit(state, at, 'SAID', text, actor);
     }
@@ -138,7 +182,11 @@ export function performSocial(state: SocialState, actor: Resident, request: Shar
 
 export function publicSocial(state: SocialState, residents: SocialResident[]) {
   const meeting = state.meeting;
-  return { revision: state.revision, meeting, events: state.events,
+  const speaker = meeting?.status === 'talking' && meeting.lines.length < SHARED_PILOT_MAX_TURNS ? nextSpeaker(meeting) : null;
+  return { revision: state.revision,
+    meeting: meeting && { ...meeting, nextSpeaker: speaker, surveyIntents: speaker ? availableSurveyIntents(meeting, speaker) : [],
+      surveyAgreement: surveyAgreement(meeting) },
+    events: state.events,
     arrived: meeting && (meeting.status === 'accepted' || meeting.status === 'talking') ? residents.filter(atMeetingPoint).map(({ residentId }) => residentId) : [],
     completedMeetings: Math.min(state.encounters['01'], state.encounters['02']),
   };

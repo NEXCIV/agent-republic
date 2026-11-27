@@ -104,6 +104,34 @@ describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('shared café social
     expect(s.observe(b).privateSocial.memories).toEqual([]);
   });
 
+  it('persists original dialogue, enforces speaker and intent, and does not infer agreement from talk alone', () => {
+    const { s, a, b } = setup();
+    const { meetingId } = s.socialAction(a, invite());
+    s.socialAction(b, respond(meetingId, 'accept'));
+    at = Math.max(s.moveTo(a, move('cafe')).arrivesAt, s.moveTo(b, move('cafe')).arrivesAt);
+    at = s.observe(a).social.meeting!.nextTurnAt;
+    const first = { action: 'say', meetingId, requestId: randomUUID(), text: '我想去湖边看落日。' };
+    expect(() => s.socialAction(b, first)).toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+    expect(() => s.socialAction(a, { ...first, surveyIntent: 'accept' })).toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+    expect(() => s.socialAction(a, { ...first, text: '凭据 nxc_shared_' + 'a'.repeat(43) })).toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+    const receipt = s.socialAction(a, first);
+    expect(s.socialAction(a, first)).toEqual(receipt);
+    expect(() => s.socialAction(a, { ...first, text: '改口' })).toThrowError(expect.objectContaining({ code: 'CONFLICT' }));
+    for (const [token, text] of [[b, '好呀，今天的云是橘色的。'], [a, '我喜欢这种安静的晚上。'], [b, '下次也来看看吧。']] as const) {
+      at = s.observe(a).social.meeting!.nextTurnAt;
+      s.socialAction(token, { ...first, requestId: randomUUID(), text });
+    }
+    at = s.observe(a).social.meeting!.nextTurnAt;
+    const saved = reopen().observe(a);
+    expect(saved.social.meeting?.lines[0]).toMatchObject({ text: first.text, source: 'agent' });
+    expect(saved.social.meeting?.status).toBe('completed');
+    expect(saved.survey.eligibleMeetingId).toBeNull();
+    expect(saved.privateSocial.memories[0]?.text).toContain('橘色');
+    expect(saved.privateSocial.memories[0]?.text).not.toContain('约定一起');
+    expect(() => store!.surveyAction(a, { requestId: randomUUID(), action: 'proposeSurvey', meetingId }))
+      .toThrowError(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+  });
+
   it('migrates the exact v1 pilot schema without losing prior movement or credentials', () => {
     const { s, a, b } = setup();
     const sent = s.moveTo(a, move('works'));

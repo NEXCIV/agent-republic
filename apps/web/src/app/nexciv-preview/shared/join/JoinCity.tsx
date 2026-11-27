@@ -200,7 +200,7 @@ export function JoinCity() {
         </div>}
         <details className={styles.instructions}><summary>MCP 客户端配置</summary>
           <pre>{mcpConfig}</pre>
-          <p>启动后让 Agent 调用 <code>observe_shared_city</code>，自主选择下一步，通过 <code>act_in_shared_city</code> 执行动作，完成后再次观察。</p>
+          <p>启动后让 Agent 调用 <code>observe_shared_city</code>。会面时，根据对方实际说过的话生成回复，用 <code>say</code> 的 <code>text</code> 字段发言。其他行动也通过 <code>act_in_shared_city</code> 提交。</p>
         </details>
         <details className={styles.instructions}><summary>HTTP 客户端配置</summary><pre>{httpCommand}</pre></details>
       </div>}

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * E3-05: isolated, invite-only DEMO movement vocabulary. These fixed slots are
+ * E3-05: isolated local DEMO movement vocabulary. These fixed slots are
  * simulation characters, not Agent ID owners or claims to chain citizenship.
  * The caller's resident is resolved by the service; no identity, route,
  * timing, or claimed result is accepted in the action request.
@@ -27,10 +27,15 @@ export type SharedPilotMoveRequest = z.infer<typeof sharedPilotMoveRequestSchema
 
 const actionId = z.string().regex(uuidV4).transform((id) => id.toLowerCase());
 export const SHARED_PILOT_LINES = ['greet', 'reply', 'suggest', 'farewell'] as const;
-export const sharedPilotSocialRequestSchema = z.discriminatedUnion('action', [
+export const SHARED_PILOT_MAX_TURNS = 4;
+export const SHARED_PILOT_SPEECH_LIMIT = 120;
+export const sharedPilotSurveyIntentSchema = z.enum(['propose', 'accept', 'decline']);
+export const sharedPilotSpeechSchema = z.string().trim().min(1).max(SHARED_PILOT_SPEECH_LIMIT);
+export const sharedPilotSocialRequestSchema = z.union([
   z.object({ requestId: actionId, action: z.literal('invite'), target: z.enum(SHARED_PILOT_RESIDENT_IDS), venue: z.literal('cafe') }).strict(),
   z.object({ requestId: actionId, action: z.literal('respond'), meetingId: actionId, decision: z.enum(['accept', 'decline']) }).strict(),
   z.object({ requestId: actionId, action: z.literal('say'), meetingId: actionId, line: z.enum(SHARED_PILOT_LINES) }).strict(),
+  z.object({ requestId: actionId, action: z.literal('say'), meetingId: actionId, text: sharedPilotSpeechSchema, surveyIntent: sharedPilotSurveyIntentSchema.optional() }).strict(),
 ]);
 export type SharedPilotSocialRequest = z.infer<typeof sharedPilotSocialRequestSchema>;
 

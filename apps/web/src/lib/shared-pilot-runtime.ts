@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import { SHARED_PILOT_LINES, SHARED_PILOT_RESIDENT_IDS, type SharedPilotMoveRequest, type SharedPilotPlaceId, type SharedPilotResidentId, type SharedPilotSocialRequest, type SharedPilotSurveyRequest } from '@agent-republic/domain';
+import { SHARED_PILOT_MAX_TURNS, SHARED_PILOT_RESIDENT_IDS, type SharedPilotMoveRequest, type SharedPilotPlaceId, type SharedPilotResidentId, type SharedPilotSocialRequest, type SharedPilotSurveyRequest } from '@agent-republic/domain';
 import { SharedPilotError, SharedPilotStore } from './shared-pilot-store';
-import { meetingActive, nextSpeaker } from './shared-pilot-social';
+import { availableSurveyIntents, meetingActive, nextSpeaker, type SharedMeeting } from './shared-pilot-social';
 import { SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS, surveyActive } from './shared-pilot-survey';
 import type { SharedPilotProfile } from './shared-pilot-profiles';
 import { chooseModelAction, SharedPilotModelRun, type ModelConfig } from './shared-pilot-model';
+import { CITY_PLACES } from './city-movement';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
@@ -15,6 +16,29 @@ const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> 
 };
 const MAX_DECISIONS = 16;
 const DWELL_MS = 6500;
+
+function ruleSpeech(meeting: SharedMeeting, observation: Observation, peerUsesRules: boolean): SharedPilotSocialRequest {
+  const actor = observation.viewerResidentId;
+  const peer = actor === meeting.inviter ? meeting.invitee : meeting.inviter;
+  const name = observation.profiles.find(({ residentId }) => residentId === peer)?.name ?? `${peer} 号`;
+  const previous = meeting.lines.at(-1);
+  const intents = availableSurveyIntents(meeting, actor);
+  const base = { action: 'say' as const, meetingId: meeting.id, requestId: randomUUID() };
+  if (intents.includes('accept')) {
+    return { ...base, text: '好，我也想看看建设中心入口和人行通道。我们喝完咖啡再过去吧。', surveyIntent: 'accept' };
+  }
+  if (peerUsesRules && meeting.lines.length === SHARED_PILOT_MAX_TURNS - 2 && intents.includes('propose')) {
+    const text = observation.survey.report ? '上次我们看过入口了，想不想再去建设中心核对一下人行通道？'
+      : '我想去公共建设中心看看入口和人行通道，你愿意一起去吗？';
+    return { ...base, text, surveyIntent: 'propose' };
+  }
+  const familiar = observation.privateSocial.encounters > 0;
+  const text = previous ? (meeting.lines.length === SHARED_PILOT_MAX_TURNS - 1
+    ? '谢谢你聊起这个。我要继续逛逛了，下次在咖啡街见。'
+    : `你刚才说「${Array.from(previous.text).slice(0, 24).join('')}」让我想到，接下来也可以去别处看看。你想去哪儿？`)
+    : `${name}，${familiar ? '又见面了' : '很高兴在咖啡街认识你'}。我正想去${CITY_PLACES[PREFERENCES[actor][1]!]}看看，你呢？`;
+  return { ...base, text };
+}
 
 /** Two separate rules clients, each authenticated for its own resident. No browser drives their movement. */
 export class SharedPilotRuntime {
@@ -167,7 +191,7 @@ export class SharedPilotRuntime {
     return !!task?.endedAt && at < task.endedAt + 12000;
   }
 
-  private socialTick(connection: RuleConnection, observation: Observation): boolean {
+  private socialTick(connection: RuleConnection, observation: Observation, peerUsesRules: boolean): boolean {
     if (!this.socialEnabled) return false;
     const { meeting, arrived } = observation.social;
     const at = observation.serverTime;
@@ -184,9 +208,8 @@ export class SharedPilotRuntime {
       } else if (meeting.status === 'accepted' && !arrived.includes(actor) && own.movement?.status !== 'walking') {
         this.store.moveTo(connection.token, { requestId: randomUUID(), action: 'moveTo', destination: { place: 'cafe' } });
         connection.decisions++;
-      } else if (meeting.status === 'talking' && nextSpeaker(meeting) === actor && at >= meeting.nextTurnAt) {
-        const line = SHARED_PILOT_LINES[meeting.lines.length];
-        if (line) this.store.socialAction(connection.token, { requestId: randomUUID(), action: 'say', meetingId: meeting.id, line });
+      } else if (meeting.status === 'talking' && meeting.lines.length < SHARED_PILOT_MAX_TURNS && nextSpeaker(meeting) === actor && at >= meeting.nextTurnAt) {
+        this.store.socialAction(connection.token, ruleSpeech(meeting, observation, peerUsesRules), 'rules');
       }
       return true;
     }
@@ -233,7 +256,7 @@ export class SharedPilotRuntime {
       if (external.has(connection.residentId)) continue;
       const observation = connection === this.connections[0] ? firstObservation : this.observeConnection(connection);
       if (this.surveyTick(connection, observation)) continue;
-      if (this.socialTick(connection, observation)) continue;
+      if (this.socialTick(connection, observation, external.size === 0)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
       const destination = this.choose(connection, observation);
       if (!destination) continue;

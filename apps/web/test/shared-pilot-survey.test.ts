@@ -89,6 +89,28 @@ describe.skipIf(!process.getBuiltinModule?.('node:sqlite'))('shared construction
     expect(reopen().observe(a).survey.report).toEqual(final.survey.report);
   });
 
+  it('unlocks a survey only after the other resident confirms the specific plan in free dialogue', () => {
+    const { s, a, b } = setup();
+    const { meetingId } = s.socialAction(a, { requestId: requestId(), action: 'invite', target: '02', venue: 'cafe' });
+    s.socialAction(b, { requestId: requestId(), action: 'respond', meetingId, decision: 'accept' });
+    at = Math.max(s.moveTo(a, move('cafe')).arrivesAt, s.moveTo(b, move('cafe')).arrivesAt);
+    const replies = [
+      { text: '我们去公共建设中心看看入口吗？', surveyIntent: 'propose' },
+      { text: '我今天想先聊聊咖啡。', surveyIntent: 'decline' },
+      { text: '咖啡喝完再一起去看看人行通道怎么样？', surveyIntent: 'propose' },
+      { text: '可以，我同意一起去公共建设中心。', surveyIntent: 'accept' },
+    ];
+    for (const [index, reply] of replies.entries()) {
+      at = s.observe(a).social.meeting!.nextTurnAt;
+      s.socialAction(index % 2 ? b : a, { requestId: requestId(), action: 'say', meetingId, ...reply });
+    }
+    at = s.observe(a).social.meeting!.nextTurnAt;
+    const view = s.observe(b);
+    expect(view.survey.eligibleMeetingId).toBe(meetingId);
+    expect(view.privateSocial.memories[0]?.text).toContain('约定一起调研');
+    expect(s.surveyAction(b, { requestId: requestId(), action: 'proposeSurvey', meetingId }).action).toBe('proposeSurvey');
+  });
+
   it('migrates v2 preserving completed coffee memory and expiry never substitutes for a report', () => {
     const { s, a, b } = setup();
     const meetingId = coffee(s, a, b);

@@ -1006,7 +1006,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         else if (peer) observedFacing.set(...peer.position);
         else observedFacing.set(previous ? 2 * x - previous[0] : x, y, previous ? 2 * z - previous[2] : z - 1);
         const line = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
-        patrol.observe(poseDt, observedPosition, observedFacing, false, inspecting ? 'nod' : line?.residentId === id ? (line.line === 'greet' ? 'wave' : 'nod') : undefined);
+        patrol.observe(poseDt, observedPosition, observedFacing, false,
+          inspecting ? 'nod' : line?.residentId === id ? (meeting?.lines.length === 1 ? 'wave' : 'nod') : undefined);
       }
     }
     if (speech && speechCanvas && speechTexture) {
@@ -1014,7 +1015,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const dialogue = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
       const task = projection?.survey?.task;
       const observation = task?.status === 'surveying' ? projection?.survey.events.filter((event) => event.taskId === task.id && (event.kind === 'SURVEY_INSPECTING' || event.kind === 'SURVEY_RECORDED') && event.residentId).at(-1) : undefined;
-      const line = dialogue ? { ...dialogue, key: `${meeting!.id}:${dialogue.line}` } : observation?.residentId ? { residentId: observation.residentId, text: observation.text, key: observation.id } : undefined;
+      const line = dialogue ? { ...dialogue, key: `${meeting!.id}:${dialogue.happenedAt}` } : observation?.residentId ? { residentId: observation.residentId, text: observation.text, key: observation.id } : undefined;
       const speaker = line && selectableActor(line.residentId)?.patrol.root;
       speech.visible = Boolean(line && speaker?.visible && mode === 'follow');
       if (line && speaker && speech.visible) {
@@ -1030,7 +1031,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
             ctx.font = 'bold 25px Microsoft YaHei, sans-serif'; ctx.fillStyle = ctx.strokeStyle;
             ctx.fillText(`${line.residentId} 号`, 25, 40);
             ctx.font = '28px Microsoft YaHei, sans-serif'; ctx.fillStyle = '#f3ead6';
-            const characters = Array.from(line.text);
+            const text = Array.from(line.text);
+            const characters = text.length > 38 ? [...text.slice(0, 37), '…'] : text;
             for (let i = 0; i < characters.length; i += 19) ctx.fillText(characters.slice(i, i + 19).join(''), 25, 80 + (i / 19) * 38);
             speechTexture.needsUpdate = true;
           }

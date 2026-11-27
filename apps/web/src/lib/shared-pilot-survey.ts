@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { type SharedPilotResidentId, type SharedPilotSurveyRequest } from '@agent-republic/domain';
 import type { CityPoint } from './cafe-geometry';
-import type { SharedMeeting, SocialResident } from './shared-pilot-social';
+import { surveyAgreement, type SharedMeeting, type SocialResident } from './shared-pilot-social';
 
 type Resident = SharedPilotResidentId;
 export const SURVEY_OBSERVATION_MS = 8000;
@@ -69,7 +69,7 @@ export function performSurvey(state: SurveyState, actor: Resident, request: Shar
   let task = state.task;
   if (request.action === 'proposeSurvey') {
     if (surveyActive(task) || own?.moving) throw new SurveyActionError('BUSY', '当前居民或调研任务正忙。');
-    if (!meeting || meeting.status !== 'completed' || meeting.id !== request.meetingId || meeting.lines.length !== 4 || state.usedMeetingIds.includes(meeting.id)) {
+    if (!meeting || meeting.status !== 'completed' || meeting.id !== request.meetingId || !surveyAgreement(meeting).accepted || state.usedMeetingIds.includes(meeting.id)) {
       throw new SurveyActionError('INVALID_REQUEST', '需要未履行的已完成咖啡街约定。');
     }
     if (state.usedMeetingIds.length >= 100) throw new SurveyActionError('LIMIT_REACHED', '共同调研次数已达试点上限。');
@@ -117,7 +117,7 @@ export function performSurvey(state: SurveyState, actor: Resident, request: Shar
 export function publicSurvey(state: SurveyState, residents: SocialResident[], meeting: SharedMeeting | null) {
   const task = state.task;
   return { revision: state.revision, task, events: state.events, completed: state.completed,
-    eligibleMeetingId: meeting?.status === 'completed' && !state.usedMeetingIds.includes(meeting.id) ? meeting.id : null,
+    eligibleMeetingId: meeting?.status === 'completed' && surveyAgreement(meeting).accepted && !state.usedMeetingIds.includes(meeting.id) ? meeting.id : null,
     arrived: task && ['accepted', 'surveying', 'completed'].includes(task.status) ? residents.filter(atSurveyPoint).map(({ residentId }) => residentId) : [],
     checkpoints: { '01': { label: SURVEY_CHECKPOINTS['01'].label, x: 95, z: SURVEY_CHECKPOINTS['01'].z }, '02': { label: SURVEY_CHECKPOINTS['02'].label, x: 95, z: SURVEY_CHECKPOINTS['02'].z } },
     report: state.reports.at(-1) ?? null,

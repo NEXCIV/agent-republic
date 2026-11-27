@@ -24,11 +24,14 @@ async function send(command) {
 }
 
 const requestId = z.uuidv4().optional();
-const action = z.discriminatedUnion('action', [
+const action = z.union([
   z.strictObject({ requestId, action: z.literal('moveTo'), destination: z.strictObject({ place: z.enum(['cafe', 'plaza', 'governance', 'works']) }) }),
   z.strictObject({ requestId, action: z.literal('invite'), target: z.enum(['01', '02']), venue: z.literal('cafe') }),
   z.strictObject({ requestId, action: z.literal('respond'), meetingId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
-  z.strictObject({ requestId, action: z.literal('say'), meetingId: z.uuidv4(), line: z.enum(['greet', 'reply', 'suggest', 'farewell']) }),
+  z.strictObject({ requestId, action: z.literal('say'), meetingId: z.uuidv4(),
+    text: z.string().trim().min(1).max(120).describe('根据会面和之前实际说过的话现场写一句'),
+    surveyIntent: z.enum(['propose', 'accept', 'decline']).optional().describe('只有实际提出、接受或婉拒共同调研时才填写') }),
+  z.strictObject({ requestId, action: z.literal('say'), meetingId: z.uuidv4(), line: z.enum(['greet', 'reply', 'suggest', 'farewell']).describe('旧客户端台词键。新发言使用 text。') }),
   z.strictObject({ requestId, action: z.literal('proposeSurvey'), meetingId: z.uuidv4() }),
   z.strictObject({ requestId, action: z.literal('respondSurvey'), taskId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
   z.strictObject({ requestId, action: z.literal('inspectSurvey'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
@@ -36,13 +39,13 @@ const action = z.discriminatedUnion('action', [
 ]);
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-shared', version: '0.2.0' });
+  const server = new McpServer({ name: 'nexciv-shared', version: '0.3.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取授权居民的身份、自己的记忆，以及共享的居民位置、会面和建设中心调研。',
+    description: '读取授权居民的身份、记忆、位置、会面逐句对话和调研。会面中参考 nextSpeaker 和 nextTurnAt，轮到自己才继续。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以授权居民提交移动、会面或调研动作。使用相同的请求 ID 重试同一动作。',
+    description: '以授权居民提交移动、自由发言或调研动作。发言使用 say 的 text 字段，根据上一句话现场回复。使用相同的请求 ID 重试同一动作。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send({ ...command, requestId: command.requestId ?? randomUUID() }));
   return server;

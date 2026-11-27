@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { CityMark } from '@/components/CityMark';
+import { SHARED_PILOT_MAX_TURNS } from '@agent-republic/domain';
 import type { SharedPilotView } from '../../../lib/shared-pilot-runtime';
 import { CITY_PLACES } from '../../../lib/city-movement';
 import { createWalk, type DistrictStatus, type WalkController } from '../walk';
@@ -198,11 +199,16 @@ export function SharedCity({ children }: { children: ReactNode }) {
           {survey?.report && survey.report.taskId !== task.id && <details className={styles.previousReport}><summary>查看上一份共同调研报告</summary><p>{survey.report.summary}</p>{survey.report.findings.map(finding => <p key={finding.checkId}>{finding.residentId} 号 · {finding.label}：{finding.text}（X {finding.position[0].toFixed(2)}, Z {finding.position[2].toFixed(2)}）</p>)}</details>}
           {(['accepted', 'surveying'].includes(task.status) || task.status === 'completed' && survey?.arrived.length === 2) && <button type="button" className={styles.meetingButton} disabled={!live3d} aria-pressed={view === 'survey'} onClick={() => focus('survey')}>查看调研现场</button>}
         </section>}
-        {(!task || (meeting && ['invited', 'accepted', 'talking'].includes(meeting.status))) && <section className={styles.meeting} aria-label="咖啡街会面">
+        {(!task || meeting) && <section className={styles.meeting} aria-label="咖啡街会面">
           <div className={styles.panelHead}><h2>咖啡街会面</h2><small>{social?.completedMeetings ?? 0} 次交流</small></div>
-          <p className={styles.meetingState} data-meeting-status={meeting?.status ?? 'none'}><i />{meetingTitle}{meeting?.status === 'accepted' && ` · ${social?.arrived.length ?? 0}/2 已到场`}{meeting?.status === 'talking' && ` · ${meeting.lines.length}/4 轮`}</p>
+          <p className={styles.meetingState} data-meeting-status={meeting?.status ?? 'none'}><i />{meetingTitle}{meeting?.status === 'accepted' && ` · ${social?.arrived.length ?? 0}/2 已到场`}{meeting?.status === 'talking' && ` · ${meeting.lines.length}/${SHARED_PILOT_MAX_TURNS} 句`}</p>
           {meeting?.status === 'invited' && <p>{meeting.inviter} 号邀请 {meeting.invitee} 号到咖啡街，等待对方自行回应。</p>}
-          {lastLine && <blockquote data-speaker={lastLine.residentId}><b>{lastLine.residentId} 号</b>{lastLine.text}</blockquote>}
+          {meeting && meeting.lines.length > 0 && <div aria-label="会面逐句记录">
+            {meeting.lines.map((line) => <blockquote key={`${line.residentId}:${line.happenedAt}`} data-speaker={line.residentId}>
+              <b>{line.residentId} 号 · {line.source === 'agent' ? 'Agent 发言' : '规则发言'}</b>{line.text}
+            </blockquote>)}
+          </div>}
+          {meeting?.status === 'completed' && meeting.surveyAgreement?.accepted && <p className={styles.memory}>双方约定一起调研公共建设中心。</p>}
           {meeting?.status === 'completed' && <p className={styles.memory}>✓ 双方已各自留下私人记忆。{(social?.completedMeetings ?? 0) > 1 ? '关系：逐渐熟悉' : '关系：初次认识'}</p>}
           {meeting && ['accepted', 'talking'].includes(meeting.status) && <button type="button" className={styles.meetingButton} disabled={!live3d} aria-pressed={view === 'meeting'} onClick={() => focus('meeting')}>查看会面现场</button>}
         </section>}

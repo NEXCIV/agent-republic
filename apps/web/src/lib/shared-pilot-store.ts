@@ -495,7 +495,7 @@ export class SharedPilotStore {
     });
   }
 
-  socialAction(token: unknown, input: unknown): SocialReceipt {
+  socialAction(token: unknown, input: unknown, source: 'agent' | 'rules' = 'agent'): SocialReceipt {
     return this.transaction((at) => {
       const actor = this.authenticate(token, at);
       const parsed = sharedPilotSocialRequestSchema.safeParse(input);
@@ -508,7 +508,7 @@ export class SharedPilotStore {
       if (surveyActive(survey.task) && !social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('BUSY', 'A shared survey is active.');
       try {
         const residents = this.socialResidents(at);
-        const receipt = performSocial(social, actor, parsed.data, at, residents);
+        const receipt = performSocial(social, actor, parsed.data, at, residents, source);
         advanceSocial(social, at, residents);
         this.saveSocial(social);
         return receipt;

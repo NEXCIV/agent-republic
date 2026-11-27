@@ -48,7 +48,7 @@
 .report { margin: 10px 0; padding: 10px; border: 1px solid #54876b; color: #a3d9b1; background: #20342a; border-radius: 4px; }
 .report b { font-size: 14px; }.report p { color: #d8e5d8; margin: 5px 0; }.report small { font-size: 11px; color: #adcbb3; }
 .previousReport { margin: 10px 0; color: #d4c48d; font-size: 12px; }.previousReport summary { cursor: pointer; }.previousReport p { margin: 7px 0; }
-.meeting blockquote { margin: 9px 0; padding: 9px 12px; background: #2d2c27; border-left: 2px solid #d1ad57; border-radius: 3px; color: #f5ecda; font-size: 14px; line-height: 1.5; }
+.meeting blockquote { margin: 9px 0; padding: 9px 12px; background: #2d2c27; border-left: 2px solid #d1ad57; border-radius: 3px; color: #f5ecda; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
 .meeting blockquote b { display: block; color: #efbd55; font-size: 11px; margin-bottom: 4px; }
 .meeting blockquote[data-speaker="02"] { border-color: #79bab7; }
 .meeting blockquote[data-speaker="02"] b { color: #79bab7; }
