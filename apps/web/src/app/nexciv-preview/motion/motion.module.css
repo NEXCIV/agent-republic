@@ -146,3 +146,13 @@
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
+
+.credits {
+  margin: 0.8rem 0 0;
+  color: #c8c4b8;
+  font-size: 0.79rem;
+}
+
+.credits a {
+  color: #edd38f;
+}

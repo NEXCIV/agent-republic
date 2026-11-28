@@ -5,16 +5,15 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { URL } from 'node:url';
 import * as THREE from 'three';
+import { bakePreviewLocomotion, motionSources, walkPath } from './preview-locomotion.mjs';
 
 const sourceDir = process.argv[2];
 if (!sourceDir) throw new Error('Pass the directory containing the KayKit Rig_Medium GLBs.');
 const assets = new URL('../public/nexciv-walk/', import.meta.url);
 const output = new URL('../public/nexciv-motion/', import.meta.url);
 const fps = 30;
-const yAxis = new THREE.Vector3(0, 1, 0);
 const clipNames = {
   General: ['Idle_A'],
-  MovementBasic: ['Walking_A'],
   Simulation: ['Sit_Chair_Down', 'Sit_Chair_Idle', 'Sit_Chair_StandUp'],
 };
 
@@ -156,7 +155,7 @@ function contact({ foot, points }) {
   return hull.getCenter(new THREE.Vector3()).setY(hull.min.y);
 }
 
-function bake(file, source, target, soles, name, standing, turn = false) {
+function bake(file, source, target, soles, name) {
   const motion = solveSourcePose(file, source, name);
   const steps = Math.ceil(motion.duration * fps);
   const times = Array.from({ length: steps + 1 }, (_, i) => i * motion.duration / steps);
@@ -171,7 +170,6 @@ function bake(file, source, target, soles, name, standing, turn = false) {
   const upright = new THREE.Quaternion();
   const hips = target.byName.Hips;
   const hipKeys = [];
-  const feet = [];
   const legScale = (target.byName['Shin.L'].position.length() + target.byName['Foot.L'].position.length()) /
     (source.byName['lowerleg.l'].position.length() + source.byName['foot.l'].position.length());
   for (const time of times) {
@@ -182,16 +180,8 @@ function bake(file, source, target, soles, name, standing, turn = false) {
     const sitting = name === 'Sit_Chair_Idle' ? 1 :
       name === 'Sit_Chair_Down' ? THREE.MathUtils.smoothstep(progress, 0.35, 0.91) :
       name === 'Sit_Chair_StandUp' ? 1 - THREE.MathUtils.smoothstep(progress, 0.12, 0.65) : 0;
-    const turnStep = Math.sin(Math.PI * progress) ** 2;
     for (const { bone, sourceBone, basis } of links) {
       sourceBone.getWorldQuaternion(rotation).multiply(basis);
-      if (standing && name === 'Walking_A') {
-        const arm = /^(UpperArm|Forearm|Hand)/.test(bone.name);
-        const leg = /^(Thigh|Shin|Foot)/.test(bone.name);
-        const amount = arm ? 0.48 : leg ? 0.79 : 0.85;
-        const neutral = standing[bone.name];
-        rotation.copy(upright.copy(neutral).slerp(rotation, turn ? amount * 0.48 * turnStep : amount));
-      }
       if (sitting && bone.name.startsWith('Foot.')) {
         rotation.slerp(target.bind[bone.name].rotation, sitting);
       }
@@ -210,67 +200,31 @@ function bake(file, source, target, soles, name, standing, turn = false) {
     hips.position.y += lift;
     hipKeys.push(...hips.position.toArray());
     for (const { bone, keys } of links) keys.push(...bone.quaternion.toArray());
-    feet.push(frameFeet.map((foot) => foot.setY(foot.y + lift)));
   }
   const tracks = links.map(({ bone, keys }) => new THREE.QuaternionKeyframeTrack(
     `${THREE.PropertyBinding.sanitizeNodeName(bone.name)}.quaternion`, times, keys,
   ));
   tracks.push(new THREE.VectorKeyframeTrack('Hips.position', times, hipKeys));
   const worldPose = Object.fromEntries(links.map(({ bone }) => [bone.name, bone.getWorldQuaternion(new THREE.Quaternion())]));
-  return { clip: new THREE.AnimationClip(name, motion.duration, tracks), times, feet, hipKeys, worldPose };
+  return { clip: new THREE.AnimationClip(name, motion.duration, tracks), hipKeys, worldPose };
 }
 
-// Plant the lower sole through the pivot and blend between the two contacts at support changes.
-function stepTurn(walk) {
-  const clip = walk.clip;
-  clip.name = 'StepTurnRight90';
-  const rotations = [];
-  const positions = [0, 0, 0];
-  const previous = new THREE.Vector3();
-  const current = new THREE.Vector3();
-  const travel = new THREE.Vector3();
-  const rotation = new THREE.Quaternion();
-  const times = walk.times;
-  for (const [index, seconds] of times.entries()) {
-    const t = seconds / times.at(-1);
-    rotation.setFromAxisAngle(yAxis, -(t * t * (3 - 2 * t)) * Math.PI / 2);
-    rotations.push(...rotation.toArray());
-    if (index === 0) continue;
-    const [left, right] = walk.feet[index];
-    const weight = THREE.MathUtils.smoothstep(right.y - left.y, -0.045, 0.045);
-    current.copy(right).lerp(left, weight).applyQuaternion(rotation);
-    const [previousLeft, previousRight] = walk.feet[index - 1];
-    previous.copy(previousRight).lerp(previousLeft, weight)
-      .applyQuaternion(new THREE.Quaternion().fromArray(rotations, (index - 1) * 4));
-    travel.add(previous.sub(current)).setY(0);
-    positions.push(...travel.toArray());
-  }
-  clip.tracks.push(new THREE.QuaternionKeyframeTrack('Root.quaternion', times, rotations));
-  clip.tracks.push(new THREE.VectorKeyframeTrack('Root.position', times, positions));
-  return clip;
-}
-
+const sources = motionSources(sourceDir, readGlb, rig, solveSourcePose);
 mkdirSync(output, { recursive: true });
 for (const id of ['02', '06']) {
   const file = readGlb(new URL(`agent-${id}.glb`, assets));
   const target = rig(file);
   const soles = solePoints(file, target);
   const clips = [];
-  let stride;
   let seat;
   let standing;
   for (const [pack, names] of Object.entries(clipNames)) {
     const input = readGlb(resolve(sourceDir, `Rig_Medium_${pack}.glb`));
     for (const name of names) {
       const source = rig(input);
-      const motion = bake(input, source, target, soles, name, standing);
+      const motion = bake(input, source, target, soles, name);
       clips.push(motion.clip);
       if (name === 'Idle_A') standing = motion.worldPose;
-      if (name === 'Walking_A') {
-        const grounded = motion.feet.flat().filter(({ y }) => y < 0.024).map(({ z }) => z);
-        stride = 2 * (Math.max(...grounded) - Math.min(...grounded));
-        clips.push(stepTurn(bake(input, rig(input), target, soles, name, standing, true)));
-      }
       if (name === 'Sit_Chair_Idle') {
         seat = {
           y: motion.hipKeys[1] - 0.105,
@@ -279,7 +233,15 @@ for (const id of ['02', '06']) {
       }
     }
   }
-  const sidecar = { modelHash: file.hash, stride, seat, clips: clips.map((clip) => {
+  for (const [label, source] of sources) {
+    for (const turning of [false, true]) {
+      const { clip, error, lift, maxHipStep } = bakePreviewLocomotion(label, source, target, soles, standing, turning);
+      clips.push(clip);
+      console.log(id, clip.name, 'maximum planted ankle error (mm)', (error * 1000).toFixed(2),
+        'maximum sole lift (cm)', (lift * 100).toFixed(1), 'largest hip frame step (mm)', (maxHipStep * 1000).toFixed(1));
+    }
+  }
+  const sidecar = { modelHash: file.hash, seat, walkPath, clips: clips.map((clip) => {
     // Keep sub-millimetre precision and avoid serializing the random runtime UUID.
     const json = THREE.AnimationClip.toJSON(clip.optimize());
     delete json.uuid;
@@ -290,5 +252,5 @@ for (const id of ['02', '06']) {
     return json;
   }) };
   writeFileSync(new URL(`agent-${id}.json`, output), JSON.stringify(sidecar));
-  console.log(id, 'stride', stride.toFixed(3), 'seat', seat, 'clips', clips.map((clip) => clip.name));
+  console.log(id, 'seat', seat, 'clips', clips.map((clip) => clip.name));
 }

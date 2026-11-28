@@ -1,12 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { createStage, durations, loadLanes, type Character, type Motion, type View } from './stage';
+import { createStage, durations, loadLanes, type Character, type Gait, type Motion, type View } from './stage';
 import styles from './motion.module.css';
 
 const characters = [['02', '02 建设工人'], ['06', '06 商业服务']] as const;
 const motions = [['walk', '走路与停步'], ['turn', '向右转身'], ['sit', '坐下与起身']] as const;
 const views = [['front', '斜前方'], ['side', '侧面']] as const;
+const gaits: { id: Gait; label: string }[] = [
+  { id: '100STYLE', label: '真人动捕' },
+  { id: 'Quaternius', label: 'Quaternius' },
+];
 
 export default function MotionPreview() {
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -17,14 +21,15 @@ export default function MotionPreview() {
   const [character, setCharacter] = useState<Character>('02');
   const [motion, setMotion] = useState<Motion>('walk');
   const [view, setView] = useState<View>('front');
+  const [gait, setGait] = useState<Gait>('100STYLE');
   const [paused, setPaused] = useState(false);
   const [rate, setRate] = useState(1);
   const [loaded, setLoaded] = useState<Character>();
   const [error, setError] = useState('');
   const [renderError, setRenderError] = useState('');
-  const settings = useRef({ motion, view, paused, rate });
+  const settings = useRef({ motion, view, gait, paused, rate });
 
-  useEffect(() => { settings.current = { motion, view, paused, rate }; }, [motion, view, paused, rate]);
+  useEffect(() => { settings.current = { motion, view, gait, paused, rate }; }, [motion, view, gait, paused, rate]);
   useEffect(() => {
     const media = window.matchMedia('(prefers-reduced-motion: reduce)');
     const preferPause = () => { if (media.matches) setPaused(true); };
@@ -67,15 +72,15 @@ export default function MotionPreview() {
     let lastDrawn: { key: string; data: typeof data.current } | undefined;
     const draw = (now: number) => {
       frame = requestAnimationFrame(draw);
-      const { motion, view, paused, rate } = settings.current;
+      const { motion, view, gait, paused, rate } = settings.current;
       const dt = Math.min((now - previous) / 1000, 0.075);
       previous = now;
       if (!data.current) return;
       if (!paused) position.current = (position.current + dt * rate) % durations[motion];
       const time = position.current;
-      const key = `${motion}/${view}/${time}/${element.clientWidth}/${element.clientHeight}`;
+      const key = `${motion}/${view}/${gait}/${time}/${element.clientWidth}/${element.clientHeight}`;
       if (key === lastDrawn?.key && lastDrawn?.data === data.current) return;
-      stage.draw(data.current, motion, view, time);
+      stage.draw(data.current, motion, view, time, gait);
       lastDrawn = { key, data: data.current };
       if (slider.current) slider.current.value = String(time);
       if (elapsed.current) elapsed.current.value = `${time.toFixed(2)} s`;
@@ -136,11 +141,16 @@ export default function MotionPreview() {
             <button key={id} type="button" aria-pressed={view === id} onClick={() => setView(id)}>{label}</button>
           ))}
         </div>
+        {motion !== 'sit' && <div className={styles.buttons} role="group" aria-label="试片来源">
+          {gaits.map(({ id, label }) => (
+            <button key={id} type="button" aria-pressed={gait === id} onClick={() => setGait(id)}>{label}</button>
+          ))}
+        </div>}
       </div>
       <div className={styles.comparison} aria-busy={!error && !renderError && loaded !== character}>
         <div className={styles.laneNames}>
           <span>城市现有动作</span>
-          <span>KayKit 重定向试片</span>
+          <span>{motion === 'sit' ? 'KayKit 坐起试片' : gait === '100STYLE' ? '100STYLE 真人动捕试片' : 'Quaternius 步态试片'}</span>
         </div>
         <div className={styles.stage}>
           <canvas ref={canvas} aria-label="左侧现有动作，右侧试片" />
@@ -160,6 +170,11 @@ export default function MotionPreview() {
           <output ref={elapsed}>0.00 s</output>
         </div>
       </div>
+      {motion !== 'sit' && <p className={styles.credits}>
+        {gait === '100STYLE' ? <>动作源自 Ian Mason、Sebastian Starke、Taku Komura 的 <a href="https://zenodo.org/records/8127870">100STYLE</a>（<a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>），已裁切和重定向。</>
+          : <>动作源自 <a href="https://quaternius.itch.io/universal-animation-library">Quaternius Universal Animation Library</a>（CC0），已重定向。</>}
+        {motion === 'turn' && ' 转身步点由项目制作。'}
+      </p>}
     </main>
   );
 }
