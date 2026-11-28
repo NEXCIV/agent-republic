@@ -1062,7 +1062,7 @@ export class SharedPilotStore {
       let firstExploration: FirstExplorationObservation | null = null;
       const self = residents.find(resident => resident.residentId === viewerResidentId)!;
       const firstTrip = social.firstExplorations?.[viewerResidentId];
-      if (profiles.some(profile => profile.residentId === viewerResidentId) && !firstTrip?.result
+      if (profiles.some(profile => profile.residentId === viewerResidentId)
         && !meetingActive(social.meeting) && !surveyActive(survey.task) && !pendingWorksGoal
         && ![cafe.orders, fishing.visits, works.visits].some(visits => visits.some(visit =>
           visit.residentId === viewerResidentId && visit.stage !== 'completed'))) {
@@ -1071,8 +1071,13 @@ export class SharedPilotStore {
           firstExploration = { phase: 'intro', place: self.place, destinations: sites.filter(site => site.place !== self.place) };
         } else if (firstTrip && this.lastMove(viewerResidentId)?.request_id === firstTrip.trip.requestId) {
           const place = firstTrip.trip.place;
-          firstExploration = self.movement?.status === 'walking' ? { phase: 'travelling', place }
-            : { phase: 'onSite', place, site: sites.find(site => site.place === place)! };
+          if (self.movement?.status === 'walking') firstExploration = { phase: 'travelling', place };
+          else if (self.place === place) {
+            const site = sites.find(site => site.place === place)!;
+            firstExploration = firstTrip.result
+              ? { phase: 'followUp', place, site, exchange: { text: firstTrip.result.action.text, reply: firstTrip.result.reply } }
+              : { phase: 'onSite', place, site };
+          }
         }
       }
       return {

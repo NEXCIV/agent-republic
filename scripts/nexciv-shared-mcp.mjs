@@ -51,7 +51,7 @@ const action = z.union([
 serveStdio(() => {
   const server = new McpServer({ name: 'nexciv-shared', version: '0.5.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取居民、城市及 firstExploration。首次探索可根据观察用 exploreSite 说一句并出发，到场后用 exploreArrival 观察或问 NPC。pendingWorksGoal 列出网页调研的可用动作。',
+    description: '读取居民、城市及 firstExploration。首次探索用 exploreSite 启程，到场用 exploreArrival 观察或问 NPC。followUp 阶段可参考现场和回复，用既有动作点单、巡查、钓鱼或前往别处。pendingWorksGoal 列出网页调研动作。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {

@@ -31,7 +31,8 @@ export type ExplorationScene = { place: ExplorationPlace; contact: string; obser
 export type FirstExplorationObservation =
   | { phase: 'intro'; place: SharedPilotPlaceId; destinations: ExplorationScene[] }
   | { phase: 'travelling'; place: ExplorationPlace }
-  | { phase: 'onSite'; place: ExplorationPlace; site: ExplorationScene };
+  | { phase: 'onSite'; place: ExplorationPlace; site: ExplorationScene }
+  | { phase: 'followUp'; place: ExplorationPlace; site: ExplorationScene; exchange: { text: string; reply: string } };
 
 export function explorationScenes(state: {
   cafe: { serving: boolean; queued: number };

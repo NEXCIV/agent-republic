@@ -235,18 +235,22 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
     return choices;
   }
   if (moving) return choices;
-  askCafe();
-  for (const place of SHARED_PILOT_PLACE_IDS) if (place !== own.place) move(place);
+  const followUp = first?.phase === 'followUp';
+  const prefix = followUp ? 'visit:' : '';
+  if (!followUp) askCafe();
+  for (const place of SHARED_PILOT_PLACE_IDS) {
+    if (place !== own.place) move(place, followUp ? `结束这次到访，前往${CITY_PLACES[place]}` : undefined, `${prefix}move:${place}`);
+  }
   const peer = actor === '01' ? '02' : '01';
   const inspections = works.visits.filter(visit => visit.stage !== 'completed');
-  if (!activeBriefs.length && !inspections.length && !fishingActive.length && !cafe.orders.some(order => order.stage !== 'completed')) {
+  if (!followUp && !activeBriefs.length && !inspections.length && !fishingActive.length && !cafe.orders.some(order => order.stage !== 'completed')) {
     add(`invite:${peer}`, '邀请另一位居民到咖啡街见面', { action: 'invite', target: peer, venue: 'cafe', requestId: randomUUID() });
     if (survey.eligibleMeetingId) add(`survey:${survey.eligibleMeetingId}:propose`, '提议共同调研公共建设中心',
       { action: 'proposeSurvey', meetingId: survey.eligibleMeetingId, requestId: randomUUID() });
   }
   if (own.place === 'cafe' && !cafe.orders.some(order => order.residentId === actor && at < (order.finishedAt ?? at) + 60000)) {
     for (const drink of ['flat-white', 'americano'] as const) {
-      add(`coffee:${drink}`, `向咖啡摊主点一杯${COFFEE_MENU[drink]}${cafe.serving ? '（柜台忙，可能排队）' : ''}`,
+      add(`${prefix}coffee:${drink}`, `向咖啡摊主点一杯${COFFEE_MENU[drink]}${cafe.serving ? '（柜台忙，可能排队）' : ''}`,
         { action: 'orderCoffee', drink, requestId: randomUUID() });
     }
   }
@@ -254,14 +258,14 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
     for (const { checkId, label } of Object.values(WORKS_CHECKS)) {
       const unavailable = inspections.some(visit => visit.checkId === checkId)
         || works.visits.some(visit => visit.residentId === actor && visit.checkId === checkId && at < visit.reportAt + 120000);
-      if (!unavailable) add(`works:${checkId}`, `向现场管理员领取${label}巡查`, { action: 'inspectWorks', checkId, requestId: randomUUID() });
+      if (!unavailable) add(`${prefix}works:${checkId}`, `向现场管理员领取${label}巡查`, { action: 'inspectWorks', checkId, requestId: randomUUID() });
     }
   }
   if (own.place === 'pier' && !fishing.visits.some(visit => visit.residentId === actor && at < (visit.endsAt ?? at) + 90000)) {
-    add('fishing:cast', fishing.occupied ? '在北岸码头等候钓位，再钓一竿' : '在北岸码头钓一竿',
+    add(`${prefix}fishing:cast`, fishing.occupied ? '在北岸码头等候钓位，再钓一竿' : '在北岸码头钓一竿',
       { action: 'goFishing', requestId: randomUUID() });
   }
-  return choices;
+  return followUp ? choices.slice(1) : choices;
 }
 
 export async function chooseModelAction(config: ModelConfig, observation: ModelObservation, choices: Choice[], signal: AbortSignal, cafeReply?: string) {
@@ -275,7 +279,8 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     meeting: meeting && { status: meeting.status, venue: CITY_PLACES[meeting.venue],
       transcript: meeting.lines.map(({ residentId, text }) => ({ residentId, text })) },
     survey: observation.survey.task?.status,
-    cafe: { serving: observation.cafe.serving, queued: observation.cafe.queued, reply: cafeReply },
+    cafe: { serving: observation.cafe.serving, queued: observation.cafe.queued, reply: cafeReply,
+      lastPickup: observation.cafe.events.filter(event => event.residentId === observation.viewerResidentId && event.kind === 'PICKED_UP').at(-1)?.text },
     works: observation.works.visits.slice(-3).map(({ residentId, label, stage, report }) => ({ residentId, label, stage, finding: report?.text })),
     fishing: { occupied: observation.fishing.occupied, queued: observation.fishing.queued,
       lastResult: observation.fishing.visits.filter(visit => visit.residentId === observation.viewerResidentId && visit.result).at(-1)?.result?.text },
@@ -293,6 +298,7 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
       `Keep text under ${SHARED_PILOT_SPEECH_LIMIT} characters. Talk about the city, the meeting, what you think or what you might do. Do not invent past actions, claim results, repeat credentials, or include links. You may simply socialize.`,
       'Optionally include "surveyIntent" from that choice’s allowed list only when your dialogue explicitly proposes or responds to joint investigation at the Public Construction Center. Respond independently, including declining if you prefer.',
       'For an exploration choice, return exactly {"choice":"the-id","text":"one natural first-person Chinese line, at most 38 characters"}. On intro, react with curiosity using your current place and the given site observations, then say where you want to go. On arrival, ask the contact a real question if choosing ask, or react to the observed activity if choosing look. Only refer to the given facts. Do not claim to have arrived before travel or invent NPC replies.',
+      'When exploration.phase is followUp, use the most recent local exchange and the current site state to decide whether to do an available activity here or leave for a different place. Return only {"choice":"the-id"}.',
     ].join(' ') },
     { role: 'user', content: JSON.stringify(data) },
   ] });
