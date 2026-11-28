@@ -18,6 +18,7 @@ import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, SURVE
   type InspectionRoute, type WorksBrief, type WorksCheck, type WorksGoalRow } from './shared-pilot-works';
 import { FISHING_TABLE, FISHING_WAIT, FishingVisits, fishingOutcome, fishingPose, goFishingSchema } from './shared-pilot-fishing';
 import { explorationActionSchema, explorationScenes, explorationView, type FirstExplorationObservation } from './shared-pilot-exploration';
+import { noteActivityLabel, playerNoteView, resolvePlayerNoteSchema, submitPlayerNoteSchema } from './shared-pilot-notes';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
@@ -28,6 +29,7 @@ const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
 const MAX_MOVES_PER_RESIDENT = 300;
 const PUBLIC_EVENT_LIMIT = 40;
+const MAX_PLAYER_NOTES = 120;
 const TOKEN_PATTERN = /^nxc_shared_[A-Za-z0-9_-]{43}$/;
 const V1_TABLES = [
   'shared_pilot_credentials', 'shared_pilot_events', 'shared_pilot_meta', 'shared_pilot_moves', 'shared_pilot_residents',
@@ -195,6 +197,7 @@ export class SharedPilotStore {
   private readonly db: DatabaseSync;
   private readonly coffee: CafeOrders;
   private readonly fishing: FishingVisits;
+  private transactionTime?: number;
 
   constructor(filename: string, private readonly clock: () => number) {
     const sqlite = process.getBuiltinModule?.('node:sqlite') as typeof import('node:sqlite') | undefined;
@@ -351,6 +354,7 @@ export class SharedPilotStore {
   }
 
   private transaction<T>(work: (at: number) => T): T {
+    if (this.transactionTime !== undefined) return work(this.transactionTime);
     this.db.exec('BEGIN IMMEDIATE');
     let closed = false;
     try {
@@ -360,6 +364,7 @@ export class SharedPilotStore {
       const at = Math.max(checkTime(previous), checkTime(this.clock()));
       this.db.prepare('UPDATE shared_pilot_meta SET logical_now=? WHERE id=1').run(at);
       this.db.exec('SAVEPOINT pilot_work');
+      this.transactionTime = at;
       try {
         const result = work(at);
         this.db.exec('RELEASE pilot_work; COMMIT');
@@ -377,6 +382,8 @@ export class SharedPilotStore {
     } catch (error) {
       if (!closed) this.db.exec('ROLLBACK');
       throw error;
+    } finally {
+      this.transactionTime = undefined;
     }
   }
 
@@ -564,6 +571,75 @@ export class SharedPilotStore {
     const actor = this.browserProfile(credential, at)?.residentId;
     if (!actor || !profileResidents.includes(actor)) throw new SharedPilotError('AUTH_REQUIRED', '请先在此浏览器创建居民。');
     return actor;
+  }
+
+  profileNotes(session: string, profileResidents: readonly SharedPilotResidentId[]) {
+    return this.transaction(at => {
+      const actor = this.browserOrAgent(session, at, profileResidents);
+      return (this.readSocial().playerNotes?.[actor] ?? []).map(note => playerNoteView(note, at));
+    });
+  }
+
+  submitPlayerNote(session: string, input: unknown, profileResidents: readonly SharedPilotResidentId[]) {
+    return this.transaction(at => {
+      const actor = this.browserOrAgent(session, at, profileResidents);
+      const parsed = submitPlayerNoteSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '请填写一张不含链接或凭据的纸条。');
+      const social = this.readSocial();
+      const entries = social.playerNotes ??= {};
+      const notes = entries[actor] ??= [];
+      const { noteId: id, text } = parsed.data;
+      const previous = notes.find(note => note.id === id);
+      if (previous) {
+        if (previous.text !== text) throw new SharedPilotError('CONFLICT', '这张纸条已经送出。');
+        return playerNoteView(previous, at);
+      }
+      if (notes.some(note => playerNoteView(note, at).status === 'pending')) throw new SharedPilotError('BUSY', '上一张纸条正在等待 Agent 处理。');
+      if (notes.length >= MAX_PLAYER_NOTES) throw new SharedPilotError('LIMIT_REACHED', '本轮试玩的纸条记录已满。');
+      const note = { id, text, sentAt: at };
+      notes.push(note);
+      this.saveSocial(social);
+      return playerNoteView(note, at);
+    });
+  }
+
+  resolvePlayerNote(token: string, input: unknown) {
+    return this.transaction(at => {
+      const actor = this.authenticate(token, at);
+      const parsed = resolvePlayerNoteSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '纸条回复或活动无效。');
+      const resolution = parsed.data;
+      const social = this.readSocial();
+      const note = social.playerNotes?.[actor]?.find(item => item.id === resolution.noteId);
+      if (!note) throw new SharedPilotError('NOT_FOUND', '这张纸条无法处理。');
+      if (note.response) {
+        if (JSON.stringify(note.response.resolution) !== JSON.stringify(resolution)) throw new SharedPilotError('CONFLICT', '这张纸条已经处理。');
+        return playerNoteView(note, at);
+      }
+      if (playerNoteView(note, at).status === 'expired') throw new SharedPilotError('CONFLICT', '这张纸条已过期。');
+      let activityLabel: string | undefined;
+      if (resolution.decision !== 'skipped') {
+        const { activity } = resolution;
+        if (this.findReceipt(actor, activity.requestId) || social.requests[actor][activity.requestId]
+          || this.readSurvey().requests[actor][activity.requestId]) {
+          throw new SharedPilotError('CONFLICT', '请为这张纸条提交一个新活动。');
+        }
+        // The activity and the private receipt share this transaction and its server clock.
+        switch (activity.action) {
+          case 'moveTo': this.moveTo(token, activity); break;
+          case 'invite': this.socialAction(token, activity); break;
+          case 'orderCoffee': this.orderCoffee(token, activity); break;
+          case 'inspectWorks': this.requestInspection(token, activity); break;
+          case 'goFishing': this.goFishing(token, activity); break;
+        }
+        activityLabel = noteActivityLabel(activity);
+      }
+      const updated = this.readSocial();
+      const stored = updated.playerNotes![actor]!.find(item => item.id === resolution.noteId)!;
+      stored.response = { resolution, handledAt: at, activityLabel };
+      this.saveSocial(updated);
+      return playerNoteView(stored, at);
+    });
   }
 
   moveTo(token: unknown, input: unknown): SharedPilotReceipt {
@@ -1089,6 +1165,7 @@ export class SharedPilotStore {
           .sort((a, b) => a.happenedAt - b.happenedAt) },
         pendingWorksGoal,
         firstExploration,
+        playerNotes: (social.playerNotes?.[viewerResidentId] ?? []).map(note => playerNoteView(note, at)),
         exploration: explorationView(social.firstExplorations),
         social: publicSocial(social, this.socialResidents(at)),
         survey: publicSurvey(survey, this.socialResidents(at), social.meeting),

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { SHARED_PILOT_LINES, SHARED_PILOT_MAX_TURNS, type SharedPilotResidentId, type SharedPilotSocialRequest } from '@agent-republic/domain';
 import { CAFE_BENCH_FRONT, CAFE_COUNTER, type CityPoint } from './cafe-geometry';
 import { safePilotSpeech, type FirstExploration } from './shared-pilot-exploration';
+import type { PlayerNoteRecord } from './shared-pilot-notes';
 
 type Resident = SharedPilotResidentId;
 type Line = typeof SHARED_PILOT_LINES[number];
@@ -26,6 +27,7 @@ export type SocialState = {
   memories: Record<Resident, Memory[]>; encounters: Record<Resident, number>;
   requests: Record<Resident, Record<string, RequestRecord>>;
   firstExplorations?: Partial<Record<Resident, FirstExploration>>;
+  playerNotes?: Partial<Record<Resident, PlayerNoteRecord[]>>;
 };
 
 export const SOCIAL_DWELL_MS = 4000;

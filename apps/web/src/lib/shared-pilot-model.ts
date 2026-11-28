@@ -13,6 +13,7 @@ import { WORKS_CHECKS, worksBriefActive, type InspectWorks } from './shared-pilo
 import type { GoFishing } from './shared-pilot-fishing';
 import { explorationTextSchema, type ExplorationAction, type ExplorationActivity, type ExplorationPlace } from './shared-pilot-exploration';
 import { SHARED_AVATARS } from './shared-pilot-profiles';
+import { noteActivitySchema, resolvePlayerNoteSchema, type NoteActivity, type ResolvePlayerNote } from './shared-pilot-notes';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
@@ -20,8 +21,8 @@ type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSu
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
 type ExplorationChoice = { action: 'exploreSite'; place: ExplorationPlace } | { action: 'exploreArrival'; activity: ExplorationActivity };
 type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] };
-  exploration?: ExplorationChoice };
-type ModelDecision = string | ({ choice: string } & Speech);
+  exploration?: ExplorationChoice; note?: { id: string; activity?: NoteActivity } };
+type ModelDecision = string | ({ choice: string } & Speech) | { choice: string; noteResponse: ResolvePlayerNote };
 export const MODEL_CALL_LIMIT = 30;
 export const MODEL_RUN_MS = 30 * 60_000;
 const DECISION_GAP_MS = 5_000;
@@ -69,6 +70,15 @@ export function parseModelDecision(raw: unknown, choices: Choice[]): ModelDecisi
     if (!value || typeof value !== 'object' || !('choice' in value) || typeof value.choice !== 'string') return;
     const choice = choices.find(({ id }) => id === value.choice);
     if (!choice) return;
+    if (choice.note) {
+      if (!('decision' in value) || !('reason' in value) || Object.keys(value).length !== 3) return;
+      const { id, activity } = choice.note;
+      const parsed = resolvePlayerNoteSchema.safeParse({
+        action: 'resolvePlayerNote', noteId: id, decision: value.decision, reason: value.reason, ...(activity && { activity }),
+      });
+      if (parsed.success) return { choice: choice.id, noteResponse: parsed.data };
+      return;
+    }
     if (choice.exploration) {
       const text = explorationTextSchema.safeParse('text' in value ? value.text : undefined);
       if (text.success && Object.keys(value).length === 2) return { choice: choice.id, text: text.data };
@@ -177,7 +187,7 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
   });
 }
 
-export function modelChoices(observation: ModelObservation, canAskCafe = true): Choice[] {
+function availableModelChoices(observation: ModelObservation, canAskCafe: boolean): Choice[] {
   const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe, works, fishing } = observation;
   const first = observation.firstExploration;
   if (first?.phase === 'intro') return first.destinations.map(({ place }) => ({
@@ -268,12 +278,30 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
   return followUp ? choices.slice(1) : choices;
 }
 
+export function modelChoices(observation: ModelObservation, canAskCafe = true): Choice[] {
+  const choices = availableModelChoices(observation, canAskCafe);
+  const pending = observation.playerNotes.find(note => note.status === 'pending');
+  if (!pending || observation.pendingWorksGoal || meetingActive(observation.social.meeting) || surveyActive(observation.survey.task)) {
+    return choices;
+  }
+  const noteChoices = choices.flatMap(choice => {
+    const parsed = noteActivitySchema.safeParse(choice.command);
+    return parsed.success ? [{ id: `note:${choice.id}`, label: choice.label, note: { id: pending.id, activity: parsed.data } }] : [];
+  });
+  return noteChoices.length === 0 ? choices : [...noteChoices, {
+    id: 'note:skip', label: '暂不采纳这张建议，继续自己的安排', note: { id: pending.id },
+  }];
+}
+
 export async function chooseModelAction(config: ModelConfig, observation: ModelObservation, choices: Choice[], signal: AbortSignal, cafeReply?: string) {
   const meeting = observation.social.meeting;
   const first = observation.firstExploration;
   const avatar = observation.profiles.find(profile => profile.residentId === observation.viewerResidentId)?.avatar;
+  const role = avatar ? SHARED_AVATARS[avatar].label : undefined;
+  const playerNote = observation.playerNotes.find(note => note.id === choices[0]?.note?.id);
   const data = {
     resident: observation.viewerResidentId,
+    role,
     profiles: observation.profiles,
     residents: observation.residents.map(({ residentId, place, movement }) => ({ residentId, place, destination: movement?.destination.place, moving: movement?.status === 'walking' })),
     meeting: meeting && { status: meeting.status, venue: CITY_PLACES[meeting.venue],
@@ -285,7 +313,8 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     fishing: { occupied: observation.fishing.occupied, queued: observation.fishing.queued,
       lastResult: observation.fishing.visits.filter(visit => visit.residentId === observation.viewerResidentId && visit.result).at(-1)?.result?.text },
     memories: observation.privateSocial.memories.slice(-3).map(({ text }) => text),
-    exploration: first && { ...first, placeName: CITY_PLACES[first.place], role: avatar ? SHARED_AVATARS[avatar].label : undefined },
+    exploration: first && { ...first, placeName: CITY_PLACES[first.place], role },
+    playerNote: playerNote?.text,
     choices: choices.map(({ id, label, speech, exploration }) => ({ id, label, surveyIntents: speech?.surveyIntents, exploration })),
   };
   const tokenLimit = config.endpoint.hostname === MIMO_HOST
@@ -299,6 +328,7 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
       'Optionally include "surveyIntent" from that choice’s allowed list only when your dialogue explicitly proposes or responds to joint investigation at the Public Construction Center. Respond independently, including declining if you prefer.',
       'For an exploration choice, return exactly {"choice":"the-id","text":"one natural first-person Chinese line, at most 38 characters"}. On intro, react with curiosity using your current place and the given site observations, then say where you want to go. On arrival, ask the contact a real question if choosing ask, or react to the observed activity if choosing look. Only refer to the given facts. Do not claim to have arrived before travel or invent NPC replies.',
       'When exploration.phase is followUp, use the most recent local exchange and the current site state to decide whether to do an available activity here or leave for a different place. Return only {"choice":"the-id"}.',
+      'When playerNote is present it is private advice from your player. Consider your role, current location and the observed world. Return exactly {"choice":"the-id","decision":"adopted or adapted","reason":"brief Chinese reason for your player"} for an activity, or choose note:skip and decision skipped. Never publish or repeat the private note in public dialogue. Decide independently.',
     ].join(' ') },
     { role: 'user', content: JSON.stringify(data) },
   ] });
@@ -317,7 +347,7 @@ export class SharedPilotModelRun {
   private nextCafeQuestionAt = 0;
   private consecutiveFailures = 0;
 
-  constructor(config: ModelConfig, private readonly observe: () => ModelObservation, private readonly act: (command: Command) => unknown,
+  constructor(config: ModelConfig, private readonly observe: () => ModelObservation, private readonly act: (command: Command | ResolvePlayerNote) => unknown,
     private readonly choose: typeof chooseModelAction) {
     this.config = config;
     this.state = { status: 'starting', model: config.model, calls: 0, limit: MODEL_CALL_LIMIT, endsAt: Date.now() + MODEL_RUN_MS };
@@ -368,7 +398,9 @@ export class SharedPilotModelRun {
       const refreshed = this.observe();
       const current = modelChoices(refreshed, refreshed.serverTime >= this.nextCafeQuestionAt).find((choice) => choice.id === id);
       let label = current?.label ?? '世界状态已变化，重新观察';
-      if (current?.exploration && typeof decision !== 'string') {
+      if (typeof decision !== 'string' && 'noteResponse' in decision) {
+        if (current?.note?.id === decision.noteResponse.noteId) this.act(decision.noteResponse);
+      } else if (current?.exploration && typeof decision !== 'string') {
         this.act({ ...current.exploration, requestId: randomUUID(), text: decision.text });
       } else if (current?.speech && typeof decision !== 'string') {
         this.act({ action: 'say', requestId: randomUUID(), meetingId: current.speech.meetingId, text: decision.text, surveyIntent: decision.surveyIntent });

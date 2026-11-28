@@ -10,11 +10,13 @@ import type { CafeTalk, OrderCoffee } from './shared-pilot-cafe';
 import { worksBriefActive, type CancelWorksGoal, type InspectWorks, type SurveyWorksSite, type WorksGoalAction, type WorksTalk } from './shared-pilot-works';
 import type { FishingTalk, GoFishing } from './shared-pilot-fishing';
 import type { ExplorationAction } from './shared-pilot-exploration';
+import type { ResolvePlayerNote, SubmitPlayerNote } from './shared-pilot-notes';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
 export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest
-  | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | ExplorationAction | { action: 'observe' };
+  | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | ExplorationAction
+  | ResolvePlayerNote | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
   '02': ['cafe', 'works', 'plaza', 'governance'],
@@ -85,6 +87,10 @@ export class SharedPilotRuntime {
   }
 
   profile(session: string) { return this.store.profile(session); }
+  profileNotes(session: string, residents: readonly SharedPilotResidentId[]) { return this.store.profileNotes(session, residents); }
+  submitPlayerNote(session: string, residents: readonly SharedPilotResidentId[], command: SubmitPlayerNote) {
+    return this.store.submitPlayerNote(session, command, residents);
+  }
   cafeTalk(question: string) { return this.store.cafeTalk(question); }
   worksTalk(question: string) { return this.store.worksTalk(question); }
   fishingTalk(question: string) { return this.store.fishingTalk(question); }
@@ -169,6 +175,8 @@ export class SharedPilotRuntime {
     switch (command.action) {
       case 'observe':
         return observation;
+      case 'resolvePlayerNote':
+        return this.store.resolvePlayerNote(token, command);
       case 'moveTo':
         return this.store.moveTo(token, command);
       case 'orderCoffee':

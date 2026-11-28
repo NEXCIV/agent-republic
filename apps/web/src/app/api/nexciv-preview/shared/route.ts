@@ -10,12 +10,13 @@ import { cafeTalkSchema, orderCoffeeSchema } from '../../../../lib/shared-pilot-
 import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, worksGoalActionSchema, worksTalkSchema } from '../../../../lib/shared-pilot-works';
 import { fishingTalkSchema, goFishingSchema } from '../../../../lib/shared-pilot-fishing';
 import { explorationActionSchema } from '../../../../lib/shared-pilot-exploration';
+import { resolvePlayerNoteSchema, submitPlayerNoteSchema } from '../../../../lib/shared-pilot-notes';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 13;
+const PILOT_RUNTIME_VERSION = 14;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -83,7 +84,8 @@ export function GET(request: NextRequest) {
     const resident = session && config.profileResidents.length ? pilot.profile(session).profile?.residentId : undefined;
     const ownResidentId = resident && config.profileResidents.includes(resident) ? resident : null;
     return json({ ...pilot.snapshot(), profilesEnabled: config.profileResidents.length > 0,
-      ownResidentId, ownModelRun: ownResidentId ? pilot.modelProfile(ownResidentId).modelRun : null });
+      ownResidentId, ownModelRun: ownResidentId ? pilot.modelProfile(ownResidentId).modelRun : null,
+      ownNotes: ownResidentId ? pilot.profileNotes(session!, config.profileResidents) : [] });
   } catch {
     return json({ error: '共享城市暂不可用，请确认本机试验配置。' }, 503);
   }
@@ -116,7 +118,7 @@ function readCommand(body: Record<string, unknown> | undefined): SharedAgentComm
   if (!body) return;
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
   for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
-    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema, explorationActionSchema]) {
+    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema, explorationActionSchema, resolvePlayerNoteSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
   }
@@ -129,6 +131,8 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
   if (!body) return json({ error: '角色操作无效。' }, 400);
   const session = request.cookies.get(profileCookie)?.value ?? '';
   const pilot = pilotFor(file, config.externalResidents);
+  const note = submitPlayerNoteSchema.safeParse(body);
+  if (note.success) return json(pilot.submitPlayerNote(session, config.profileResidents, note.data));
   const chat = cafeTalkSchema.safeParse(body);
   if (chat.success) return json(pilot.cafeTalk(chat.data.question));
   const coffee = orderCoffeeSchema.safeParse(body);

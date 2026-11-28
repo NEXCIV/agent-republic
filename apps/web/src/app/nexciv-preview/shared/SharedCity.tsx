@@ -12,6 +12,8 @@ import { latestResidentActivity, type SharedPilotProfile } from '../../../lib/sh
 import { CITY_PLACES } from '../../../lib/city-movement';
 import { createWalk, type AgentReport, type DistrictStatus, type WalkController, type WalkSelection } from '../walk';
 import { CityExplorer } from '../CityExplorer';
+import { PlayerNotes } from './PlayerNotes';
+import type { PlayerNoteView } from '../../../lib/shared-pilot-notes';
 import { CityGlyph } from '../CityGlyph';
 import base from '../preview.module.css';
 import styles from './shared.module.css';
@@ -25,7 +27,7 @@ import { WorksBriefRecord, WorksSitePanel } from './WorksSitePanel';
 
 type ResidentId = '01' | '02';
 type CameraView = 'overview' | 'self';
-type SharedCitySnapshot = SharedPilotView & { ownResidentId: ResidentId | null; ownModelRun: ModelRunView | null };
+type SharedCitySnapshot = SharedPilotView & { ownResidentId: ResidentId | null; ownModelRun: ModelRunView | null; ownNotes: PlayerNoteView[] };
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
 const residents = ['01', '02'] as const;
 const endpoint = '/api/nexciv-preview/shared';
@@ -258,6 +260,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
               : movement && <div className={styles.progress}><progress aria-label={`${id} 号行程进度`} max={100} value={progress} /><span>{progress}%</span></div>}
             {resident && <small className={styles.position}>X {resident.position[0].toFixed(1)} · Z {resident.position[2].toFixed(1)}</small>}
             {reports[id]?.status === 'unavailable' && <small>角色模型未载入，行动记录仍可查看。</small>}
+            {id === ownResident && <PlayerNotes notes={snapshot?.ownNotes ?? []} connected={status === 'live'} />}
           </article>;
         })}
         <div className={styles.cameraActions}>

@@ -23,6 +23,10 @@
 .resident>strong { display: block; font-size: 15px; margin-bottom: 6px; font-weight: 650; }
 .modelActivity { margin: 4px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .explorationLine { margin: 6px 0; color: #f5e0a5; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.playerNotes { margin-top: 8px; }
+.playerNotes summary { color: #f4d78a; cursor: pointer; font-size: 13px; }
+.playerNotes summary span { color: var(--muted); }
+.playerNotes .cafeVendor { margin-top: 8px; }
 .progress { display: flex; align-items: center; gap: 9px; font-variant-numeric: tabular-nums; color: #e4c56f; font-size: 12px; margin: 4px 0 6px; }
 .progress progress { flex: 1; height: 8px; accent-color: #f0b90b; }
 .resident[data-resident="02"] .progress progress { accent-color: #75aaa9; }

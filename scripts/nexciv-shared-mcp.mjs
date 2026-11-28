@@ -24,9 +24,15 @@ async function send(command) {
 }
 
 const requestId = z.uuidv4().optional();
-const action = z.union([
+const noteActivities = [
   z.strictObject({ requestId, action: z.literal('moveTo'), destination: z.strictObject({ place: z.enum(['cafe', 'plaza', 'governance', 'works', 'pier']) }) }),
   z.strictObject({ requestId, action: z.literal('invite'), target: z.enum(['01', '02']), venue: z.literal('cafe') }),
+  z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
+  z.strictObject({ requestId, action: z.literal('inspectWorks'), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
+  z.strictObject({ requestId, action: z.literal('goFishing') }),
+];
+const action = z.union([
+  ...noteActivities,
   z.strictObject({ requestId, action: z.literal('respond'), meetingId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
   z.strictObject({ requestId, action: z.literal('say'), meetingId: z.uuidv4(),
     text: z.string().trim().min(1).max(120).describe('根据会面和之前实际说过的话现场写一句'),
@@ -36,8 +42,6 @@ const action = z.union([
   z.strictObject({ requestId, action: z.literal('respondSurvey'), taskId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
   z.strictObject({ requestId, action: z.literal('inspectSurvey'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
   z.strictObject({ requestId, action: z.literal('submitSurvey'), taskId: z.uuidv4() }),
-  z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
-  z.strictObject({ requestId, action: z.literal('inspectWorks'), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
   z.strictObject({ action: z.literal('acceptWorksGoal'), taskId: z.uuidv4() }),
   z.strictObject({ action: z.literal('askWorksGoal'), taskId: z.uuidv4() }),
   z.strictObject({ action: z.literal('inspectWorksGoal'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
@@ -45,13 +49,17 @@ const action = z.union([
     text: z.string().trim().min(1).max(38) }),
   z.strictObject({ requestId, action: z.literal('exploreArrival'), activity: z.enum(['ask', 'look']),
     text: z.string().trim().min(1).max(38) }),
-  z.strictObject({ requestId, action: z.literal('goFishing') }),
+]);
+const noteReply = { noteId: z.uuidv4(), reason: z.string().trim().min(1).max(120) };
+const resolution = z.union([
+  z.strictObject({ ...noteReply, decision: z.literal('skipped') }),
+  z.strictObject({ ...noteReply, decision: z.enum(['adopted', 'adapted']), activity: z.union(noteActivities) }),
 ]);
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-shared', version: '0.5.0' });
+  const server = new McpServer({ name: 'nexciv-shared', version: '0.6.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取居民、城市及 firstExploration。首次探索用 exploreSite 启程，到场用 exploreArrival 观察或问 NPC。followUp 阶段可参考现场和回复，用既有动作点单、巡查、钓鱼或前往别处。pendingWorksGoal 列出网页调研动作。',
+    description: '读取居民、城市及 firstExploration。playerNotes 仅含本居民的私人纸条，用 resolve_player_note 回复待处理建议。首次探索用 exploreSite 启程，到场用 exploreArrival 观察或询问。pendingWorksGoal 列出网页调研动作。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
@@ -59,6 +67,11 @@ serveStdio(() => {
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send('requestId' in command ? { ...command, requestId: command.requestId ?? randomUUID() }
     : command.action.endsWith('WorksGoal') ? command : { ...command, requestId: randomUUID() }));
+  server.registerTool('resolve_player_note', {
+    description: '根据自身处境采纳、调整或略过本居民的一张纸条。采纳或调整时在本次请求里提交一个城市动作。原因只显示给玩家和本居民的 Agent。',
+    inputSchema: z.strictObject({ reply: resolution }), annotations: { destructiveHint: false, openWorldHint: false },
+  }, ({ reply }) => send(reply.decision === 'skipped' ? { action: 'resolvePlayerNote', ...reply }
+    : { ...reply, action: 'resolvePlayerNote', activity: { ...reply.activity, requestId: reply.activity.requestId ?? reply.noteId } }));
   server.registerTool('ask_cafe_vendor', {
     description: '询问咖啡摊主菜单、排队情况和附近休息地点。',
     inputSchema: z.strictObject({ question: z.string().trim().min(1).max(120) }),
