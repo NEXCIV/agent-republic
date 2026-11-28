@@ -73,12 +73,15 @@ export function GET(request: NextRequest) {
   if (profile && !config.profileResidents.length) return json({ error: '本机试玩名额已分配给测试 Agent。' }, 409);
   try {
     const pilot = pilotFor(file, config.externalResidents);
+    const session = request.cookies.get(profileCookie)?.value;
     if (profile) {
-      const view = pilot.profile(request.cookies.get(profileCookie)?.value ?? '');
+      const view = pilot.profile(session ?? '');
       if (!view.profile || !config.profileResidents.includes(view.profile.residentId)) return json({ profile: null, hasKey: false, modelRun: null, mcpConnected: false });
       return json({ ...view, ...pilot.modelProfile(view.profile.residentId), mcpScript: path.resolve(process.cwd(), '../../scripts/nexciv-shared-mcp.mjs') });
     }
-    return json({ ...pilot.snapshot(), profilesEnabled: config.profileResidents.length > 0 });
+    const resident = session && config.profileResidents.length ? pilot.profile(session).profile?.residentId : undefined;
+    return json({ ...pilot.snapshot(), profilesEnabled: config.profileResidents.length > 0,
+      ownResidentId: resident && config.profileResidents.includes(resident) ? resident : null });
   } catch {
     return json({ error: '共享城市暂不可用，请确认本机试验配置。' }, 503);
   }

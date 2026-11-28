@@ -15,6 +15,7 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('allocates free local seat
   const local = globalThis as typeof globalThis & { nexcivSharedPilot?: { runtime: SharedPilotRuntime } };
   const close = () => { local.nexcivSharedPilot?.runtime.close(); local.nexcivSharedPilot = undefined; };
   const profile = (cookie = '') => GET(new NextRequest(url + '?profile=1', { headers: { host, cookie } }));
+  const city = (cookie = '', query = '') => GET(new NextRequest(url + query, { headers: { host, cookie } })).json();
   const change = (body: unknown, cookie = '', origin = new URL(url).origin) => POST(new NextRequest(url + '?profile=1', {
     method: 'POST', headers: { host, origin, cookie, 'content-type': 'application/json' }, body: JSON.stringify(body),
   }));
@@ -50,6 +51,10 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('allocates free local seat
     expect(other.status).toBe(201);
     expect((await change(first)).status).toBe(409);
     const otherCookie = other.headers.get('set-cookie')!.split(';')[0]!;
+    expect((await city()).ownResidentId).toBeNull();
+    expect((await city(cookie, '?residentId=02')).ownResidentId).toBe('01');
+    expect((await city(otherCookie)).ownResidentId).toBe('02');
+    expect((await city('nexciv_shared_profile=invalid')).ownResidentId).toBeNull();
     const { key } = await (await change({ action: 'issue' }, cookie)).json();
     const { key: otherKey } = await (await change({ action: 'issue' }, otherCookie)).json();
     expect(await (await observe(key)).json()).toMatchObject({ viewerResidentId: '01' });

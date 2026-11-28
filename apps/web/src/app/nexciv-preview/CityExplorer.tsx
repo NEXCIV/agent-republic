@@ -39,6 +39,7 @@ type Props = {
   open: boolean;
   sceneState: 'loading' | 'ready' | 'fallback';
   focusActive: boolean;
+  followResident?: FollowId | null;
   residentReport?: AgentReport;
   residentIds: readonly FollowId[];
   residentNames?: Partial<Record<FollowId, string>>;
@@ -55,7 +56,7 @@ type Props = {
   onFocus: (selection: WalkSelection) => void;
 };
 
-export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, residentNames, cafeLink = false, workerStatus, managerPresent, cafeVendor, pierAngler, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
+export function CityExplorer({ selection, open, sceneState, focusActive, followResident, residentReport, residentIds, residentNames, cafeLink = false, workerStatus, managerPresent, cafeVendor, pierAngler, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
   if (!open) return null;
 
   const landmark = selection?.kind === 'building' ? LANDMARKS[selection.id] : undefined;
@@ -72,6 +73,7 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
     || (residentReport !== undefined && residentReport.status !== 'unavailable'));
   const residentStatus = sceneState === 'fallback' ? '静态预览中无法获取实时位置'
     : marketGuest ? workerStatus ?? '在街角市集活动' : residentActivity(residentReport);
+  const showFocus = selection?.kind !== 'resident' || followResident === undefined || selection.id === followResident;
 
   return <aside id="city-explorer" className={styles.explorer} aria-labelledby="city-explorer-title">
     <header className={styles.explorerHeader}>
@@ -84,12 +86,12 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
       {landmark ? <p className={styles.explorerDescription}>{landmark.description}</p> : !person && <p className={styles.explorerDescription} aria-live="polite">
         {residentStatus}
       </p>}
-      <div className={styles.explorerActions}>
+      {showFocus && <div className={styles.explorerActions}>
         <button type="button" disabled={!canFocus} aria-pressed={focusActive} onClick={() => onFocus(selection)}>
           {selection.kind === 'building' ? (selection.id === 'west-pool' ? '查看水景' : '聚焦建筑') : person?.action ?? '跟随居民'}
         </button>
         {cafeLink && selection.kind === 'building' && selection.id === 'market' && <Link href="/nexciv-preview/cafe" prefetch={false}>打开咖啡街试玩</Link>}
-      </div>
+      </div>}
       {children}
     </div> : <div className={styles.explorerDirectory}>
       <h3>地标</h3>

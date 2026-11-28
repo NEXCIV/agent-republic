@@ -62,12 +62,13 @@ type Callbacks = {
   overview: (status: DistrictStatus) => void;
   fps: (value: number) => void;
   onSelect?: (selection: WalkSelection | null) => void;
+  onFreeCamera?: () => void;
 };
 
 export type WalkController = {
   syncCafe: (snapshot: CafeSnapshot | null) => void;
   syncCity: (observation: CityObservation | null) => void;
-  syncShared: (snapshot: SharedPilotView | null) => void;
+  syncShared: (snapshot: SharedPilotView | null, owner?: SharedResident | null) => void;
   view: (mode: View, id?: FollowId) => void;
   enterResident: (id: SharedResident, avatar: SharedPilotAvatar) => void;
   select: (selection: WalkSelection | null) => void;
@@ -88,6 +89,9 @@ const CITYWIDE_DISTANCE = 362;
 const CITYWIDE_PITCH = 0.735;
 const CITYWIDE_FOV = 39;
 const STREET_FOV = 49;
+const MAP_X = 150;
+const MAP_NORTH = -214;
+const MAP_SOUTH = 150;
 const DISTRICT_ORBIT: Record<District, [yaw: number, pitch: number, distance: number]> = {
   east: [START_YAW, 1.02, 143],
   west: [-0.18, 1.02, 130],
@@ -488,6 +492,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const lakeTime = { value: 0 };
   const forumEntrance = new THREE.Vector3(-94, 1, 75);
   const viewFocus = focus.clone();
+  const mapFocus = new THREE.Vector3();
+  const mapHit = new THREE.Vector3();
+  const ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  let hasMapFocus = false;
   const aim = new THREE.Vector3();
   const marketEntrance = new THREE.Vector3();
   const counter = new THREE.Vector3(...CAFE_COUNTER);
@@ -600,7 +608,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const retailPlacements: { mid: THREE.Object3D; bounds: THREE.Sphere; close?: THREE.Object3D }[] = [];
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const tween = !reducedMotion.matches;
-  const pointers = new Map<number, { x: number; y: number; startX: number; startY: number; dragging: boolean }>();
+  const pointers = new Map<number, { x: number; y: number; startX: number; startY: number; dragging: boolean; pan: boolean }>();
   const aborter = new AbortController();
   let ended = false;
   let contextLost = false;
@@ -674,6 +682,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const sharedActors = new Map<SharedResident, { file: string; asset: GLTF; patrol: Patrol }>();
   const sharedRequests = new Map<SharedResident, { file: string }>();
   let sharedSnapshot: SharedPilotView | null = null;
+  let sharedOwner: SharedResident | null = null;
   let sharedReceivedAt = performance.now();
   const sharedJourneys = new Map<string, string>();
   const sharedRegions = new Set<CityRegion>();
@@ -809,6 +818,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function zoom(factor: number) {
+    if (sharedMode && mode === 'overview') {
+      desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 5.5, 465);
+      return;
+    }
     if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor,
       framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' || framedLandmark === 'pier-angler' ? 5.5 : 16, 94);
     else if (mode === 'follow' && followedPatrol()) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
@@ -846,10 +859,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function setView(next: View, id = followed) {
+    if (sharedMode && next === 'follow' && (sharedOwner === null || id !== sharedOwner)) return;
     entryTarget = undefined;
     entryFlight = undefined;
-    const viewChanged = mode !== next || Boolean(framedLandmark);
+    const viewChanged = mode !== next || Boolean(framedLandmark) || hasMapFocus || (sharedMode && next === 'overview');
     framedLandmark = undefined;
+    hasMapFocus = false;
     if (id !== followed) {
       followed = id;
       resetFollowCamera();
@@ -865,6 +880,71 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     if (next !== 'overview' && next !== 'follow') loadDistrict(next, true);
   }
 
+  function mapRegionReady(point: THREE.Vector3, request: boolean) {
+    const area = regionFor(point.x, point.z);
+    switch (area) {
+      case LANDSCAPE_REGION.governance:
+        if (request && !north && !northFailed) loadNorth(true);
+        return Boolean(north);
+      case LANDSCAPE_REGION.south:
+        if (request && !cafeStreetRequested) loadCafeStreet();
+        return Boolean(southGardens);
+      default: {
+        const side = area === LANDSCAPE_REGION.east ? 'east' : area === LANDSCAPE_REGION.west ? 'west'
+          : area === LANDSCAPE_REGION.shore ? 'shore' : area === LANDSCAPE_REGION.research ? 'research'
+            : area === LANDSCAPE_REGION.residential ? 'residential' : undefined;
+        if (!side) return area === LANDSCAPE_REGION.base && Boolean(model);
+        if (request && districts[side].status === 'idle') loadDistrict(side, true);
+        return Boolean(districts[side].asset);
+      }
+    }
+  }
+
+  function detachCamera() {
+    if (mode === 'follow') {
+      const target = entryFlight ? viewFocus : aim;
+      const offset = camera.position.clone().sub(target);
+      orbitDistance = desiredDistance = offset.length();
+      if (orbitDistance > 0) {
+        orbitYaw = Math.atan2(offset.x, offset.z);
+        orbitPitch = Math.asin(offset.y / orbitDistance);
+      }
+      viewFocus.copy(target);
+    }
+    if (!hasMapFocus) mapFocus.copy(framedLandmark ? landmarkTarget : viewFocus);
+    hasMapFocus = true;
+    mode = 'overview';
+    framedLandmark = undefined;
+    entryTarget = undefined;
+    entryFlight = undefined;
+    callbacks.onFreeCamera?.();
+  }
+
+  function panCamera(dx: number, dy: number) {
+    if (!hasMapFocus) detachCamera();
+    const metres = 2 * orbitDistance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, canvas.clientHeight);
+    const sine = Math.sin(orbitYaw);
+    const cosine = Math.cos(orbitYaw);
+    mapFocus.x = THREE.MathUtils.clamp(mapFocus.x - (dx * cosine + dy * sine) * metres, -MAP_X, MAP_X);
+    mapFocus.z = THREE.MathUtils.clamp(mapFocus.z + (dx * sine - dy * cosine) * metres, MAP_NORTH, MAP_SOUTH);
+  }
+
+  function focusMapPoint(point: THREE.Vector3) {
+    const followedBefore = mode === 'follow';
+    detachCamera();
+    mapFocus.set(THREE.MathUtils.clamp(point.x, -MAP_X, MAP_X), 0, THREE.MathUtils.clamp(point.z, MAP_NORTH, MAP_SOUTH));
+    if (followedBefore || desiredDistance > 100) {
+      desiredDistance = 76;
+      orbitPitch = Math.max(orbitPitch, 0.66);
+    }
+  }
+
+  function interruptEntry() {
+    if (entryTarget) callbacks.onFreeCamera?.();
+    entryTarget = undefined;
+    entryFlight = undefined;
+  }
+
   function focusSelection(target: WalkSelection) {
     if (target.kind !== 'building' && (target.kind !== 'person' || !sharedMode)) {
       const root = selectableActor(target.id)?.patrol.root;
@@ -878,6 +958,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       orbitDistance = camera.position.distanceTo(aim);
     }
     mode = 'overview';
+    hasMapFocus = false;
     framedLandmark = target.kind === 'building' ? target.id : target.id === CAFE_VENDOR.id ? 'cafe-vendor'
       : target.id === WORKS_MANAGER.id ? 'works-manager' : 'pier-angler';
     const framing = LANDMARK_FRAMING[framedLandmark];
@@ -1408,10 +1489,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const district = mode !== 'overview' && mode !== 'follow' ? districts[mode] : undefined;
     const framedDistrict = framedLandmark && LANDMARK_FRAMING[framedLandmark].district;
     const framedLandmarkLoaded = framedDistrict ? districts[framedDistrict].asset : framedLandmark === 'governance' ? north : model;
-    let wide = Boolean(citywide && (mode === 'overview' && (!framedLandmark || !framedLandmarkLoaded)
+    const mapAnchor = sharedMode && mode === 'overview'
+      ? hasMapFocus ? mapFocus : framedLandmark ? landmarkTarget : citywide ? citywideFocus : focus
+      : undefined;
+    const closeMap = mapAnchor ? mapRegionReady(mapAnchor, desiredDistance < 155) : false;
+    let wide = Boolean(citywide && (mode === 'overview'
+      && (mapAnchor ? !closeMap || orbitDistance > (citywide.visible ? 126 : 150) : !framedLandmark || !framedLandmarkLoaded)
       || (citywide.visible && (mode === 'follow' && !patrol
         || district && (district.status === 'loading' || orbitDistance > 192)))));
-    const seeingLake = Boolean(districts.shore.asset && (mode === 'shore' || framedLandmark === 'pier-angler' || (following && patrol.root.position.z < -132)));
+    const seeingLake = Boolean(districts.shore.asset && (mode === 'shore' || framedLandmark === 'pier-angler'
+      || (mapAnchor && mapAnchor.z < -132) || (following && patrol.root.position.z < -132)));
     if (following) {
       const feet = patrol.root.position;
       followHeight = followHeight === undefined || !tween ? feet.y : THREE.MathUtils.damp(followHeight, feet.y, 12, dt);
@@ -1515,9 +1602,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       camera.lookAt(target);
     } else {
       orbitDistance = tween ? THREE.MathUtils.damp(orbitDistance, desiredDistance, 11, dt) : desiredDistance;
-      const target = framedLandmark ? landmarkTarget : wide && !district ? citywideFocus
+      const target = mapAnchor ?? (framedLandmark ? landmarkTarget : wide && !district ? citywideFocus
         : mode === 'west' && cafeMode && theatre?.booking && districts.west.asset ? theatreFocus
-          : mode !== 'overview' && mode !== 'follow' && (districts[mode].asset || wide) ? districtFocus[mode] : focus;
+          : mode !== 'overview' && mode !== 'follow' && (districts[mode].asset || wide) ? districtFocus[mode] : focus);
       if (tween) viewFocus.lerp(target, 1 - Math.exp(-8 * dt));
       else viewFocus.copy(target);
       const distance = orbitDistance * (camera.aspect < 0.8 ? 1.09 : 1);
@@ -1576,9 +1663,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
     }
     // Keep enough depth precision in the wide view and avoid clipping near the resident.
-    const near = following && !wide ? 0.18 : Math.max(1, orbitDistance * (approaching ? 0.026 : 0.055));
+    const near = !wide && (following || (mapAnchor && orbitDistance < 20)) ? 0.18 : Math.max(1, orbitDistance * (approaching ? 0.026 : 0.055));
     const far = wide ? 920 : seeingLake ? 520 : 285;
-    const fov = approaching && flight.wide ? THREE.MathUtils.lerp(wideFov, STREET_FOV, travel) : wide ? wideFov : STREET_FOV;
+    const fov = mapAnchor ? THREE.MathUtils.lerp(STREET_FOV, wideFov, THREE.MathUtils.smoothstep(orbitDistance, 95, 175))
+      : approaching && flight.wide ? THREE.MathUtils.lerp(wideFov, STREET_FOV, travel) : wide ? wideFov : STREET_FOV;
     if (camera.near !== near || camera.far !== far || camera.fov !== fov) {
       camera.fov = fov;
       camera.near = near;
@@ -1668,10 +1756,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function onPointerDown(event: PointerEvent) {
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const pans = sharedMode && event.pointerType === 'mouse' && (event.button === 1 || event.button === 2 || (event.button === 0 && event.shiftKey));
+    if (event.pointerType === 'mouse' && event.button !== 0 && !pans) return;
+    if (pans) event.preventDefault();
     canvas.setPointerCapture(event.pointerId);
     const { clientX: x, clientY: y } = event;
-    pointers.set(event.pointerId, { x, y, startX: x, startY: y, dragging: false });
+    pointers.set(event.pointerId, { x, y, startX: x, startY: y, dragging: false, pan: pans });
     if (pointers.size > 1) for (const pointer of pointers.values()) pointer.dragging = true;
   }
 
@@ -1689,19 +1779,27 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (other) {
         const a = Math.hypot(previous.x - other.x, previous.y - other.y);
         const b = Math.hypot(next.x - other.x, next.y - other.y);
-        if (a > 4 && b > 4) zoom(a / b);
+        if (a > 4 && b > 4) {
+          interruptEntry();
+          zoom(a / b);
+        }
       }
       return;
     }
     const dx = next.x - previous.x;
     const dy = next.y - previous.y;
+    if (next.pan) {
+      panCamera(dx, dy);
+      return;
+    }
+    interruptEntry();
     if (mode === 'follow' && followedPatrol()) {
       followYaw -= dx * 0.006;
       followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.006, 0.16, 1.18);
     } else {
       orbitYaw -= dx * 0.006;
       orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006,
-        framedLandmark === 'west-pool' || framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' || framedLandmark === 'pier-angler' ? 0.14 : 0.48, 1.45);
+        sharedMode || framedLandmark === 'west-pool' || framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' || framedLandmark === 'pier-angler' ? 0.2 : 0.48, 1.45);
     }
   }
 
@@ -1742,16 +1840,21 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
     }
 
-    if (target) {
+    if (target || sharedMode) {
       // The selectable mesh can sit behind an unselectable asset such as a tree or a roof.
       const city = citywide?.visible ? citywide : street;
       blockingGeometries.length = 0;
       city.traverseVisible((node) => {
         if (node instanceof THREE.Mesh) blockingGeometries.push(node);
       });
-      raycaster.far = nearest - 0.025;
-      if (raycaster.intersectObjects(blockingGeometries, false).length) target = null;
+      if (target) raycaster.far = nearest - 0.025;
+      const hit = raycaster.intersectObjects(blockingGeometries, false)[0];
+      if (target && hit) target = null;
       blockingGeometries.length = 0;
+      if (sharedMode && !target) {
+        const point = hit?.point ?? raycaster.ray.intersectPlane(ground, mapHit);
+        if (point && Math.abs(point.x) <= MAP_X && point.z >= MAP_NORTH && point.z <= MAP_SOUTH) focusMapPoint(point);
+      }
     }
     selection = target;
     callbacks.onSelect?.(target);
@@ -1760,7 +1863,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function onPointerUp(event: PointerEvent) {
     const press = pointers.get(event.pointerId);
     pointers.delete(event.pointerId);
-    if (!callbacks.onSelect || !press || press.dragging || !model || contextLost) return;
+    if (!callbacks.onSelect || !press || press.dragging || press.pan || !model || contextLost) return;
     if (Math.hypot(event.clientX - press.startX, event.clientY - press.startY) < 5) pickSelection(event.clientX, event.clientY);
   }
 
@@ -1771,7 +1874,24 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function onWheel(event: WheelEvent) {
     event.preventDefault();
     for (const pointer of pointers.values()) pointer.dragging = true;
-    zoom(Math.exp(THREE.MathUtils.clamp(event.deltaY * 0.0012, -0.24, 0.24)));
+    interruptEntry();
+    const delta = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaMode === 2 ? event.deltaY * canvas.clientHeight : event.deltaY;
+    zoom(Math.exp(THREE.MathUtils.clamp(delta * 0.0012, -0.24, 0.24)));
+  }
+
+  function onMapKey(event: KeyboardEvent) {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    switch (event.key) {
+      case 'ArrowLeft': panCamera(45, 0); break;
+      case 'ArrowRight': panCamera(-45, 0); break;
+      case 'ArrowUp': panCamera(0, 45); break;
+      case 'ArrowDown': panCamera(0, -45); break;
+      case '+':
+      case '=': interruptEntry(); zoom(0.8); break;
+      case '-': interruptEntry(); zoom(1.25); break;
+      default: return;
+    }
+    event.preventDefault();
   }
 
   function onContextLost(event: Event) {
@@ -1790,6 +1910,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   canvas.addEventListener('pointercancel', cancelPointer, { signal });
   canvas.addEventListener('lostpointercapture', cancelPointer, { signal });
   canvas.addEventListener('wheel', onWheel, { passive: false, signal });
+  if (sharedMode) {
+    canvas.addEventListener('contextmenu', event => event.preventDefault(), { signal });
+    canvas.addEventListener('keydown', onMapKey, { signal });
+    canvas.setAttribute('aria-describedby', 'shared-camera-controls');
+  }
   canvas.addEventListener('webglcontextlost', onContextLost, { signal });
   resize();
 
@@ -1908,7 +2033,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         if (match) registerLandmark(match[1], node);
       });
       scene.add(asset);
-      if (mode === 'overview') resetOrbit();
+      if (mode === 'overview' && (!sharedMode || (!hasMapFocus && !framedLandmark))) resetOrbit();
       overviewStatus = 'ready';
       callbacks.overview(overviewStatus);
     }).catch(() => {
@@ -2261,9 +2386,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   return {
     syncCafe(snapshot) { cafeSnapshot = snapshot; receivedAt = performance.now(); },
-    syncShared(snapshot) {
+    syncShared(snapshot, owner = null) {
       sharedSnapshot = snapshot;
       sharedReceivedAt = performance.now();
+      if (sharedOwner !== owner) {
+        sharedOwner = owner;
+        if (entryTarget && entryTarget.id !== owner) interruptEntry();
+        if (mode === 'follow' && followed !== owner) setView('overview');
+      }
       if (!sharedMode || !snapshot) return;
       for (const id of SHARED_RESIDENTS) {
         const avatar = snapshot.profiles.find((profile) => profile.residentId === id)?.avatar;
@@ -2277,7 +2407,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     },
     view: setView,
     enterResident(id, avatar) {
-      if (!sharedMode) return;
+      if (!sharedMode || sharedOwner !== id) return;
       if (mode !== 'overview' || framedLandmark) setView('overview');
       entryTarget = { id, file: SHARED_AVATARS[avatar].asset };
     },
