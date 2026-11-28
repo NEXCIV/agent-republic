@@ -44,6 +44,14 @@ export function lightOverview(asset: THREE.Group, sky: THREE.Texture) {
     if (/amber guide lens|architectural gold trim/i.test(mat.name)) mat.emissiveIntensity *= 1.55;
     if (/Warm interior plaster/i.test(mat.name)) mat.emissiveIntensity *= 3.4;
     if (/CIVIC_Fountain/.test(mat.name)) lightFountainJets(mat);
+    if (mat instanceof THREE.MeshPhysicalMaterial && /^MAT_CIVIC_Jet(?:\.\d+)?$/.test(mat.name) && mat.transmission > 0) {
+      // These distant jets retain their blue emissive finish without rendering the opaque city again for refraction.
+      mat.transmission = 0;
+      mat.transparent = true;
+      mat.opacity = 0.72;
+      mat.depthWrite = false;
+      mat.forceSinglePass = true;
+    }
   }
   // Only the hall dome uses this polished copper response. Keep the material's base colour and ribs.
   const hall = asset.children.find(node => node.name.startsWith('HERO_01_Governance_Hall'));
