@@ -1412,18 +1412,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       if ((thirdWalk || (observer && districts.shore.status === 'ready')) && !regularRequested) {
         regularRequested = true;
-        request('agent-03.glb').then((response) => response.arrayBuffer())
-          .then((bytes) => loader.parseAsync(bytes, ASSET_PATH)).then((asset) => {
-            if (ended || contextLost) { disposeModel(asset.scene); return; }
-            try {
-              const patrol = createAgentPatrol(asset, [pierEntrance.toArray(), regularPosition.toArray()], [interviewSpot.x, interviewSpot.z]);
-              pierRegular = { asset, patrol };
-              street.add(patrol.root);
-            } catch (error) {
-              disposeModel(asset.scene);
-              throw error;
-            }
-          }).catch(() => { if (!ended && !contextLost) callbacks.fallback(); });
+        loadCityAgent('agent-03.glb').then((asset) => {
+          if (ended || contextLost) { disposeModel(asset.scene); return; }
+          try {
+            const patrol = createAgentPatrol(asset, [pierEntrance.toArray(), regularPosition.toArray()], [interviewSpot.x, interviewSpot.z]);
+            pierRegular = { asset, patrol };
+            street.add(patrol.root);
+          } catch (error) {
+            disposeModel(asset.scene);
+            throw error;
+          }
+        }).catch(() => { if (!ended && !contextLost) callbacks.fallback(); });
       }
       if (pierRegular) {
         pierRegular.patrol.root.visible = Boolean(thirdWalk || observer);
@@ -1992,10 +1991,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     return response;
   }
 
-  async function loadCityAgent(file: string, priority: RequestPriority = 'auto') {
-    const match = loadCityGait(file, priority);
-    const bytes = await request(file, priority).then((response) => response.arrayBuffer());
-    const gait = await matchCityGait(await match, bytes);
+  async function loadCityAgent(file: string, priority: RequestPriority = 'auto', prefetched?: ArrayBuffer) {
+    const [bytes, candidate] = await Promise.all([
+      prefetched ?? request(file, priority).then((response) => response.arrayBuffer()),
+      loadCityGait(file, priority),
+    ]);
+    const gait = await matchCityGait(candidate, bytes);
     signal.throwIfAborted();
     const asset = await loader.parseAsync(bytes, ASSET_PATH);
     if (gait?.apron) installServiceApron(asset.scene, gait.apron);
@@ -2273,7 +2274,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
       if (cafeMode || sharedMode) return;
       if (!agentBytes) throw new Error('Researcher asset unavailable');
-      const agent = await loader.parseAsync(agentBytes, ASSET_PATH);
+      const agent = await loadCityAgent('agent-03.glb', priority, agentBytes);
       if (ended || contextLost) { disposeModel(agent.scene); return; }
       attachAgent('03', agent, 'plazaNorth');
     }).catch(() => {
@@ -2357,9 +2358,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     updateCouncilNotice?.(text, programme);
   }
 
-  if (!sharedMode) request('agent-01.glb').then((response) => response.arrayBuffer()).then(async (bytes) => {
-    if (ended || contextLost) return;
-    const result = await loader.parseAsync(bytes, ASSET_PATH);
+  if (!sharedMode) loadCityAgent('agent-01.glb').then((result) => {
     if (ended || contextLost) { disposeModel(result.scene); return; }
     actor = result;
     connectPrimary();

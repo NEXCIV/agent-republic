@@ -227,14 +227,17 @@ function clipJson(clip) {
 }
 
 mkdirSync(output, { recursive: true });
-for (const id of ['02', '06']) {
+const pilotIds = new Set(['02', '06']);
+for (const id of ['02', '06', '01', '03', '04', '05', '07', '08']) {
+  const comparison = pilotIds.has(id);
   const file = readGlb(new URL(`agent-${id}.glb`, assets));
   const target = rig(file);
   const soles = solePoints(file, target);
   const clips = [];
   let seat;
   let standing;
-  for (const [pack, names] of Object.entries(clipNames)) {
+  const packs = comparison ? clipNames : { General: ['Idle_A'] };
+  for (const [pack, names] of Object.entries(packs)) {
     const input = readGlb(resolve(sourceDir, `Rig_Medium_${pack}.glb`));
     for (const name of names) {
       const source = rig(input);
@@ -250,6 +253,7 @@ for (const id of ['02', '06']) {
     }
   }
   for (const [label, source] of walkSources) {
+    if (!comparison && label !== 'Quaternius') continue;
     for (const turning of [false, true]) {
       const { clip, error, lift, maxHipStep } = bakePreviewLocomotion(label, source, target, soles, standing, turning);
       clips.push(clip);
@@ -272,10 +276,12 @@ for (const id of ['02', '06']) {
       new THREE.Vector3(x, bounds.min.y, z).applyQuaternion(local).toArray().map((value) => +value.toFixed(5)),
     );
   });
-  const sidecar = { modelHash: file.hash, seat, walkPath, clips: clips.map(clipJson) };
-  writeFileSync(new URL(`agent-${id}.json`, output), JSON.stringify(sidecar));
+  if (comparison) {
+    const sidecar = { modelHash: file.hash, seat, walkPath, clips: clips.map(clipJson) };
+    writeFileSync(new URL(`agent-${id}.json`, output), JSON.stringify(sidecar));
+  }
   writeFileSync(new URL(`agent-${id}-city-v1.json`, output),
     JSON.stringify({ modelHash: file.hash, stride: gait.stride, jogStride: jogging.stride, shoeContacts, apron,
       clips: [...gait.clips, jogging.clip].map(clipJson) }));
-  console.log(id, 'seat', seat, 'clips', clips.map((clip) => clip.name));
+  console.log(id, 'city walk stride', gait.stride.toFixed(3), 'jog stride', jogging.stride.toFixed(3));
 }

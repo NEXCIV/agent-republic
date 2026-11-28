@@ -16,16 +16,12 @@ export type CityGait = {
 };
 export type CityAgentAsset = GLTF & { gait?: CityGait; groundHeight?: GroundHeight };
 
-const urls: Partial<Record<string, string>> = {
-  'agent-02.glb': '/nexciv-motion/agent-02-city-v1.json',
-  'agent-06.glb': '/nexciv-motion/agent-06-city-v1.json',
-};
-
 export function cityGaitLoader(signal: AbortSignal) {
   const cache = new Map<string, Promise<CityGait | undefined>>();
   return function load(file: string, priority: RequestPriority) {
-    const url = urls[file];
-    if (!url) return undefined;
+    const match = /^agent-(0[1-8])\.glb$/.exec(file);
+    if (!match) return undefined;
+    const url = `/nexciv-motion/agent-${match[1]}-city-v1.json`;
     let pending = cache.get(file);
     if (!pending) {
       pending = fetch(url, { signal, priority }).then(async (response) => {

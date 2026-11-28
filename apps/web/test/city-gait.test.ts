@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { createAgentPatrol } from '../src/app/nexciv-preview/agent';
 import { cityGaitLoader, matchCityGait, type CityAgentAsset, type CityGait } from '../src/app/nexciv-preview/city-gait';
+import { SHARED_AVATARS } from '../src/lib/shared-pilot-profiles';
 
 function setup(gait?: CityGait) {
   const scene = new THREE.Group();
@@ -86,21 +87,24 @@ describe('Quaternius city locomotion', () => {
     patrol.dispose();
   });
 
-  it.each(['02', '06'])('loads the matching model and loopable clips for %s', async (id) => {
+  it.each(Object.values(SHARED_AVATARS))('loads the matching model and loopable clips for $asset', async ({ asset }) => {
+    const id = asset.slice(6, 8);
     const data = fs.readFileSync(new URL(`../public/nexciv-motion/agent-${id}-city-v1.json`, import.meta.url), 'utf8');
     const fetch = vi.fn(async () => new Response(data));
     vi.stubGlobal('fetch', fetch);
     try {
       const load = cityGaitLoader(new AbortController().signal);
-      expect(load('agent-03.glb', 'auto')).toBeUndefined();
-      const gait = await load(`agent-${id}.glb`, 'auto');
-      expect(await load(`agent-${id}.glb`, 'low')).toBe(gait);
+      expect(load('npc-04.glb', 'auto')).toBeUndefined();
+      const gait = await load(asset, 'auto');
+      expect(await load(asset, 'low')).toBe(gait);
       expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledWith(`/nexciv-motion/agent-${id}-city-v1.json`, expect.any(Object));
       expect(gait?.pivot.duration).toBeCloseTo(1.25);
       expect(gait?.walk.duration).toBeCloseTo(0.78);
       expect(gait?.jog.duration).toBeCloseTo(0.93333);
       expect(gait?.jogStride).toBeGreaterThan(3.5);
-      const bytes = new Uint8Array(fs.readFileSync(new URL(`../public/nexciv-walk/agent-${id}.glb`, import.meta.url)));
+      expect(gait?.shoeContacts).toHaveLength(2);
+      const bytes = new Uint8Array(fs.readFileSync(new URL(`../public/nexciv-walk/${asset}`, import.meta.url)));
       expect(await matchCityGait(gait, bytes.buffer)).toBe(gait);
       expect(await matchCityGait(gait, new ArrayBuffer(4))).toBeUndefined();
       for (const track of [...gait!.walk.tracks, ...gait!.jog.tracks]) {
