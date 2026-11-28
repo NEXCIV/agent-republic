@@ -8,10 +8,12 @@ import { chooseModelAction, SharedPilotModelRun, type ModelConfig } from './shar
 import { CITY_PLACES } from './city-movement';
 import type { CafeTalk, OrderCoffee } from './shared-pilot-cafe';
 import type { InspectWorks, WorksTalk } from './shared-pilot-works';
+import type { FishingTalk, GoFishing } from './shared-pilot-fishing';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
-export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | { action: 'observe' };
+export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest
+  | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | GoFishing | FishingTalk | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
   '02': ['cafe', 'works', 'plaza', 'governance'],
@@ -84,11 +86,15 @@ export class SharedPilotRuntime {
   profile(session: string) { return this.store.profile(session); }
   cafeTalk(question: string) { return this.store.cafeTalk(question); }
   worksTalk(question: string) { return this.store.worksTalk(question); }
+  fishingTalk(question: string) { return this.store.fishingTalk(question); }
   orderCoffee(session: string, residents: readonly SharedPilotResidentId[], command: OrderCoffee) {
     return this.store.orderCoffee(session, command, residents);
   }
   requestInspection(session: string, residents: readonly SharedPilotResidentId[], command: InspectWorks) {
     return this.store.requestInspection(session, command, residents);
+  }
+  goFishing(session: string, residents: readonly SharedPilotResidentId[], command: GoFishing) {
+    return this.store.goFishing(session, command, residents);
   }
   claimProfile(profile: Pick<SharedPilotProfile, 'name' | 'avatar'>, profileResidents: readonly SharedPilotResidentId[], session: string) {
     const claimed = this.store.claim(profile, profileResidents, session);
@@ -166,6 +172,10 @@ export class SharedPilotRuntime {
         return this.store.requestInspection(token, command);
       case 'worksTalk':
         return this.store.worksTalk(command.question, token);
+      case 'goFishing':
+        return this.store.goFishing(token, command);
+      case 'fishingTalk':
+        return this.store.fishingTalk(command.question, token);
       case 'invite':
       case 'respond':
       case 'say':
@@ -275,6 +285,7 @@ export class SharedPilotRuntime {
       const observation = connection === this.connections[0] ? firstObservation : this.observeConnection(connection);
       if (observation.cafe.orders.some(order => order.stage !== 'completed')) continue;
       if (observation.works.visits.some(visit => visit.stage !== 'completed')) continue;
+      if (observation.fishing.visits.some(visit => visit.stage !== 'completed')) continue;
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation, external.size === 0)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
@@ -302,9 +313,9 @@ export class SharedPilotRuntime {
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works } = this.observeConnection(this.connections[0]!);
+    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing } = this.observeConnection(this.connections[0]!);
     const external = this.externallyControlled(profiles);
-    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works,
+    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing,
       engines: this.connections.map(({ residentId }) => {
         const run = this.modelRuns.get(residentId);
         if (run) return { residentId, driver: 'MODEL' as const, status: run.view.status };
@@ -312,7 +323,8 @@ export class SharedPilotRuntime {
         const lastCall = this.lastExternalCallAt.get(residentId);
         return { residentId, driver: 'EXTERNAL' as const, connected: lastCall !== undefined && serverTime - lastCall <= 120000 };
       }),
-      running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting) || surveyActive(survey.task)),
+      running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting)
+        || surveyActive(survey.task) || fishing.visits.some(visit => visit.stage !== 'completed')),
     };
   }
 

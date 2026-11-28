@@ -10,7 +10,7 @@ const request = {
 describe('shared city DEMO move request', () => {
   it('requires a server-owned resident and a fixed pilot place vocabulary', () => {
     expect(SHARED_PILOT_RESIDENT_IDS).toEqual(['01', '02']);
-    expect(SHARED_PILOT_PLACE_IDS).toEqual(['cafe', 'plaza', 'governance', 'works']);
+    expect(SHARED_PILOT_PLACE_IDS).toEqual(['cafe', 'plaza', 'governance', 'works', 'pier']);
     expect(SHARED_PILOT_PROVENANCE).toBe('AI_SIMULATED');
     for (const place of SHARED_PILOT_PLACE_IDS) {
       const command = { ...request, destination: { place } };
@@ -32,7 +32,7 @@ describe('shared city DEMO move request', () => {
       { arrival: 1 }, { arrivesAt: 1 }, { duration: 1 }, { completed: true }, { result: 'COMPLETED' },
       { coordinates: { x: 1, z: 2 } }, { x: 1, z: 2 }, { position: [1, 2] },
       { destination: { place: 'cafe', x: 1, z: 2 } }, { destination: { place: 'cafe', arrivesAt: 1 } },
-      { destination: { x: 1, z: 2 } }, { destination: { place: 'pier' } },
+      { destination: { x: 1, z: 2 } }, { destination: { place: 'market' } },
     ]) {
       expect(sharedPilotMoveRequestSchema.safeParse({ ...request, ...extra }).success).toBe(false);
     }

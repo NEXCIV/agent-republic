@@ -4,6 +4,7 @@ import { CITY_PLACES } from '../../lib/city-movement';
 import type { AgentReport, FollowId, WalkLandmarkId, WalkSelection } from './walk';
 import { WORKS_MANAGER } from './CityVisitPanel';
 import { CAFE_VENDOR, CAFE_VENDOR_NAME } from '../../lib/shared-pilot-cafe';
+import { PIER_ANGLER, PIER_ANGLER_NAME } from '../../lib/shared-pilot-fishing';
 import styles from './preview.module.css';
 
 const LANDMARKS = {
@@ -45,6 +46,7 @@ type Props = {
   workerStatus?: string;
   managerPresent: boolean;
   cafeVendor?: boolean;
+  pierAngler?: boolean;
   children?: ReactNode;
   heading: RefObject<HTMLHeadingElement | null>;
   onOpen: () => void;
@@ -53,16 +55,20 @@ type Props = {
   onFocus: (selection: WalkSelection) => void;
 };
 
-export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, residentNames, cafeLink = false, workerStatus, managerPresent, cafeVendor, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
+export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, residentNames, cafeLink = false, workerStatus, managerPresent, cafeVendor, pierAngler, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
   if (!open) return null;
 
   const landmark = selection?.kind === 'building' ? LANDMARKS[selection.id] : undefined;
   const manager = selection?.kind === 'person' && selection.id === WORKS_MANAGER.id;
   const vendor = selection?.kind === 'person' && selection.id === CAFE_VENDOR.id;
+  const angler = selection?.kind === 'person' && selection.id === PIER_ANGLER.id;
+  const person = manager ? { name: '现场管理员', place: '公共建设中心', action: '聚焦管理员', present: managerPresent }
+    : vendor ? { name: CAFE_VENDOR_NAME, place: '咖啡街', action: '查看摊位', present: cafeVendor }
+      : angler ? { name: PIER_ANGLER_NAME, place: '北岸码头', action: '查看钓位', present: pierAngler } : undefined;
   const name = selection?.kind === 'building' ? landmarkName(selection.id)
-    : selection?.kind === 'resident' ? residentNames?.[selection.id] ?? `${selection.id} 号居民` : vendor ? CAFE_VENDOR_NAME : manager ? '现场管理员' : '地点与居民';
+    : selection?.kind === 'resident' ? residentNames?.[selection.id] ?? `${selection.id} 号居民` : person?.name ?? '地点与居民';
   const marketGuest = selection?.kind === 'resident' && selection.id === '02' && workerStatus !== undefined;
-  const canFocus = sceneState === 'ready' && (selection?.kind === 'building' || vendor || (manager && managerPresent) || (marketGuest && workerStatus)
+  const canFocus = sceneState === 'ready' && (selection?.kind === 'building' || person?.present || (marketGuest && workerStatus)
     || (residentReport !== undefined && residentReport.status !== 'unavailable'));
   const residentStatus = sceneState === 'fallback' ? '静态预览中无法获取实时位置'
     : marketGuest ? workerStatus ?? '在街角市集活动' : residentActivity(residentReport);
@@ -74,13 +80,13 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
     </header>
     <h2 ref={heading} id="city-explorer-title" tabIndex={-1} className={styles.explorerTitle}>{name}</h2>
     {selection ? <div className={styles.explorerDetail}>
-      <p className={styles.explorerMeta}>{landmark ? landmark.area : selection.kind === 'resident' ? `${selection.id} 号居民 · 模拟行为` : vendor ? '咖啡街 · 模拟居民' : '公共建设中心 · 模拟居民'}</p>
-      {landmark ? <p className={styles.explorerDescription}>{landmark.description}</p> : !manager && !vendor && <p className={styles.explorerDescription} aria-live="polite">
+      <p className={styles.explorerMeta}>{landmark ? landmark.area : selection.kind === 'resident' ? `${selection.id} 号居民 · 模拟行为` : `${person?.place} · 模拟居民`}</p>
+      {landmark ? <p className={styles.explorerDescription}>{landmark.description}</p> : !person && <p className={styles.explorerDescription} aria-live="polite">
         {residentStatus}
       </p>}
       <div className={styles.explorerActions}>
         <button type="button" disabled={!canFocus} aria-pressed={focusActive} onClick={() => onFocus(selection)}>
-          {selection.kind === 'building' ? (selection.id === 'west-pool' ? '查看水景' : '聚焦建筑') : vendor ? '查看摊位' : manager ? '聚焦管理员' : '跟随居民'}
+          {selection.kind === 'building' ? (selection.id === 'west-pool' ? '查看水景' : '聚焦建筑') : person?.action ?? '跟随居民'}
         </button>
         {cafeLink && selection.kind === 'building' && selection.id === 'market' && <Link href="/nexciv-preview/cafe" prefetch={false}>打开咖啡街试玩</Link>}
       </div>
@@ -109,6 +115,11 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
         {cafeVendor && <li>
           <button type="button" onClick={() => onSelect(CAFE_VENDOR)}>
             <span>{CAFE_VENDOR_NAME}</span><small>咖啡街</small>
+          </button>
+        </li>}
+        {pierAngler && <li>
+          <button type="button" aria-label={PIER_ANGLER_NAME} onClick={() => onSelect(PIER_ANGLER)}>
+            <span>{PIER_ANGLER_NAME}</span><small>北岸码头</small>
           </button>
         </li>}
       </ul>

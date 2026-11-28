@@ -44,6 +44,8 @@ add(surveyed(east.works.points), 'east');
 add(surveyed(west.points), 'west');
 add(surveyed(shore.points), 'shore');
 add([surveyed(shore.points).at(-1)!, FISHING_SPOT], 'shore');
+// The second waiting lane follows the surveyed alternate track on the same dock.
+add([[71, 0.09, -188], [71.85, 0.09, -188], [71.85, 0.09, -190], FISHING_SPOT], 'shore');
 add(surveyed(research.points), 'research');
 add(surveyed(residential.points), 'residential');
 

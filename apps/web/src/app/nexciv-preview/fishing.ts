@@ -8,6 +8,7 @@ type Gesture = 'casting' | 'fishing' | 'reeling';
 
 export function createFishingGear() {
   const group = new THREE.Group();
+  group.name = 'Fishing rod and float';
   group.visible = false;
   const rod = new THREE.Group();
   group.add(rod);
@@ -61,6 +62,9 @@ export function createFishingGear() {
     group,
     update(resident: THREE.Object3D, phase: Gesture, progress: number, moving: boolean) {
       if (actor !== resident) {
+        arm?.quaternion.copy(armRest);
+        forearm?.quaternion.copy(forearmRest);
+        group.visible = false;
         actor = resident;
         arm = resident.getObjectByName('UpperArmR');
         forearm = resident.getObjectByName('ForearmR');

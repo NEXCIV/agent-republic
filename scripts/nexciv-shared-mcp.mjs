@@ -25,7 +25,7 @@ async function send(command) {
 
 const requestId = z.uuidv4().optional();
 const action = z.union([
-  z.strictObject({ requestId, action: z.literal('moveTo'), destination: z.strictObject({ place: z.enum(['cafe', 'plaza', 'governance', 'works']) }) }),
+  z.strictObject({ requestId, action: z.literal('moveTo'), destination: z.strictObject({ place: z.enum(['cafe', 'plaza', 'governance', 'works', 'pier']) }) }),
   z.strictObject({ requestId, action: z.literal('invite'), target: z.enum(['01', '02']), venue: z.literal('cafe') }),
   z.strictObject({ requestId, action: z.literal('respond'), meetingId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
   z.strictObject({ requestId, action: z.literal('say'), meetingId: z.uuidv4(),
@@ -38,6 +38,7 @@ const action = z.union([
   z.strictObject({ requestId, action: z.literal('submitSurvey'), taskId: z.uuidv4() }),
   z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
   z.strictObject({ requestId, action: z.literal('inspectWorks'), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
+  z.strictObject({ requestId, action: z.literal('goFishing') }),
 ]);
 
 serveStdio(() => {
@@ -47,7 +48,7 @@ serveStdio(() => {
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以授权居民提交移动、点咖啡、发言、共同调研或建设中心个人巡查。inspectWorks 自动到点观察并记录。使用相同的请求 ID 重试同一动作。',
+    description: '以授权居民移动、点咖啡、发言、调研、巡查或钓鱼。goFishing 会前往北岸码头，按实际到场顺序使用钓位。使用相同的请求 ID 重试同一动作。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send({ ...command, requestId: command.requestId ?? randomUUID() }));
   server.registerTool('ask_cafe_vendor', {
@@ -60,5 +61,10 @@ serveStdio(() => {
     inputSchema: z.strictObject({ question: z.string().trim().min(1).max(120) }),
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, ({ question }) => send({ action: 'worksTalk', question }));
+  server.registerTool('ask_pier_angler', {
+    description: '到北岸码头后，询问钓客钓位、等候情况或钓鱼方法。',
+    inputSchema: z.strictObject({ question: z.string().trim().min(1).max(120) }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, ({ question }) => send({ action: 'fishingTalk', question }));
   return server;
 });

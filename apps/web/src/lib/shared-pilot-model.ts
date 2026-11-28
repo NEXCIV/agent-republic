@@ -10,10 +10,11 @@ import { surveyActive, SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS } from './share
 import { CITY_PLACES } from './city-movement';
 import { COFFEE_MENU, type CafeTalk, type OrderCoffee } from './shared-pilot-cafe';
 import { WORKS_CHECKS, type InspectWorks } from './shared-pilot-works';
+import type { GoFishing } from './shared-pilot-fishing';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
-type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks;
+type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing;
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
 type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] } };
 type ModelDecision = string | ({ choice: string } & Speech);
@@ -122,7 +123,7 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
 }
 
 export function modelChoices(observation: ModelObservation, canAskCafe = true): Choice[] {
-  const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe, works } = observation;
+  const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe, works, fishing } = observation;
   const own = residents.find(({ residentId }) => residentId === actor)!;
   const choices: Choice[] = [{ id: 'wait', label: '休息或等待' }];
   const move = (place: typeof SHARED_PILOT_PLACE_IDS[number], label = `前往${CITY_PLACES[place]}`, id = `move:${place}`) =>
@@ -139,6 +140,8 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
     return choices;
   }
   if (works.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
+  const fishingActive = fishing.visits.filter(visit => visit.stage !== 'completed');
+  if (fishingActive.some(visit => visit.residentId === actor)) return choices;
   const task = survey.task;
   if (task && surveyActive(task)) {
     if (task.status === 'proposed' && task.invitee === actor) {
@@ -171,7 +174,7 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
   for (const place of SHARED_PILOT_PLACE_IDS) if (place !== own.place) move(place);
   const peer = actor === '01' ? '02' : '01';
   const inspections = works.visits.filter(visit => visit.stage !== 'completed');
-  if (!inspections.length && !cafe.orders.some(order => order.stage !== 'completed')) {
+  if (!inspections.length && !fishingActive.length && !cafe.orders.some(order => order.stage !== 'completed')) {
     add(`invite:${peer}`, '邀请另一位居民到咖啡街见面', { action: 'invite', target: peer, venue: 'cafe', requestId: randomUUID() });
     if (survey.eligibleMeetingId) add(`survey:${survey.eligibleMeetingId}:propose`, '提议共同调研公共建设中心',
       { action: 'proposeSurvey', meetingId: survey.eligibleMeetingId, requestId: randomUUID() });
@@ -189,6 +192,10 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
       if (!unavailable) add(`works:${checkId}`, `向现场管理员领取${label}巡查`, { action: 'inspectWorks', checkId, requestId: randomUUID() });
     }
   }
+  if (own.place === 'pier' && !fishing.visits.some(visit => visit.residentId === actor && at < (visit.endsAt ?? at) + 90000)) {
+    add('fishing:cast', fishing.occupied ? '在北岸码头等候钓位，再钓一竿' : '在北岸码头钓一竿',
+      { action: 'goFishing', requestId: randomUUID() });
+  }
   return choices;
 }
 
@@ -203,6 +210,8 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     survey: observation.survey.task?.status,
     cafe: { serving: observation.cafe.serving, queued: observation.cafe.queued, reply: cafeReply },
     works: observation.works.visits.slice(-3).map(({ residentId, label, stage, report }) => ({ residentId, label, stage, finding: report?.text })),
+    fishing: { occupied: observation.fishing.occupied, queued: observation.fishing.queued,
+      lastResult: observation.fishing.visits.filter(visit => visit.residentId === observation.viewerResidentId && visit.result).at(-1)?.result?.text },
     memories: observation.privateSocial.memories.slice(-3).map(({ text }) => text),
     choices: choices.map(({ id, label, speech }) => ({ id, label, surveyIntents: speech?.surveyIntents })),
   };

@@ -17,6 +17,7 @@ import styles from './shared.module.css';
 import { EntryCameraContext } from './entry-camera';
 import { CAFE_VENDOR, COFFEE_STATUS } from '../../../lib/shared-pilot-cafe';
 import { WORKS_MANAGER, WORKS_STATUS } from '../../../lib/shared-pilot-works';
+import { FISHING_STATUS, PIER_ANGLER } from '../../../lib/shared-pilot-fishing';
 import { SharedNpcPanel } from './SharedNpcPanel';
 
 type ResidentId = '01' | '02';
@@ -180,11 +181,17 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const meetingTitle = meeting ? ({ invited: '等待回应', accepted: '双方赴约中', talking: '正在交流', completed: '会面已结束', declined: '邀请被婉拒', expired: '会面超时' })[meeting.status] : '暂未发起会面';
   const events = (snapshot ? [...snapshot.events.map((event) => ({ ...event, text: `${event.residentId} 号 ${event.kind === 'MOVE_STARTED' ? '出发前往' : '已到达'} ${CITY_PLACES[event.place]}` })),
     ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text })),
-    ...(survey?.events ?? []), ...snapshot.cafe.events, ...snapshot.works.events] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
+    ...(survey?.events ?? []), ...snapshot.cafe.events, ...snapshot.works.events, ...snapshot.fishing.events] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
   const residentNames = { ...names, ...Object.fromEntries(snapshot?.profiles.map((p) => [p.residentId, p.name]) ?? []) };
   const selectedResident = selection?.kind === 'resident' && selection.id !== '03' ? selection.id : undefined;
   const selectedCafeVendor = selection?.kind === 'person' && selection.id === CAFE_VENDOR.id;
   const selectedWorksManager = selection?.kind === 'person' && selection.id === WORKS_MANAGER.id;
+  const selectedAngler = selection?.kind === 'person' && selection.id === PIER_ANGLER.id;
+  function followActivity(id: ResidentId) {
+    world.current?.view('follow', id);
+    setFocusedBuilding(null);
+    setView(id);
+  }
   return <div className={base.page}>
     <section className={`${base.viewer} ${styles.viewer}`} data-joining={joining} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
@@ -202,6 +209,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
         {residents.map((id) => {
           const order = snapshot && latestResidentActivity(snapshot.cafe.orders, id);
           const visit = snapshot && latestResidentActivity(snapshot.works.visits, id);
+          const fishing = snapshot && latestResidentActivity(snapshot.fishing.visits, id);
           const engine = snapshot?.engines.find(({ residentId }) => residentId === id);
           const profile = snapshot?.profiles.find(({ residentId }) => residentId === id);
           const resident = snapshot?.residents.find(({ residentId }) => residentId === id);
@@ -219,7 +227,8 @@ export function SharedCity({ children }: { children: ReactNode }) {
               ? ({ starting: '模型 Agent 正在启动', running: '模型 Agent 自主运行中', paused: '模型 Agent 已暂停', finished: '模型 Agent 本轮结束', error: '模型 Agent 运行失败' })[engine.status]
               : engine?.driver === 'EXTERNAL' ? (engine.connected ? '外接 Agent 最近活跃' : '等待 Agent 接入') : resident ? '规则 Agent 已接入' : '连接中'}</small></div>
               <button type="button" disabled={!live3d || reports[id]?.status === 'unavailable'} aria-pressed={view === id && !focusedBuilding} onClick={() => focus(id)}>跟随</button></div>
-            <strong role="status" data-resident-status={id}>{visit && visit.stage !== 'completed' ? WORKS_STATUS[visit.stage] : order && order.stage !== 'completed' ? COFFEE_STATUS[order.stage] : resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
+            <strong role="status" data-resident-status={id}>{fishing && fishing.stage !== 'completed' ? FISHING_STATUS[fishing.stage]
+              : visit && visit.stage !== 'completed' ? WORKS_STATUS[visit.stage] : order && order.stage !== 'completed' ? COFFEE_STATUS[order.stage] : resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
             {inspection ? <div className={styles.progress}><progress aria-label={`${id} 号现场观察进度`} max={8} value={inspection.finding ? 8 : Math.min(8, Math.max(0, ((snapshot?.serverTime ?? 0) - (inspection.startedAt ?? snapshot?.serverTime ?? 0)) / 1000))} /><span>{inspection.finding ? '已记录' : '观察'}</span></div>
               : movement && <div className={styles.progress}><progress aria-label={`${id} 号行程进度`} max={100} value={progress} /><span>{progress}%</span></div>}
             {resident && <small className={styles.position}>X {resident.position[0].toFixed(1)} · Z {resident.position[2].toFixed(1)}</small>}
@@ -241,15 +250,13 @@ export function SharedCity({ children }: { children: ReactNode }) {
       <CityExplorer selection={selection} open={panel === 'directory'} sceneState={staticMode ? 'fallback' : scene}
         focusActive={selection?.kind === 'building' || selection?.kind === 'person' ? focusedBuilding === selection.id : Boolean(selectedResident && view === selectedResident && !focusedBuilding)}
         residentIds={residents} residentNames={residentNames} residentReport={selectedResident ? reports[selectedResident] : undefined}
-        managerPresent cafeVendor heading={explorerHeading} onOpen={() => inspect(null)} onClose={closeExplorer}
+        managerPresent cafeVendor pierAngler heading={explorerHeading} onOpen={() => inspect(null)} onClose={closeExplorer}
         onSelect={inspect} onFocus={focusSelection}>
         {selectedCafeVendor && <SharedNpcPanel key="cafe" kind="cafe" snapshot={snapshot} connected={status === 'live'} />}
         {selectedWorksManager && <SharedNpcPanel key="works" kind="works" snapshot={snapshot} connected={status === 'live'}
-          onFollow={live3d ? id => {
-            world.current?.view('follow', id);
-            setFocusedBuilding(null);
-            setView(id);
-          } : undefined} />}
+          onFollow={live3d ? followActivity : undefined} />}
+        {selectedAngler && <SharedNpcPanel key="fishing" kind="fishing" snapshot={snapshot} connected={status === 'live'}
+          onFollow={live3d ? followActivity : undefined} />}
         {selection?.kind === 'building' && selection.id === 'works' && <div className={`${base.explorerActions} ${styles.worksEntry}`}>
           <button type="button" onClick={() => inspect(WORKS_MANAGER)}>找现场管理员</button>
         </div>}

@@ -8,12 +8,13 @@ import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, i
 import { parseModelConfig } from '../../../../lib/shared-pilot-model';
 import { cafeTalkSchema, orderCoffeeSchema } from '../../../../lib/shared-pilot-cafe';
 import { inspectWorksSchema, worksTalkSchema } from '../../../../lib/shared-pilot-works';
+import { fishingTalkSchema, goFishingSchema } from '../../../../lib/shared-pilot-fishing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 6;
+const PILOT_RUNTIME_VERSION = 7;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -109,7 +110,8 @@ async function readBody(request: NextRequest): Promise<Record<string, unknown> |
 function readCommand(body: Record<string, unknown> | undefined): SharedAgentCommand | undefined {
   if (!body) return;
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
-  for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema, orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema]) {
+  for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
+    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, goFishingSchema, fishingTalkSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
   }
@@ -130,6 +132,10 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
   if (worksChat.success) return json(pilot.worksTalk(worksChat.data.question));
   const inspection = inspectWorksSchema.safeParse(body);
   if (inspection.success) return json(pilot.requestInspection(session, config.profileResidents, inspection.data));
+  const angler = fishingTalkSchema.safeParse(body);
+  if (angler.success) return json(pilot.fishingTalk(angler.data.question));
+  const fishing = goFishingSchema.safeParse(body);
+  if (fishing.success) return json(pilot.goFishing(session, config.profileResidents, fishing.data));
   if (!config.profileResidents.length) return json({ error: '本机试玩名额已分配给测试 Agent。' }, 409);
   if (body.action === 'claim') {
     const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim() : '';

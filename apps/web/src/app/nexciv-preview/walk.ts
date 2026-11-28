@@ -23,6 +23,7 @@ import { createTraffic, removeParkedVehicles } from './traffic';
 import { createCityCrowd, type PedestrianPath } from './city-crowd';
 import { CAFE_VENDOR, cafePose } from '../../lib/shared-pilot-cafe';
 import { WORKS_MANAGER, WORKS_MANAGER_POSITION } from '../../lib/shared-pilot-works';
+import { ANGLER_POSITION, PIER_ANGLER, fishingPose } from '../../lib/shared-pilot-fishing';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -32,7 +33,7 @@ export type DistrictStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 export type AgentId = ResidentId;
 export type FollowId = AgentId | '02';
 export type WalkLandmarkId = 'registry' | 'works' | 'center' | 'governance' | 'market' | 'forum' | 'west-pool';
-type PersonId = typeof WORKS_MANAGER.id | typeof CAFE_VENDOR.id;
+type PersonId = typeof WORKS_MANAGER.id | typeof CAFE_VENDOR.id | typeof PIER_ANGLER.id;
 type ActorId = FollowId | PersonId;
 export type WalkSelection = { kind: 'building'; id: WalkLandmarkId }
   | { kind: 'resident'; id: FollowId }
@@ -119,7 +120,7 @@ const DETAIL_FILES = {
 };
 type Detail = keyof typeof DETAIL_FILES;
 const LANDMARK_DETAILS = ['registry', 'works', 'center', 'hall'] as const;
-type CameraTarget = WalkLandmarkId | 'cafe-vendor' | 'works-manager';
+type CameraTarget = WalkLandmarkId | 'cafe-vendor' | 'works-manager' | 'pier-angler';
 const LANDMARK_FRAMING: Record<CameraTarget, { center: CityPoint; yaw: number; distance: number; pitch?: number; district?: District }> = {
   registry: { center: [80, 4, -23.5], yaw: -0.45, distance: 27, district: 'east' },
   works: { center: [95, 6, 82], yaw: -2.76, distance: 33, district: 'east' },
@@ -130,6 +131,7 @@ const LANDMARK_FRAMING: Record<CameraTarget, { center: CityPoint; yaw: number; d
   'west-pool': { center: [-80.6, 0.74, 32.5], yaw: -0.16, distance: 24.8, pitch: 0.16, district: 'west' },
   'cafe-vendor': { center: [11.8, 1, 72.05], yaw: -2.74, distance: 8.2, pitch: 0.36 },
   'works-manager': { center: [95.65, 1.1, 72.45], yaw: -2.73, distance: 8.2, pitch: 0.37, district: 'east' },
+  'pier-angler': { center: [73.15, 0.7, -188.5], yaw: -2.25, distance: 9.5, pitch: 0.35, district: 'shore' },
 };
 const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_01_Governance_Hall', 'governance'],
@@ -138,7 +140,7 @@ const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_04_Public_Construction', 'works'],
   ['Market', 'market'],
 ];
-const SELECTABLE_ACTORS = ['01', '02', '03', WORKS_MANAGER.id, CAFE_VENDOR.id] as const;
+const SELECTABLE_ACTORS = ['01', '02', '03', WORKS_MANAGER.id, CAFE_VENDOR.id, PIER_ANGLER.id] as const;
 
 function isRendered(object: THREE.Object3D) {
   for (let node: THREE.Object3D | null = object; node; node = node.parent) {
@@ -528,9 +530,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const theatreFocus = new THREE.Vector3(THEATRE_STAGE[0], 0.82, 83.25);
   let siteHost: { patrol: Patrol; asset: GLTF; position: THREE.Vector3; facing: THREE.Vector3 } | undefined;
   let siteHostRequested = false;
-  const fishingGear = cafeMode ? createFishingGear() : undefined;
+  const fishingGear = cafeMode || sharedMode ? createFishingGear() : undefined;
   const fishingSpot = new THREE.Vector3(...FISHING_SPOT);
   const waterFacing = fishingSpot.clone().add(new THREE.Vector3(1, 0, 0));
+  const anglerPosition = new THREE.Vector3(...ANGLER_POSITION);
   const interviewSpot = pierEntrance.clone();
   const regularPosition = pierEntrance.clone().add(new THREE.Vector3(1.25, 0, 0.65));
   let pierRegular: { asset: GLTF; patrol: Patrol } | undefined;
@@ -556,8 +559,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const residentMarkers = new Map<ActorId, THREE.Sprite>();
   if (callbacks.onSelect) {
     for (const id of SELECTABLE_ACTORS) {
-      if (sharedMode ? id === '03' : id === CAFE_VENDOR.id) continue;
-      const label = id === WORKS_MANAGER.id ? '工' : id === CAFE_VENDOR.id ? '咖' : id;
+      if (sharedMode ? id === '03' : id === CAFE_VENDOR.id || id === PIER_ANGLER.id) continue;
+      const label = id === WORKS_MANAGER.id ? '工' : id === CAFE_VENDOR.id ? '咖' : id === PIER_ANGLER.id ? '钓' : id;
       const material = sharedMode ? createResidentMarkerMaterial(label, id === '02' ? '#79bab7' : '#f0b90b') : markerMaterial;
       if (!material) continue;
       if (sharedMode) sharedMarkerMaterials.push(material);
@@ -738,6 +741,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function selectableActor(id: ActorId) {
     if (id === CAFE_VENDOR.id) return cafeVendor;
+    if (id === PIER_ANGLER.id) return sharedMode ? pierRegular : undefined;
     if (id === WORKS_MANAGER.id) return cityObservation?.lightingPilot?.worker ? undefined : siteHost;
     if (sharedMode) return id === '01' || id === '02' ? sharedActors.get(id) : undefined;
     const assignedWorker = cityObservation?.lightingPilot?.worker;
@@ -793,7 +797,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const markerScale = 2 * (sharedMode ? 27 : 16) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
     for (const [id, marker] of residentMarkers) {
       const root = selectableActor(id)?.patrol.root;
-      const location = id === CAFE_VENDOR.id ? coworker : sharedMode && id === WORKS_MANAGER.id ? managerPosition : undefined;
+      const location = id === CAFE_VENDOR.id ? coworker : id === PIER_ANGLER.id ? anglerPosition
+        : sharedMode && id === WORKS_MANAGER.id ? managerPosition : undefined;
       const position = location ?? root?.position;
       marker.visible = Boolean(position && (location || (root && isRendered(root))) && camera.position.distanceTo(position) > (location ? 10 : 62));
       if (!marker.visible || !position) continue;
@@ -804,7 +809,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function zoom(factor: number) {
-    if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' ? 5.5 : 16, 94);
+    if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor,
+      framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' || framedLandmark === 'pier-angler' ? 5.5 : 16, 94);
     else if (mode === 'follow' && followedPatrol()) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
     else if (mode === 'overview' && citywide) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 155, 465);
     else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north || sideDistrictLoaded() ? 176 : 139);
@@ -860,7 +866,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function focusSelection(target: WalkSelection) {
-    if (target.kind !== 'building' && target.id !== CAFE_VENDOR.id && (!sharedMode || target.id !== WORKS_MANAGER.id)) {
+    if (target.kind !== 'building' && (target.kind !== 'person' || !sharedMode)) {
       const root = selectableActor(target.id)?.patrol.root;
       if (target.kind === 'person' || (root && isRendered(root))) setView('follow', target.id);
       return;
@@ -872,7 +878,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       orbitDistance = camera.position.distanceTo(aim);
     }
     mode = 'overview';
-    framedLandmark = target.kind === 'building' ? target.id : target.id === CAFE_VENDOR.id ? 'cafe-vendor' : 'works-manager';
+    framedLandmark = target.kind === 'building' ? target.id : target.id === CAFE_VENDOR.id ? 'cafe-vendor'
+      : target.id === WORKS_MANAGER.id ? 'works-manager' : 'pier-angler';
     const framing = LANDMARK_FRAMING[framedLandmark];
     landmarkTarget.set(...framing.center);
     resetOrbit();
@@ -1076,6 +1083,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const serverTime = (projection?.serverTime ?? 0) + Math.min(elapsed, 1600);
     cafeVendor?.patrol.observe(reducedMotion.matches ? 0 : poseDt, coworker, counter, false, projection?.cafe.serving ? 'nod' : undefined);
     if (takeawayCup) takeawayCup.visible = false;
+    let showingRod = false;
     for (const id of SHARED_RESIDENTS) {
       const actor = sharedActors.get(id);
       const patrol = actor?.patrol;
@@ -1103,6 +1111,23 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const [x, y, z] = resident.position;
         const previous = move?.points.at(-2);
         observedPosition.set(x, y, z);
+        const fishingVisit = projection && latestResidentActivity(projection.fishing.visits, id);
+        const onDock = fishingVisit && fishingPose(fishingVisit, serverTime);
+        if (onDock) {
+          patrol.observe(poseDt, observedPosition.set(...onDock.point), observedFacing.set(...onDock.facing), onDock.walking);
+          const { stage } = onDock;
+          if (stage === 'casting' || stage === 'fishing' || stage === 'reeling') {
+            fishingGear?.update(patrol.root, stage, onDock.progress, poseDt > 0 && !reducedMotion.matches);
+            showingRod = true;
+          }
+          continue;
+        }
+        if (fishingVisit && fishingVisit.stage !== 'completed' && fishingVisit.stage !== 'travelling') {
+          const waiting = move?.points.at(-1);
+          if (waiting) observedPosition.set(...waiting);
+          patrol.observe(poseDt, observedPosition, fishingSpot);
+          continue;
+        }
         const inspection = projection && latestResidentActivity(projection.works.visits, id);
         if (inspection?.stage === 'observing') {
           observedFacing.set(x + 2.2, y, z + (inspection.checkId === 'entrance-path' ? 0.85 : -0.45));
@@ -1143,6 +1168,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           inspecting ? 'nod' : line?.residentId === id ? (meeting?.lines.length === 1 ? 'wave' : 'nod') : undefined);
       }
     }
+    if (!showingRod) fishingGear?.hide();
     if (speech && speechCanvas && speechTexture) {
       const meeting = projection?.social?.meeting;
       const dialogue = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
@@ -1385,7 +1411,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     let wide = Boolean(citywide && (mode === 'overview' && (!framedLandmark || !framedLandmarkLoaded)
       || (citywide.visible && (mode === 'follow' && !patrol
         || district && (district.status === 'loading' || orbitDistance > 192)))));
-    const seeingLake = Boolean(districts.shore.asset && (mode === 'shore' || (following && patrol.root.position.z < -132)));
+    const seeingLake = Boolean(districts.shore.asset && (mode === 'shore' || framedLandmark === 'pier-angler' || (following && patrol.root.position.z < -132)));
     if (following) {
       const feet = patrol.root.position;
       followHeight = followHeight === undefined || !tween ? feet.y : THREE.MathUtils.damp(followHeight, feet.y, 12, dt);
@@ -1453,7 +1479,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const usualYaw = followed === '01' && byPier && !travelling ? observer ? 0.10 : 0.49
         : closeCafe ? -2.55 : THREE.MathUtils.lerp(centerYaw, 0.24, residenceFrame);
       const entranceYaw = THREE.MathUtils.lerp(usualYaw, 0.20, Math.max(hallFrame, noticeFrame));
-      const yaw = followYaw + (sharedPair ? (surveyPair ? -1.85 : -2.65) : THREE.MathUtils.lerp(entranceYaw, followed === '02' ? 1.17 : 0.85, shoreFrame));
+      const fishingFrame = sharedMode && sharedSnapshot?.fishing.visits.some(visit => visit.residentId === followed
+        && visit.stage !== 'completed' && visit.stage !== 'travelling') ? pierFrame : 0;
+      if (fishingFrame) {
+        aim.x += 0.9 * fishingFrame;
+        aim.y -= 0.68 * fishingFrame;
+      }
+      const yaw = followYaw + (sharedPair ? (surveyPair ? -1.85 : -2.65)
+        : THREE.MathUtils.lerp(THREE.MathUtils.lerp(entranceYaw, followed === '02' ? 1.17 : 0.85, shoreFrame), -2.18, fishingFrame));
       // Lift the follow view above the banners on the plaza edge and the lamps at the north crossing.
       const plazaEdge = THREE.MathUtils.smoothstep(feet.x, 4, 9)
         * THREE.MathUtils.smoothstep(feet.z, 13, 18) * (1 - THREE.MathUtils.smoothstep(feet.z, 27, 33));
@@ -1461,7 +1494,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         * (1 - THREE.MathUtils.smoothstep(feet.z, -50, -43));
       const pitch = sharedPair ? (surveyPair ? .53 : Math.min(.65, followPitch)) : Math.min(1.3, followPitch + 0.32 * Math.max(plazaEdge, northCrossing, forumFrame)
         - 0.12 * greetingFraming - 0.07 * residenceFrame - 0.20 * hallFrame - 0.11 * shoreFrame);
-      let framedDistance = distance;
+      let framedDistance = THREE.MathUtils.lerp(distance, Math.max(distance, 7.5), fishingFrame);
       let framedYaw = yaw;
       let framedPitch = pitch;
       let target = aim;
@@ -1560,6 +1593,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (siteHost) {
         siteHost.patrol.root.visible = nearManager;
         if (nearManager) siteHost.patrol.observe(reducedMotion.matches ? 0 : poseDt, siteHost.position, siteHost.facing);
+      }
+      const nearAngler = !wide && Boolean(districts.shore.asset) && camera.position.distanceToSquared(anglerPosition) < 60 ** 2;
+      if (nearAngler && !regularRequested) loadSharedAngler();
+      if (pierRegular) {
+        pierRegular.patrol.root.visible = nearAngler;
+        if (nearAngler) pierRegular.patrol.observe(reducedMotion.matches ? 0 : poseDt, anglerPosition, fishingSpot);
       }
     }
     if (closeToCafe && !cafeStreetRequested) loadCafeStreet();
@@ -1661,7 +1700,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.006, 0.16, 1.18);
     } else {
       orbitYaw -= dx * 0.006;
-      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, framedLandmark === 'west-pool' || framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' ? 0.14 : 0.48, 1.45);
+      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006,
+        framedLandmark === 'west-pool' || framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' || framedLandmark === 'pier-angler' ? 0.14 : 0.48, 1.45);
     }
   }
 
@@ -1697,7 +1737,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       for (const hit of hits) {
         if (hit.distance < nearest) {
           nearest = hit.distance;
-          target = id === WORKS_MANAGER.id || id === CAFE_VENDOR.id ? { kind: 'person', id } : { kind: 'resident', id };
+          target = id === WORKS_MANAGER.id || id === CAFE_VENDOR.id || id === PIER_ANGLER.id ? { kind: 'person', id } : { kind: 'resident', id };
         }
       }
     }
@@ -2080,6 +2120,21 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         disposeModel(asset.scene);
       }
     }).catch(() => {});
+  }
+
+  function loadSharedAngler() {
+    regularRequested = true;
+    request('npc-04.glb', 'low').then(response => response.arrayBuffer())
+      .then(bytes => loader.parseAsync(bytes, ASSET_PATH)).then(asset => {
+        if (ended || contextLost) { disposeModel(asset.scene); return; }
+        try {
+          const patrol = createAgentPatrol(asset, [ANGLER_POSITION, FISHING_SPOT], [fishingSpot.x, fishingSpot.z]);
+          patrol.root.name = 'North pier angler';
+          patrol.observe(0, anglerPosition, fishingSpot);
+          actorLayer.add(patrol.root);
+          pierRegular = { asset, patrol };
+        } catch { disposeModel(asset.scene); }
+      }).catch(() => { /* The dock directory still works in 2D. */ });
   }
 
   function loadRouteRegions(regions: CityRegion[]) {

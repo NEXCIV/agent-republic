@@ -54,7 +54,7 @@ describe.skipIf(!sqlite)('isolated two-resident shared movement journal', () => 
       { ...command('governance'), residentId: '02' },
       { ...command('governance'), destination: { place: 'governance', x: 34, z: 0 } },
       { ...command('governance'), destination: { x: 0, z: 0 } },
-      { ...command('governance'), destination: { place: 'pier' } },
+      { ...command('governance'), destination: { place: 'market' } },
       { ...command('governance'), action: 'castVote' },
       command('governance', 'not-a-v4-uuid'),
     ]) {
