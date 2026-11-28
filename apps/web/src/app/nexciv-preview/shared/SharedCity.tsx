@@ -13,6 +13,7 @@ import { CITY_PLACES } from '../../../lib/city-movement';
 import { createWalk, type AgentReport, type DistrictStatus, type WalkController, type WalkSelection } from '../walk';
 import { CityExplorer } from '../CityExplorer';
 import { PlayerNotes } from './PlayerNotes';
+import { SharedCivicPanel } from './SharedCivicPanel';
 import type { PlayerNoteView } from '../../../lib/shared-pilot-notes';
 import { CityGlyph } from '../CityGlyph';
 import base from '../preview.module.css';
@@ -204,7 +205,8 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const meetingTitle = meeting ? ({ invited: '等待回应', accepted: '双方赴约中', talking: '正在交流', completed: '会面已结束', declined: '邀请被婉拒', expired: '会面超时' })[meeting.status] : '暂未发起会面';
   const events = (snapshot ? [...snapshot.events.map((event) => ({ ...event, text: `${event.residentId} 号 ${event.kind === 'MOVE_STARTED' ? '出发前往' : '已到达'} ${CITY_PLACES[event.place]}` })),
     ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text })),
-    ...(survey?.events ?? []), ...snapshot.cafe.events, ...snapshot.works.events, ...snapshot.fishing.events, ...snapshot.bench.events] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
+    ...(survey?.events ?? []), ...snapshot.cafe.events, ...snapshot.works.events, ...snapshot.fishing.events, ...snapshot.bench.events,
+    ...snapshot.council.events, ...snapshot.theatre.events] : []).sort((a, b) => b.happenedAt - a.happenedAt).slice(0, 8);
   const residentNames = { ...names, ...Object.fromEntries(snapshot?.profiles.map((p) => [p.residentId, p.name]) ?? []) };
   const selectedResident = selection?.kind === 'resident' && selection.id !== '03' ? selection.id : undefined;
   const selectedCafeVendor = selection?.kind === 'person' && selection.id === CAFE_VENDOR.id;
@@ -232,6 +234,11 @@ export function SharedCity({ children }: { children: ReactNode }) {
           const visit = snapshot && latestResidentActivity(snapshot.works.visits, id);
           const fishing = snapshot && latestResidentActivity(snapshot.fishing.visits, id);
           const rest = snapshot && latestResidentActivity(snapshot.bench.visits, id);
+          const notice = snapshot && latestResidentActivity(snapshot.council.visits, id);
+          const audience = snapshot?.theatre.residents[id];
+          const theatreStatus = audience?.status === 'waiting' ? '在剧场入口等候'
+            : audience?.status === 'entering' ? '走向剧场观众席' : audience?.status === 'seated' ? '正在剧场观演'
+              : audience?.status === 'leaving' ? '正在离开剧场' : undefined;
           const engine = snapshot?.engines.find(({ residentId }) => residentId === id);
           const modelRun = id === ownResident ? snapshot?.ownModelRun : undefined;
           const profile = snapshot?.profiles.find(({ residentId }) => residentId === id);
@@ -251,10 +258,12 @@ export function SharedCity({ children }: { children: ReactNode }) {
             <div className={styles.residentIdentity}><span className={styles.number}>{id}</span><div><b>{profile?.name ?? names[id]}{id === ownResident && <span className={styles.ownResident}>我的居民</span>}</b><small>{engine?.driver === 'MODEL'
               ? ({ starting: '模型 Agent 正在启动', running: '模型 Agent 自主运行中', paused: '模型 Agent 已暂停', finished: '模型 Agent 本轮结束', error: '模型 Agent 运行失败' })[engine.status]
               : engine?.driver === 'EXTERNAL' ? (engine.connected ? '外接 Agent 最近活跃' : '等待 Agent 接入') : resident ? '规则 Agent 已接入' : '连接中'}</small></div></div>
-            <strong role="status" data-resident-status={id}>{rest?.stage === 'resting' ? '在咖啡街长椅休息'
+            <strong role="status" data-resident-status={id}>{theatreStatus ?? (notice?.stage === 'reading' ? '正在阅读议会公告'
+              : notice?.stage === 'travelling' ? '前往议会公告栏'
+              : rest?.stage === 'resting' ? '在咖啡街长椅休息'
               : rest?.stage === 'travelling' ? '前往咖啡街长椅'
               : fishing && fishing.stage !== 'completed' ? FISHING_STATUS[fishing.stage]
-              : visit && visit.stage !== 'completed' ? WORKS_STATUS[visit.stage] : order && order.stage !== 'completed' ? COFFEE_STATUS[order.stage] : resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
+              : visit && visit.stage !== 'completed' ? WORKS_STATUS[visit.stage] : order && order.stage !== 'completed' ? COFFEE_STATUS[order.stage] : resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态')}</strong>
             {modelRun?.activity && <p className={styles.modelActivity}>{modelRun.activity}</p>}
             {explorationLine && <p className={styles.explorationLine} role="status">「{explorationLine.text}」</p>}
             {modelRun?.lastAction && <p className={styles.modelActivity}>最近决策 · {modelRun.lastAction}</p>}
@@ -297,6 +306,8 @@ export function SharedCity({ children }: { children: ReactNode }) {
         {selection?.kind === 'building' && selection.id === 'works' && <WorksSitePanel
           snapshot={snapshot} ownResident={ownResident} connected={status === 'live'}
           onFollow={canFollowOwn ? () => followOwn(ownResident) : undefined} onManager={() => inspect(WORKS_MANAGER)} />}
+        {selection?.kind === 'building' && (selection.id === 'governance' || selection.id === 'forum') && <SharedCivicPanel
+          key={selection.id} kind={selection.id} snapshot={snapshot} ownResident={ownResident} connected={status === 'live'} />}
       </CityExplorer>
       <aside id="shared-city-activity" className={styles.journal} aria-label="实时城市动态" hidden={panel !== 'activity'}>
         {exploration.length > 0 && <section className={styles.meeting} aria-label="居民初次探索">

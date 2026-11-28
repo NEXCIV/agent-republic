@@ -54,7 +54,7 @@ export function routeDistance(a: CityPoint, b: CityPoint) {
   return Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
 }
 
-export function cityWalkTiming(walk: CityWalk, time: number) {
+export function cityWalkTiming(walk: Pick<CityWalk, 'arrivesAt' | 'startedAt' | 'stops'>, time: number) {
   let walkingMs = walk.arrivesAt - walk.startedAt;
   let walkedMs = time - walk.startedAt;
   let stop: CityWalkStop | undefined;

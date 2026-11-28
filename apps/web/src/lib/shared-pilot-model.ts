@@ -15,10 +15,12 @@ import { explorationTextSchema, type ExplorationAction, type ExplorationActivity
 import { SHARED_AVATARS } from './shared-pilot-profiles';
 import { noteActivitySchema, resolvePlayerNoteSchema, type NoteActivity, type ResolvePlayerNote } from './shared-pilot-notes';
 import { BENCH_ID, type BenchRest } from './shared-pilot-bench';
+import { theatreActionLabel, type CouncilRead, type SharedTheatreAction } from './shared-pilot-civic';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
-type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing | ExplorationAction | BenchRest;
+type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing
+  | ExplorationAction | BenchRest | CouncilRead | SharedTheatreAction;
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
 type ExplorationChoice = { action: 'exploreSite'; place: ExplorationPlace } | { action: 'exploreArrival'; activity: ExplorationActivity };
 type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] };
@@ -219,6 +221,7 @@ function availableModelChoices(observation: ModelObservation, canAskCafe: boolea
   const fishingActive = fishing.visits.filter(visit => visit.stage !== 'completed');
   if (fishingActive.some(visit => visit.residentId === actor)) return choices;
   if (observation.bench.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
+  if (observation.council.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
   const task = survey.task;
   if (task && surveyActive(task)) {
     if (task.status === 'proposed' && task.invitee === actor) {
@@ -249,6 +252,16 @@ function availableModelChoices(observation: ModelObservation, canAskCafe: boolea
   if (moving) return choices;
   const followUp = first?.phase === 'followUp';
   const prefix = followUp ? 'visit:' : '';
+  const noticeRead = observation.council.events.some(event => event.residentId === actor);
+  if (own.place === 'governance' && !noticeRead) {
+    add('council:read', '走到公告栏阅读议事公告', { action: 'readCouncilNotice', requestId: randomUUID() });
+  }
+  const theatre = observation.theatre;
+  for (const { residentId, ...option } of theatre.availableActions) {
+    if (residentId !== actor || (option.decision === 'propose' && own.place !== 'forum' && !(noticeRead && own.place === 'governance'))) continue;
+    add(`theatre:${theatre.revision}:${option.decision}:${option.slot ?? option.cue ?? ''}:${option.response ?? ''}`,
+      theatreActionLabel(option), { action: 'respondTheatre', requestId: randomUUID(), revision: theatre.revision, ...option });
+  }
   if (!followUp) askCafe();
   for (const place of SHARED_PILOT_PLACE_IDS) {
     if (place !== own.place) move(place, followUp ? `结束这次到访，前往${CITY_PLACES[place]}` : undefined, `${prefix}move:${place}`);
@@ -323,6 +336,9 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     playerNote: playerNote?.text,
     nearby: observation.nearby,
     lastBenchRest: observation.recentRest,
+    councilAgenda: observation.council.events.some(event => event.residentId === observation.viewerResidentId) ? observation.council.agenda : undefined,
+    theatre: { phase: observation.theatre.phase, offer: observation.theatre.offer, booking: observation.theatre.booking,
+      travelSeconds: observation.theatre.residents[observation.viewerResidentId].travelSeconds },
     choices: choices.map(({ id, label, speech, exploration }) => ({ id, label, surveyIntents: speech?.surveyIntents, exploration })),
   };
   const tokenLimit = config.endpoint.hostname === MIMO_HOST

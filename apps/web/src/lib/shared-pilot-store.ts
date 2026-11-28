@@ -7,7 +7,7 @@ import {
   type SharedPilotPlaceId, type SharedPilotResidentId,
 } from '@agent-republic/domain';
 import { CAFE_BENCH_FRONT, type CityPoint } from './cafe-geometry';
-import { positionOnWalk, type CityRoute, type CityWalk } from './city-movement';
+import { positionOnWalk, type CityWalk } from './city-movement';
 import { CITY_MAP, planCityWalk } from './city-navigation';
 import { advanceSocial, emptySocialState, meetingActive, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
 import { advanceSurvey, emptySurveyState, performSurvey, publicSurvey, SURVEY_CHECKPOINTS, surveyActive, SurveyActionError, type SurveyState, type SurveyReceipt } from './shared-pilot-survey';
@@ -20,11 +20,14 @@ import { FISHING_TABLE, FISHING_WAIT, FishingVisits, fishingOutcome, fishingPose
 import { explorationActionSchema, explorationScenes, explorationView, type FirstExplorationObservation } from './shared-pilot-exploration';
 import { noteActivityLabel, playerNoteView, resolvePlayerNoteSchema, submitPlayerNoteSchema } from './shared-pilot-notes';
 import { BENCH_COOLDOWN_MS, BENCH_RANGE, BENCH_SEAT, benchProjection, benchRest, benchRestSchema, localDistance, nearbyAt } from './shared-pilot-bench';
+import { COUNCIL_NOTICE_APPROACH, COUNCIL_NOTICE_READING_SPOT } from './council-notice';
+import { councilProjection, councilRead, councilReadSchema, sharedTheatreSchema, sharedTheatreView, SHARED_THEATRE_RULES, theatreSeat } from './shared-pilot-civic';
+import { applyTheatreDecision, observeTheatre, theatreJourney, type TheatreContext } from './theatre-trial';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
 const APPLICATION_ID = 0x4e585350; // NXSP
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 const CREDENTIAL_LIFETIME = 3600000;
 const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
@@ -83,7 +86,7 @@ type MovementRow = {
   arrives_at: number;
   completed_at: number | null;
 };
-type ActivityRoute = InspectionRoute & { benchRest?: true };
+type ActivityRoute = InspectionRoute & Pick<CityWalk, 'stops' | 'facing'> & { benchRest?: true; noticeRead?: true; theatreWalk?: true };
 type ResidentRow = { id: SharedPilotResidentId; place: SharedPilotPlaceId };
 type MovementEventRow = {
   seq: number;
@@ -171,10 +174,11 @@ function point(place: SharedPilotPlaceId): CityPoint {
 }
 
 function toWalk(row: MovementRow): CityWalk {
-  const route: CityRoute = JSON.parse(row.route_json);
+  const route: ActivityRoute = JSON.parse(row.route_json);
   return {
     destination: { place: row.destination }, name: route.name, points: route.points, regions: route.regions, metres: route.metres,
     requestId: row.request_id, startedAt: row.started_at, arrivesAt: row.arrives_at,
+    ...(route.stops && { stops: route.stops }), ...(route.facing && { facing: route.facing }),
   };
 }
 
@@ -213,7 +217,7 @@ export class SharedPilotStore {
     this.fishing = new FishingVisits(this.db);
     try {
       // Reject unrelated DBs before setting WAL or running any schema changes.
-      let migrateFrom: 1 | 2 | 3 | 4 | 5 | 6 | 7 | undefined;
+      let migrateFrom: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | undefined;
       if (existing) {
         const application = Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
@@ -224,6 +228,7 @@ export class SharedPilotStore {
         if (application === APPLICATION_ID && (version === 4 || version === 5) && JSON.stringify(tables) === JSON.stringify(V5_TABLES)) migrateFrom = version;
         if (application === APPLICATION_ID && version === 6 && JSON.stringify(tables) === JSON.stringify(V6_TABLES)) migrateFrom = 6;
         if (application === APPLICATION_ID && version === 7 && JSON.stringify(tables) === JSON.stringify(V7_TABLES)) migrateFrom = 7;
+        if (application === APPLICATION_ID && version === 8 && JSON.stringify(tables) === JSON.stringify(EXPECTED_TABLES)) migrateFrom = 8;
         if (!migrateFrom && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
           throw new SharedPilotError('INCOMPATIBLE_DB', 'Refusing to open a non-pilot database.');
         }
@@ -274,7 +279,7 @@ export class SharedPilotStore {
     }
   }
 
-  private migratePilot(version: 1 | 2 | 3 | 4 | 5 | 6 | 7) {
+  private migratePilot(version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8) {
     // The fixed place checks live in two referenced tables. Replace both inside
     // the same transaction, preserving the IDs used by events, profiles and orders.
     this.db.exec('PRAGMA foreign_keys=OFF');
@@ -306,7 +311,7 @@ export class SharedPilotStore {
         this.db.exec(PROFILE_TABLE);
       }
       if (version < 6) this.db.exec(CAFE_ORDERS_TABLE);
-      if (version < 7) this.db.exec(`
+      this.db.exec(`
         ${createResidentsTable('shared_pilot_residents_next')}
         ${createMovesTable('shared_pilot_moves_next', 'shared_pilot_residents_next')}
         INSERT INTO shared_pilot_residents_next SELECT * FROM shared_pilot_residents;
@@ -316,9 +321,9 @@ export class SharedPilotStore {
         ALTER TABLE shared_pilot_residents_next RENAME TO shared_pilot_residents;
         ALTER TABLE shared_pilot_moves_next RENAME TO shared_pilot_moves;
         ${ACTIVE_MOVES_INDEX}
-        ${FISHING_TABLE}
       `);
-      this.db.exec(WORKS_GOALS_TABLE);
+      if (version < 7) this.db.exec(FISHING_TABLE);
+      if (version < 8) this.db.exec(WORKS_GOALS_TABLE);
       if (this.db.prepare('PRAGMA foreign_key_check').get()) throw new Error('Shared pilot migration would leave broken references.');
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
@@ -658,7 +663,8 @@ export class SharedPilotStore {
       const previous = this.findReceipt(actor, requestId);
       if (previous) {
         const route = JSON.parse(previous.route_json) as ActivityRoute;
-        if (previous.destination !== destination.place || this.fishing.find(actor, requestId) || route.worksInspection || route.worksBrief || route.benchRest) {
+        if (previous.destination !== destination.place || this.fishing.find(actor, requestId) || route.worksInspection || route.worksBrief
+          || route.benchRest || route.noticeRead || route.theatreWalk) {
           throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different movement.');
         }
         return toReceipt(previous);
@@ -686,16 +692,8 @@ export class SharedPilotStore {
 
   private beginMove(actor: SharedPilotResidentId, requestId: string, place: SharedPilotPlaceId, at: number,
     target: Parameters<typeof planCityWalk>[1], name?: string,
-    activity?: Pick<ActivityRoute, 'worksInspection' | 'worksBrief' | 'benchRest'>) {
-    if (this.db.prepare('SELECT seq FROM shared_pilot_moves WHERE resident_id=? AND completed_at IS NULL').get(actor)) {
-      throw new SharedPilotError('BUSY', 'This resident already has an accepted movement.');
-    }
-    const last = this.lastMove(actor);
-    if (last && (JSON.parse(last.route_json) as ActivityRoute).benchRest && benchRest(last, at).stage === 'resting') {
-      throw new SharedPilotError('BUSY', '居民正在长椅上休息。');
-    }
-    const count = Number(this.db.prepare('SELECT count(*) AS count FROM shared_pilot_moves WHERE resident_id=?').get(actor)?.count);
-    if (count >= MAX_MOVES_PER_RESIDENT) throw new SharedPilotError('LIMIT_REACHED', 'This resident has reached the local pilot journal limit.');
+    activity?: Pick<ActivityRoute, 'worksInspection' | 'worksBrief' | 'benchRest' | 'noticeRead'>) {
+    const { last, count } = this.requireMovementSlot(actor, at);
     const resident = this.db.prepare('SELECT id,place FROM shared_pilot_residents WHERE id=?').get(actor) as unknown as ResidentRow;
     const route = planCityWalk(last ? positionOnWalk(toWalk(last), at) : point(resident.place), target);
     if (!route) throw new SharedPilotError('UNREACHABLE', 'No surveyed route to this pilot place.');
@@ -704,10 +702,110 @@ export class SharedPilotStore {
       throw new SharedPilotError('LIMIT_REACHED', '此居民的行程记录已接近上限，无法安排完整调研。');
     }
     const arrivesAt = at + Math.ceil(route.metres / SPEED * 1000);
-    const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
-      VALUES (?,?,?,?,?,?)`).run(actor, requestId, place, JSON.stringify({ ...route, ...activity }), at, arrivesAt);
-    this.db.prepare("INSERT INTO shared_pilot_events (movement_seq,kind,happened_at) VALUES (?,'MOVE_STARTED',?)").run(result.lastInsertRowid, at);
+    this.saveMovement(actor, requestId, place, at, arrivesAt, { ...route, ...activity });
     return arrivesAt;
+  }
+
+  private requireMovementSlot(actor: SharedPilotResidentId, at: number) {
+    const last = this.lastMove(actor);
+    if (last?.completed_at === null) {
+      throw new SharedPilotError('BUSY', 'This resident already has an accepted movement.');
+    }
+    if (last) {
+      const activity = JSON.parse(last.route_json) as ActivityRoute;
+      if (activity.benchRest && benchRest(last, at).stage === 'resting') throw new SharedPilotError('BUSY', '居民正在长椅上休息。');
+      if (activity.noticeRead && councilRead(last, at).stage === 'reading') throw new SharedPilotError('BUSY', '居民正在阅读议会公告。');
+    }
+    const count = Number(this.db.prepare('SELECT count(*) AS count FROM shared_pilot_moves WHERE resident_id=?').get(actor)?.count);
+    if (count >= MAX_MOVES_PER_RESIDENT) throw new SharedPilotError('LIMIT_REACHED', 'This resident has reached the local pilot journal limit.');
+    return { last, count };
+  }
+
+  private saveMovement(actor: SharedPilotResidentId, requestId: string, place: SharedPilotPlaceId, at: number, arrivesAt: number, route: ActivityRoute) {
+    const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
+      VALUES (?,?,?,?,?,?)`).run(actor, requestId, place, JSON.stringify(route), at, arrivesAt);
+    this.db.prepare("INSERT INTO shared_pilot_events (movement_seq,kind,happened_at) VALUES (?,'MOVE_STARTED',?)").run(result.lastInsertRowid, at);
+  }
+
+  private councilRows() {
+    return this.db.prepare(`SELECT * FROM shared_pilot_moves WHERE json_extract(route_json, '$.noticeRead')=1
+      ORDER BY seq DESC LIMIT 24`).all() as unknown as MovementRow[];
+  }
+
+  readCouncilNotice(credential: string, input: unknown, profileResidents?: readonly SharedPilotResidentId[]) {
+    return this.transaction(at => {
+      const actor = this.browserOrAgent(credential, at, profileResidents);
+      const parsed = councilReadSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '公告阅读请求无效。');
+      const { requestId } = parsed.data;
+      this.settle(at);
+      const previous = this.findReceipt(actor, requestId);
+      if (previous) {
+        if (!(JSON.parse(previous.route_json) as ActivityRoute).noticeRead) throw new SharedPilotError('CONFLICT', '请求编号已用于其他活动。');
+        return councilRead(previous, at);
+      }
+      this.ensureWorksAvailable(actor, at);
+      if (this.claimedWorksGoal(actor) || this.activeInspections(at).some(visit => visit.residentId === actor)) {
+        throw new SharedPilotError('BUSY', '请先完成当前巡查。');
+      }
+      if (this.readSocial().requests[actor][requestId] || this.readSurvey().requests[actor][requestId]) {
+        throw new SharedPilotError('CONFLICT', '请求编号已用于其他活动。');
+      }
+      const alternate = COUNCIL_NOTICE_APPROACH[0]!;
+      const point = actor === '01' ? COUNCIL_NOTICE_READING_SPOT : { x: alternate[0], z: alternate[2] };
+      this.beginMove(actor, requestId, 'governance', at, point, '前往议会公告栏', { noticeRead: true });
+      this.settle(at);
+      return councilRead(this.findReceipt(actor, requestId)!, at);
+    });
+  }
+
+  private theatreContext(at: number, social: SocialState, survey: SurveyState): TheatreContext {
+    const context = {} as TheatreContext;
+    const surveyOrMeeting = meetingActive(social.meeting) || surveyActive(survey.task);
+    const inspections = this.activeInspections(at);
+    for (const resident of this.socialResidents(at)) {
+      const id = resident.residentId;
+      const last = this.lastMove(id);
+      const recentRoute = last ? JSON.parse(last.route_json) as ActivityRoute : undefined;
+      const busy = surveyOrMeeting || resident.moving || this.coffee.active(id, at) || this.fishing.active(at, id)
+        || this.latestWorksGoal(id)?.closed_at === null || inspections.some(visit => visit.residentId === id)
+        || Boolean(last && (recentRoute?.benchRest && benchRest(last, at).stage === 'resting'
+          || recentRoute?.noticeRead && councilRead(last, at).stage === 'reading'));
+      // The shared pilot has no energy ledger. Availability is determined by its current activities and travel time.
+      context[theatreSeat(id)] = { position: resident.position, busy, energy: 100 };
+    }
+    return context;
+  }
+
+  theatreAction(credential: string, input: unknown, profileResidents?: readonly SharedPilotResidentId[]) {
+    return this.transaction(at => {
+      const actor = this.browserOrAgent(credential, at, profileResidents);
+      const parsed = sharedTheatreSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '剧场决定无效。');
+      this.settle(at);
+      const social = this.readSocial();
+      const survey = this.readSurvey();
+      const { requestId, revision, decision, slot, cue, response } = parsed.data;
+      const context = this.theatreContext(at, social, survey);
+      const result = applyTheatreDecision(social.theatre, context, { revision, decision, slot, cue, response, agentId: theatreSeat(actor) },
+        requestId, at, SHARED_THEATRE_RULES);
+      if ('error' in result) throw new SharedPilotError(result.code === 409 ? 'CONFLICT' : 'BUSY', result.error!);
+      if (result.repeated) return sharedTheatreView(result.view);
+      if (this.findReceipt(actor, requestId) || social.requests[actor][requestId] || survey.requests[actor][requestId]) {
+        throw new SharedPilotError('CONFLICT', '请求编号已用于其他活动。');
+      }
+      if (decision === 'attend') {
+        this.requireMovementSlot(actor, at);
+        const { walk } = theatreJourney(result.state, theatreSeat(actor))!;
+        this.saveMovement(actor, requestId, 'forum', at, walk.arrivesAt, {
+          destination: { place: 'forum' }, name: walk.name, points: walk.points, regions: walk.regions, metres: walk.metres,
+          facing: walk.facing, stops: walk.stops, theatreWalk: true,
+        });
+      }
+      social.theatre = result.state;
+      this.saveSocial(social);
+      return sharedTheatreView(result.view);
+    });
   }
 
   private benchRows() {
@@ -1146,6 +1244,10 @@ export class SharedPilotStore {
       const cafe = this.coffee.view(at);
       const fishing = this.fishing.view(at);
       const bench = benchProjection(this.benchRows().reverse(), at);
+      const council = councilProjection(this.councilRows().reverse(), at);
+      const social = this.readSocial();
+      const survey = this.readSurvey();
+      const theatre = sharedTheatreView(observeTheatre(social.theatre, this.theatreContext(at, social, survey), at, SHARED_THEATRE_RULES));
       const inspections = this.db.prepare(`SELECT * FROM shared_pilot_moves
         WHERE destination='works' AND json_extract(route_json, '$.worksInspection') IS NOT NULL
         ORDER BY seq DESC LIMIT 16`).all() as unknown as MovementRow[];
@@ -1171,7 +1273,8 @@ export class SharedPilotStore {
         const visit = latestResidentActivity(fishing.visits, id);
         const atDock = visit && fishingPose(visit, at);
         return {
-          residentId: id, place, position: bench.visits.some(visit => visit.residentId === id && visit.stage === 'resting') ? BENCH_SEAT
+          residentId: id, place, position: theatre.residents[id].status === 'seated' && theatre.residents[id].position ? theatre.residents[id].position
+            : bench.visits.some(visit => visit.residentId === id && visit.stage === 'resting') ? BENCH_SEAT
             : atDock?.point ?? atCounter?.point ?? (movement ? positionOnWalk(toWalk(movement), at) : point(place)),
           movement: movement ? publicMovement(movement) : null,
         };
@@ -1182,8 +1285,6 @@ export class SharedPilotStore {
           id: String(event.seq), residentId: event.resident_id, place: event.destination, kind: event.kind, happenedAt: event.happened_at,
           provenance: SHARED_PILOT_PROVENANCE,
         }));
-      const social = this.readSocial();
-      const survey = this.readSurvey();
       const personalGoal = goals.find(({ row }) => row.resident_id === viewerResidentId && row.closed_at === null);
       const available = personalGoal?.view.stage === 'deciding' ? this.activeInspections(at).map(visit => visit.checkId) : [];
       const pendingWorksGoal = personalGoal ? { taskId: personalGoal.row.id, goal: '调研公共建设中心',
@@ -1200,7 +1301,7 @@ export class SharedPilotStore {
       const recentRest = this.recentBenchRest(viewerResidentId, at);
       const restedRecently = Boolean(recentRest && at < recentRest.endedAt + BENCH_COOLDOWN_MS);
       const engaged = Boolean(pendingWorksGoal) || meetingActive(social.meeting) || surveyActive(survey.task)
-        || [cafe.orders, fishing.visits, works.visits, bench.visits].some(visits => visits.some(visit =>
+        || [cafe.orders, fishing.visits, works.visits, bench.visits, council.visits].some(visits => visits.some(visit =>
           visit.residentId === viewerResidentId && visit.stage !== 'completed'));
       const waitingForSiteBrief = briefs.some(brief => brief.driver === 'rules' && (brief.stage === 'travelling' || brief.stage === 'deciding'));
       const busy = self.movement?.status === 'walking' || engaged || waitingForSiteBrief;
@@ -1235,6 +1336,8 @@ export class SharedPilotStore {
         cafe,
         fishing,
         bench,
+        council,
+        theatre,
         nearby,
         recentRest,
         works: { ...works, briefs, events: [...works.events, ...goals.flatMap(({ row, view }) => worksGoalEvents(row, view))]

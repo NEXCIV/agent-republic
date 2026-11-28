@@ -12,12 +12,13 @@ import { fishingTalkSchema, goFishingSchema } from '../../../../lib/shared-pilot
 import { explorationActionSchema } from '../../../../lib/shared-pilot-exploration';
 import { resolvePlayerNoteSchema, submitPlayerNoteSchema } from '../../../../lib/shared-pilot-notes';
 import { benchRestSchema } from '../../../../lib/shared-pilot-bench';
+import { councilReadSchema, sharedTheatreSchema } from '../../../../lib/shared-pilot-civic';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 15;
+const PILOT_RUNTIME_VERSION = 16;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -120,7 +121,7 @@ function readCommand(body: Record<string, unknown> | undefined): SharedAgentComm
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
   for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
     orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema, explorationActionSchema,
-    resolvePlayerNoteSchema, benchRestSchema]) {
+    resolvePlayerNoteSchema, benchRestSchema, councilReadSchema, sharedTheatreSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
   }
@@ -135,6 +136,10 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
   const pilot = pilotFor(file, config.externalResidents);
   const note = submitPlayerNoteSchema.safeParse(body);
   if (note.success) return json(pilot.submitPlayerNote(session, config.profileResidents, note.data));
+  const read = councilReadSchema.safeParse(body);
+  if (read.success) return json(pilot.readCouncilNotice(session, config.profileResidents, read.data));
+  const show = sharedTheatreSchema.safeParse(body);
+  if (show.success) return json(pilot.theatreAction(session, config.profileResidents, show.data));
   const chat = cafeTalkSchema.safeParse(body);
   if (chat.success) return json(pilot.cafeTalk(chat.data.question));
   const coffee = orderCoffeeSchema.safeParse(body);

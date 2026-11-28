@@ -23,14 +23,16 @@ const residentId = z.enum(RESIDENTS);
 const slotId = z.enum(['early', 'late']);
 const responses = ['keep', 'adjust'] as const;
 const cueIds = THEATRE_CUES.map(({ id }) => id) as [TheatreCue['id'], ...TheatreCue['id'][]];
-export const theatreDecisionSchema = z.object({
-  revision: z.number().int().min(0).max(10), agentId: residentId,
+export const theatreDecisionFields = z.object({
+  revision: z.number().int().min(0).max(10),
   decision: z.enum(['propose', 'counter', 'accept', 'decline', 'attend', 'skip', 'feedback']), slot: slotId.optional(),
   cue: z.enum(cueIds).optional(), response: z.enum(responses).optional(),
-}).strict().refine(({ decision, slot, cue, response }) => {
+}).strict();
+export function validTheatreDecision({ decision, slot, cue, response }: z.infer<typeof theatreDecisionFields>) {
   if (decision === 'feedback') return slot === undefined && cue !== undefined && response !== undefined;
   return cue === undefined && response === undefined && ((decision === 'propose' || decision === 'counter') === (slot !== undefined));
-});
+}
+export const theatreDecisionSchema = theatreDecisionFields.extend({ agentId: residentId }).refine(validTheatreDecision);
 export type TheatreDecision = z.infer<typeof theatreDecisionSchema>;
 type Decision = TheatreDecision['decision'];
 type Option = Omit<TheatreDecision, 'revision'>;
@@ -59,6 +61,7 @@ export type TheatreView = {
 };
 type ResidentContext = { position: CityPoint | null; energy: number; busy: boolean };
 export type TheatreContext = Record<TheatreResidentId, ResidentContext>;
+type TheatreRules = { proposers?: readonly TheatreResidentId[]; estimateBeforeBooking?: boolean };
 export type TheatreTrial = {
   commands: Array<{ requestId: string; choice: TheatreDecision }>;
   events: TheatreEvent[];
@@ -107,15 +110,18 @@ function planJourney(path: NonNullable<ReturnType<typeof theatrePath>>, id: Thea
   };
 }
 
-export function observeTheatre(trial: TheatreTrial | undefined, context: TheatreContext, at: number): TheatreView {
+export function observeTheatre(trial: TheatreTrial | undefined, context: TheatreContext, at: number,
+  { proposers = ['01'], estimateBeforeBooking = true }: TheatreRules = {}): TheatreView {
   const { booking, offer } = trial ?? {};
   const cues = booking?.programme === THEATRE_PROGRAMME_ID ? theatreCues(booking.opensAt) : [];
   const activeCue = cues.find(({ startsAt, endsAt }) => at >= startsAt && at < endsAt);
   const phase: Phase = booking ? at < booking.opensAt ? 'scheduled' : at < booking.closesAt ? 'open' : 'finished'
     : trial?.cancelled ? 'cancelled' : offer ? 'negotiating' : 'available';
   const availableActions: Option[] = [];
-  if (phase === 'available' && !context['01'].busy) {
-    for (const { id } of SLOTS) availableActions.push({ agentId: '01', decision: 'propose', slot: id });
+  if (phase === 'available') {
+    for (const agentId of proposers) if (!context[agentId].busy) {
+      for (const { id } of SLOTS) availableActions.push({ agentId, decision: 'propose', slot: id });
+    }
   }
   if (phase === 'negotiating' && offer) {
     const agentId = other(offer.by);
@@ -140,7 +146,8 @@ export function observeTheatre(trial: TheatreTrial | undefined, context: Theatre
     const current = context[id];
     const choice = trial?.attendance[id];
     const journey = theatreJourney(trial, id);
-    const path = !choice && !current.busy && current.position ? theatrePath(current.position, id) : undefined;
+    const estimate = booking ? at < booking.closesAt : estimateBeforeBooking;
+    const path = estimate && !choice && !current.busy && current.position ? theatrePath(current.position, id) : undefined;
     const travelSeconds = path && Math.ceil(path.seatMetres / SPEED);
     if (booking && at < booking.closesAt && !choice) {
       availableActions.push({ agentId: id, decision: 'skip' });
@@ -191,9 +198,10 @@ export function observeTheatre(trial: TheatreTrial | undefined, context: Theatre
   };
 }
 
-export function applyTheatreDecision(trial: TheatreTrial | undefined, context: TheatreContext, choice: TheatreDecision, requestId: string, at: number) {
+export function applyTheatreDecision(trial: TheatreTrial | undefined, context: TheatreContext, choice: TheatreDecision, requestId: string, at: number,
+  rules?: TheatreRules) {
   const state: TheatreTrial = trial ?? { attendance: {}, commands: [], events: [] };
-  const view = observeTheatre(trial, context, at);
+  const view = observeTheatre(trial, context, at, rules);
   const recorded = state.commands.find((command) => command.requestId === requestId);
   if (recorded) {
     const saved = recorded.choice;
@@ -235,5 +243,5 @@ export function applyTheatreDecision(trial: TheatreTrial | undefined, context: T
   }
   state.commands.push({ requestId, choice });
   state.events.push({ id: requestId, at, agentId, type: decision, text, ...(cue && response ? { cue, response } : {}) });
-  return { state, view: observeTheatre(state, context, at), repeated: false };
+  return { state, view: observeTheatre(state, context, at, rules), repeated: false };
 }

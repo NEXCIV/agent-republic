@@ -3,6 +3,7 @@ import { SHARED_PILOT_LINES, SHARED_PILOT_MAX_TURNS, type SharedPilotResidentId,
 import { CAFE_BENCH_FRONT, CAFE_COUNTER, type CityPoint } from './cafe-geometry';
 import { safePilotSpeech, type FirstExploration } from './shared-pilot-exploration';
 import type { PlayerNoteRecord } from './shared-pilot-notes';
+import type { TheatreTrial } from './theatre-trial';
 
 type Resident = SharedPilotResidentId;
 type Line = typeof SHARED_PILOT_LINES[number];
@@ -28,6 +29,7 @@ export type SocialState = {
   requests: Record<Resident, Record<string, RequestRecord>>;
   firstExplorations?: Partial<Record<Resident, FirstExploration>>;
   playerNotes?: Partial<Record<Resident, PlayerNoteRecord[]>>;
+  theatre?: TheatreTrial;
 };
 
 export const SOCIAL_DWELL_MS = 4000;

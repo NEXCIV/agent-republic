@@ -12,12 +12,13 @@ import type { FishingTalk, GoFishing } from './shared-pilot-fishing';
 import type { ExplorationAction } from './shared-pilot-exploration';
 import type { ResolvePlayerNote, SubmitPlayerNote } from './shared-pilot-notes';
 import type { BenchRest } from './shared-pilot-bench';
+import type { CouncilRead, SharedTheatreAction } from './shared-pilot-civic';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
 export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest
   | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | ExplorationAction
-  | ResolvePlayerNote | BenchRest | { action: 'observe' };
+  | ResolvePlayerNote | BenchRest | CouncilRead | SharedTheatreAction | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
   '02': ['cafe', 'works', 'plaza', 'governance'],
@@ -89,6 +90,12 @@ export class SharedPilotRuntime {
 
   profile(session: string) { return this.store.profile(session); }
   profileNotes(session: string, residents: readonly SharedPilotResidentId[]) { return this.store.profileNotes(session, residents); }
+  readCouncilNotice(session: string, residents: readonly SharedPilotResidentId[], command: CouncilRead) {
+    return this.store.readCouncilNotice(session, command, residents);
+  }
+  theatreAction(session: string, residents: readonly SharedPilotResidentId[], command: SharedTheatreAction) {
+    return this.store.theatreAction(session, command, residents);
+  }
   submitPlayerNote(session: string, residents: readonly SharedPilotResidentId[], command: SubmitPlayerNote) {
     return this.store.submitPlayerNote(session, command, residents);
   }
@@ -199,6 +206,10 @@ export class SharedPilotRuntime {
         return this.store.goFishing(token, command);
       case 'restAtBench':
         return this.store.restAtBench(token, command);
+      case 'readCouncilNotice':
+        return this.store.readCouncilNotice(token, command);
+      case 'respondTheatre':
+        return this.store.theatreAction(token, command);
       case 'fishingTalk':
         return this.store.fishingTalk(command.question, token);
       case 'invite':
@@ -297,6 +308,20 @@ export class SharedPilotRuntime {
     return new Set([...this.externalResidents, ...profiles.map(({ residentId }) => residentId)]);
   }
 
+  private theatreTick(connection: RuleConnection, observation: Observation) {
+    const { theatre, serverTime } = observation;
+    const actor = connection.residentId;
+    if (['en-route', 'waiting', 'entering', 'seated', 'leaving'].includes(theatre.residents[actor].status)) return true;
+    const action = (['accept', 'attend', 'skip'] as const).map(decision =>
+      theatre.availableActions.find(option => option.residentId === actor && option.decision === decision)).find(Boolean);
+    if (!action) return false;
+    const lastEvent = theatre.events.filter(event => ['propose', 'counter', 'accept'].includes(event.kind)).at(-1);
+    if (lastEvent && serverTime < lastEvent.happenedAt + 1800) return true;
+    const { decision } = action;
+    this.store.theatreAction(connection.token, { action: 'respondTheatre', requestId: randomUUID(), decision, revision: theatre.revision });
+    return true;
+  }
+
   tick() {
     if (this.failure) return;
     const firstObservation = this.observeConnection(this.connections[0]!);
@@ -313,7 +338,9 @@ export class SharedPilotRuntime {
       if (observation.works.briefs.some(brief => brief.stage !== 'waiting' && worksBriefActive(brief))) continue;
       if (observation.fishing.visits.some(visit => visit.stage !== 'completed')) continue;
       if (observation.bench.occupied) continue;
+      if (observation.council.visits.some(visit => visit.residentId === connection.residentId && visit.stage !== 'completed')) continue;
       if (this.surveyTick(connection, observation)) continue;
+      if (this.theatreTick(connection, observation)) continue;
       if (this.socialTick(connection, observation, external.size === 0)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
       const destination = this.choose(connection, observation);
@@ -340,9 +367,9 @@ export class SharedPilotRuntime {
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, bench, exploration } = this.observeConnection(this.connections[0]!);
+    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, bench, council, theatre, exploration } = this.observeConnection(this.connections[0]!);
     const external = this.externallyControlled(profiles);
-    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, bench, exploration,
+    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, bench, council, theatre, exploration,
       engines: this.connections.map(({ residentId }) => {
         const run = this.modelRuns.get(residentId);
         if (run) return { residentId, driver: 'MODEL' as const, status: run.view.status };

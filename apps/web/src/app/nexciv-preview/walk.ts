@@ -1207,15 +1207,25 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       if (!patrol) continue;
       if (move && move.status === 'walking' && move.metres > 0) {
+        const timing = cityWalkTiming(move, serverTime);
+        const audience = projection?.theatre.residents[id];
+        const show = projection?.theatre.booking;
+        if (move.destination.place === 'forum' && audience?.status === 'seated' && audience.position && show && serverTime < show.closesAt) {
+          patrol.observe(poseDt, observedPosition.set(...audience.position), observedFacing.set(...THEATRE_STAGE), false, undefined, true);
+          continue;
+        }
+        if (timing.stop) {
+          const { position, facing } = timing.stop;
+          patrol.observe(poseDt, observedPosition.set(...position), observedFacing.set(facing[0], position[1], facing[1]));
+          continue;
+        }
         const key = `${move.startedAt}:${move.destination.place}`;
         const target = move.points.at(-1)!;
         if (sharedJourneys.get(id) !== key) {
           patrol.plan(move.points, [target[0], target[2]]);
           sharedJourneys.set(id, key);
         }
-        const duration = move.arrivesAt - move.startedAt;
-        const progress = Math.min(1, Math.max(0, (serverTime - move.startedAt) / Math.max(1, duration)));
-        patrol.observeJourney(elapsed > 1600 ? 0 : poseDt, progress, Math.max(1, duration) / 1000);
+        patrol.observeJourney(elapsed > 1600 ? 0 : poseDt, timing.progress, Math.max(1, timing.walkingMs) / 1000);
       } else {
         const [x, y, z] = resident.position;
         const previous = move?.points.at(-2);
@@ -1226,6 +1236,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           continue;
         }
         if (rest) observedPosition.copy(seatFront);
+        if (projection?.council.visits.some(visit => visit.residentId === id && visit.stage === 'reading' && serverTime < visit.readAt)) {
+          patrol.observe(poseDt, observedPosition, councilNotice);
+          continue;
+        }
         const fishingVisit = projection && latestResidentActivity(projection.fishing.visits, id);
         const onDock = fishingVisit && fishingPose(fishingVisit, serverTime);
         if (onDock) {
@@ -1363,25 +1377,27 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
     if (!sharedMode) poseWorksSite(pilot, cityTime, poseDt, conversation?.person?.id === WORKS_MANAGER.id ? primary?.root.position : undefined);
     let observedProgress: number | undefined;
+    const show = sharedMode ? sharedSnapshot?.theatre : cafeMode ? theatre : undefined;
+    if (show?.booking && districts.west.asset) {
+      if (!theatreLights) {
+        theatreLights = createTheatreLighting();
+        cafeProps.add(theatreLights.group);
+      }
+      const open = show.phase === 'open';
+      if (open !== theatreOpen) {
+        theatreOpen = open;
+        theatreLights.setOpen(open);
+      }
+      if (show.programme && !stageInstallation) {
+        stageInstallation = createStageInstallation();
+        cafeProps.add(stageInstallation.group);
+      }
+      const showTime = sharedMode ? sharedSnapshot!.serverTime + Math.min(1600, now - sharedReceivedAt) : cityTime;
+      stageInstallation?.update(showTime - show.booking.opensAt, playing && tween);
+    }
     if (sharedMode) {
       poseShared(now, poseDt);
     } else if (cafeMode) {
-      if (theatre?.booking && districts.west.asset) {
-        if (!theatreLights) {
-          theatreLights = createTheatreLighting();
-          cafeProps.add(theatreLights.group);
-        }
-        const open = theatre.phase === 'open';
-        if (open !== theatreOpen) {
-          theatreOpen = open;
-          theatreLights.setOpen(open);
-        }
-        if (theatre.programme && !stageInstallation) {
-          stageInstallation = createStageInstallation();
-          cafeProps.add(stageInstallation.group);
-        }
-        stageInstallation?.update(cityTime - theatre.booking.opensAt, playing && tween);
-      }
       marketGuest?.patrol.observe(poseDt, coworker, counter, false, social ? 'nod' : undefined);
       const time = (cafeSnapshot?.serverTime ?? 0) + (playing ? now - receivedAt : 0);
       const duration = shift?.until ? shift.until - shift.since : 0;
@@ -2317,7 +2333,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function updateCouncilReceipt() {
     const pilot = cityObservation?.lightingPilot;
     const text = pilot ? LIGHTING_PILOT_STATUS[pilot.stage] : cityObservation?.lightingSurvey === 'submitted' ? COUNCIL_SURVEY_RECEIPT : '';
-    const theatre = cityObservation?.theatre;
+    const theatre = sharedMode ? sharedSnapshot?.theatre : cityObservation?.theatre;
     const booking = theatre?.booking;
     const programme = theatre?.phase === 'open' ? '社区剧场 · 已开放'
       : theatre?.phase === 'finished' ? '社区剧场 · 试演结束'
@@ -2434,6 +2450,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     syncShared(snapshot, owner = null) {
       sharedSnapshot = snapshot;
       sharedReceivedAt = performance.now();
+      updateCouncilReceipt();
       if (sharedOwner !== owner) {
         sharedOwner = owner;
         if (entryTarget && entryTarget.id !== owner) interruptEntry();

@@ -25,7 +25,7 @@ async function send(command) {
 
 const requestId = z.uuidv4().optional();
 const noteActivities = [
-  z.strictObject({ requestId, action: z.literal('moveTo'), destination: z.strictObject({ place: z.enum(['cafe', 'plaza', 'governance', 'works', 'pier']) }) }),
+  z.strictObject({ requestId, action: z.literal('moveTo'), destination: z.strictObject({ place: z.enum(['cafe', 'plaza', 'governance', 'works', 'pier', 'forum']) }) }),
   z.strictObject({ requestId, action: z.literal('invite'), target: z.enum(['01', '02']), venue: z.literal('cafe') }),
   z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
   z.strictObject({ requestId, action: z.literal('inspectWorks'), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
@@ -50,6 +50,11 @@ const action = z.union([
     text: z.string().trim().min(1).max(38) }),
   z.strictObject({ requestId, action: z.literal('exploreArrival'), activity: z.enum(['ask', 'look']),
     text: z.string().trim().min(1).max(38) }),
+  z.strictObject({ requestId, action: z.literal('readCouncilNotice') }),
+  z.strictObject({ requestId, action: z.literal('respondTheatre'), revision: z.number().int().min(0).max(10),
+    decision: z.enum(['propose', 'counter', 'accept', 'decline', 'attend', 'skip', 'feedback']),
+    slot: z.enum(['early', 'late']).optional(), cue: z.enum(['shoreline', 'water', 'finale']).optional(),
+    response: z.enum(['keep', 'adjust']).optional() }),
 ]);
 const noteReply = { noteId: z.uuidv4(), reason: z.string().trim().min(1).max(120) };
 const resolution = z.union([
@@ -58,13 +63,13 @@ const resolution = z.union([
 ]);
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-shared', version: '0.7.0' });
+  const server = new McpServer({ name: 'nexciv-shared', version: '0.8.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取本居民的 nearby、recentRest 和城市状态。发现可用长椅时可用 restAtBench。playerNotes 仅含本居民的私人纸条。首次探索用 exploreSite 启程，到场用 exploreArrival 互动。pendingWorksGoal 列出网页调研动作。',
+    description: '读取本居民的附近、纸条、行程和城市状态。council 显示议事公告与阅读记录。theatre 提供场次、revision 及按居民列出的可选动作。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以授权居民行动。网页调研使用观察返回的 taskId 和允许的接手、询问或巡查动作。同一任务步骤可安全重试。',
+    description: '以授权居民行动。readCouncilNotice 前往公告栏阅读。respondTheatre 用最新 revision、decision 和场次选项协商或决定是否观演。网页调研使用 pendingWorksGoal 返回的任务。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send('requestId' in command ? { ...command, requestId: command.requestId ?? randomUUID() }
     : command.action.endsWith('WorksGoal') ? command : { ...command, requestId: randomUUID() }));

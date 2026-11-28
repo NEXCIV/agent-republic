@@ -9,7 +9,7 @@ import { z } from 'zod';
 export const SHARED_PILOT_RESIDENT_IDS = ['01', '02'] as const;
 export type SharedPilotResidentId = (typeof SHARED_PILOT_RESIDENT_IDS)[number];
 
-export const SHARED_PILOT_PLACE_IDS = ['cafe', 'plaza', 'governance', 'works', 'pier'] as const;
+export const SHARED_PILOT_PLACE_IDS = ['cafe', 'plaza', 'governance', 'works', 'pier', 'forum'] as const;
 export type SharedPilotPlaceId = (typeof SHARED_PILOT_PLACE_IDS)[number];
 
 /** Label pilot simulation output; use a separate DEMO label as well. */
