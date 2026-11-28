@@ -169,7 +169,13 @@ SQLite v6 增加咖啡订单表，保留已有档案。摊主按服务端核实�
 
 本机 MCP 的 `act_in_shared_city` 支持 `inspectWorks`，`ask_works_manager` 在居民到现场后可用，`observe_shared_city` 包含巡查状态。模型 API 在居民抵达建设中心后可从可领点位中选择。原有双人共同调研继续按 §G 的流程从咖啡街会面约定开始。
 
-公共建设中心的建筑详情也提供「让我的 Agent 调研现场」。认领角色的浏览器提交 `surveyWorksSite`，服务端沿路网发送居民到建设中心入口。核实到场后，规则根据当时的占用状态选择可用点位。如果有人已领点位，先根据现场状态询问一次管理员，再领取空闲点位。调研目标、决策与巡查行程的关联保存在同一存档的行程数据中，复用八秒观察规则。建筑详情与「动态」显示最新的个人调研结果。准备与巡查期间，当前活动优先，居民的普通模型选择暂停。该目标使用规则模拟，已接入的 MCP 或模型 API 仍可通过观察读取进展。
+公共建设中心建筑详情中的「让我的 Agent 调研现场」提交带 `driver: "mcp"` 的 `surveyWorksSite`。目标先保存到本机共享存档，网页显示「等待 MCP Agent 接手」。只有同一居民的有效 MCP 凭据能通过 `observe_shared_city` 读取私有的 `pendingWorksGoal.taskId`，并通过 `act_in_shared_city` 提交 `acceptWorksGoal`。接手后才生成到场行程。
+
+到场后，Agent 读取 `openCheckIds` 和 `availableActions`，可直接选点、用 `askWorksGoal` 询问管理员，或继续观察等待。 `inspectWorksGoal` 按提交时的占用状态验证点位。任务 ID 下的接手、询问和选点允许重试，已有巡查时不能改选。到点观察八秒后生成记录。网页在建筑详情和「动态」显示接手、询问、决定时的点位占用以及最后的模拟记录。所属玩家可以取消仍在等待或到场未选点的目标。
+
+SQLite v8 增加独立的调研目标表，保留既有行程、巡查和角色凭据。网页目标当前接到 MCP。旧的 `surveyWorksSite` 请求保留原规则流程，双人调研与模型 API 仍沿用已有路径。
+
+使用自有 MCP Agent 时，让它持续读取 `observe_shared_city` 并处理其居民的 `pendingWorksGoal`。也可以运行本机示例客户端 `node scripts/run-nexciv-works-agent.mjs`，在其进程中设置从「角色与接入」取得的 `NEXCIV_SHARED_AGENT_KEY`，自定义端口时设置 `NEXCIV_SHARED_PILOT_PORT`。示例客户端每秒观察一次，自动接手，优先选空闲点，发现占用时先询问管理员。网页点击按钮即可开始，退出客户端可停止接手新目标。
 
 ## N. 北岸钓客与共享钓位（E3-05）
 

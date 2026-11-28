@@ -7,14 +7,14 @@ import { SharedPilotError } from '../../../../lib/shared-pilot-store';
 import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, isSharedPilotAvatar } from '../../../../lib/shared-pilot-profiles';
 import { parseModelConfig } from '../../../../lib/shared-pilot-model';
 import { cafeTalkSchema, orderCoffeeSchema } from '../../../../lib/shared-pilot-cafe';
-import { inspectWorksSchema, surveyWorksSiteSchema, worksTalkSchema } from '../../../../lib/shared-pilot-works';
+import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, worksGoalActionSchema, worksTalkSchema } from '../../../../lib/shared-pilot-works';
 import { fishingTalkSchema, goFishingSchema } from '../../../../lib/shared-pilot-fishing';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 8;
+const PILOT_RUNTIME_VERSION = 9;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -114,7 +114,7 @@ function readCommand(body: Record<string, unknown> | undefined): SharedAgentComm
   if (!body) return;
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
   for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
-    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, goFishingSchema, fishingTalkSchema]) {
+    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
   }
@@ -137,6 +137,8 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
   if (inspection.success) return json(pilot.requestInspection(session, config.profileResidents, inspection.data));
   const siteGoal = surveyWorksSiteSchema.safeParse(body);
   if (siteGoal.success) return json(pilot.startWorksBrief(session, config.profileResidents, siteGoal.data));
+  const cancel = cancelWorksGoalSchema.safeParse(body);
+  if (cancel.success) return json(pilot.cancelWorksGoal(session, config.profileResidents, cancel.data));
   const angler = fishingTalkSchema.safeParse(body);
   if (angler.success) return json(pilot.fishingTalk(angler.data.question));
   const fishing = goFishingSchema.safeParse(body);

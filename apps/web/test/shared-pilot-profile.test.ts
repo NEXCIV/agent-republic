@@ -139,6 +139,7 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('migrates v4 profiles with
         DROP TABLE current_profiles;
         DROP TABLE shared_pilot_cafe_orders;
         DROP TABLE shared_pilot_fishing;
+        DROP TABLE shared_pilot_works_goals;
         PRAGMA user_version=4;
       `);
     } finally { db.close(); }

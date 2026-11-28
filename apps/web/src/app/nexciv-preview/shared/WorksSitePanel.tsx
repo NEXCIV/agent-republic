@@ -13,16 +13,21 @@ type WorksBrief = SharedPilotView['works']['briefs'][number];
 export function WorksBriefRecord({ brief, serverTime }: { brief: WorksBrief; serverTime: number }) {
   const { decision, reason, visit } = brief;
   const stage = brief.stage === 'travelling' && decision ? '前往巡查点' : {
+    waiting: '等待 MCP Agent 接手', cancelled: '调研已取消',
     travelling: '前往公共建设中心', deciding: '查看现场和可用巡查点',
     observing: '正在现场观察', completed: '调研完成', failed: '调研未完成',
   }[brief.stage];
   const observed = visit?.arrivedAt != null ? Math.max(0, serverTime - visit.arrivedAt) : 0;
   return <div className={styles.worksRecord} data-brief-stage={brief.stage} data-has-decision={Boolean(decision)}>
     <p role="status"><strong>{stage}</strong></p>
+    {brief.claimedAt !== null && <small>MCP Agent 接手于 <time dateTime={new Date(brief.claimedAt).toISOString()}>
+      {new Date(brief.claimedAt).toLocaleTimeString('zh-CN', { hour12: false })}
+    </time></small>}
+    {brief.managerReply && <p>Agent 询问现场管理员。<br />「{brief.managerReply}」</p>}
     {decision && <>
-      {decision.managerReply
-        ? <p>Agent 先询问现场管理员。<br />「{decision.managerReply}」</p>
-        : <p>入口外侧步道空闲，Agent 决定直接巡查。</p>}
+      {brief.driver === 'mcp' ? <p>{decision.otherPointOccupied ? '另一处已被占用，Agent 选择了空闲点位。'
+        : '两处点位均可用，Agent 已选定巡查点。'}</p>
+        : !decision.managerReply && <p>入口外侧步道空闲，Agent 决定直接巡查。</p>}
       <small>巡查点 · {WORKS_CHECKS[decision.checkId].label}</small>
     </>}
     {brief.stage === 'observing' && visit?.arrivedAt != null && <progress className={styles.worksProgress}
@@ -53,6 +58,9 @@ export function WorksSitePanel({ snapshot, ownResident, connected, onFollow, onM
   const brief = snapshot?.works.briefs.find(brief => brief.residentId === ownResident);
   const syncing = acceptedAt !== undefined && (!brief || brief.acceptedAt < acceptedAt);
   const taskLive = brief && worksBriefActive(brief);
+  const agentOnline = snapshot?.engines.some(engine => engine.residentId === ownResident
+    && engine.driver === 'EXTERNAL' && engine.connected);
+  const cancellable = brief?.driver === 'mcp' && (brief.stage === 'waiting' || brief.stage === 'deciding');
   const occupied = snapshot?.works.visits.filter(visit => visit.stage !== 'completed').length ?? 0;
   const open = Object.keys(WORKS_CHECKS).length - occupied;
   const teamSurvey = snapshot?.survey.task?.status;
@@ -64,24 +72,25 @@ export function WorksSitePanel({ snapshot, ownResident, connected, onFollow, onM
       entries => entries?.some(entry => entry.residentId === ownResident && entry.stage !== 'completed'),
     );
 
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (submitting.current || !ownResident || !connected || syncing || busy || taskLive) return;
+  async function send(goalId?: string) {
+    if (submitting.current || !ownResident || !connected) return;
     submitting.current = true;
     setError('');
     setPending(true);
     try {
-      request.current ??= crypto.randomUUID();
+      if (!goalId) request.current ??= crypto.randomUUID();
+      const payload = goalId ? { action: 'cancelWorksGoal', goalId }
+        : { action: 'surveyWorksSite', requestId: request.current, driver: 'mcp' };
       const response = await fetch('/api/nexciv-preview/shared?profile=1', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'surveyWorksSite', requestId: request.current }),
+        body: JSON.stringify(payload),
       });
       const result = await response.json();
       if (!response.ok) {
         if (response.status < 500) request.current = null;
         throw new Error(result.error ?? '暂时无法安排调研，请稍后重试。');
       }
-      setAcceptedAt(result.acceptedAt);
+      if (!goalId) setAcceptedAt(result.acceptedAt);
       request.current = null;
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : '暂时无法安排调研，请稍后重试。');
@@ -91,12 +100,17 @@ export function WorksSitePanel({ snapshot, ownResident, connected, onFollow, onM
     }
   }
 
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!syncing && !busy && !taskLive) void send();
+  }
+
   return <section className={styles.cafeVendor} aria-labelledby="works-site-heading">
-    <form className={styles.cafeOrder} onSubmit={event => void submit(event)}>
+    <form className={styles.cafeOrder} onSubmit={submit}>
       <h3 id="works-site-heading" className={styles.worksHeading}>现场调研</h3>
-      <p>Agent 到场后按现场规则选择巡查点，完成后留下观察记录。</p>
+      <p>你的 MCP Agent 接手后前往现场，自行选择巡查点并留下记录。</p>
       {snapshot && <p className={styles.cafeState}>现场管理员在入口外 · {open} 个可用巡查点</p>}
-      {syncing && <p role="status">已安排，正在同步 Agent 的行程。</p>}
+      {syncing && <p role="status">调研目标已下达。</p>}
       {ownResident && !taskLive && !syncing && <button type="submit" disabled={!connected || pending || Boolean(busy)}>
         {pending ? '正在安排调研' : '让我的 Agent 调研现场'}
       </button>}
@@ -105,7 +119,10 @@ export function WorksSitePanel({ snapshot, ownResident, connected, onFollow, onM
       {error && <p className={styles.cafeError} role="alert">{error}</p>}
     </form>
     {brief && !syncing && <WorksBriefRecord brief={brief} serverTime={snapshot?.serverTime ?? brief.acceptedAt} />}
-    {taskLive && onFollow && <button type="button" className={styles.worksSecondary} onClick={onFollow}>跟随我的 Agent</button>}
+    {cancellable && !agentOnline && <p className={styles.cafeJoin}><Link href={JOIN_CITY}>角色与接入</Link>中可连接 MCP Agent。</p>}
+    {cancellable && <button type="button" className={styles.worksSecondary} disabled={!connected || pending}
+      onClick={() => void send(brief.id)}>取消调研</button>}
+    {taskLive && brief.stage !== 'waiting' && onFollow && <button type="button" className={styles.worksSecondary} onClick={onFollow}>跟随我的 Agent</button>}
     <button type="button" className={styles.worksSecondary} onClick={onManager}>找现场管理员</button>
   </section>;
 }

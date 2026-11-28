@@ -38,19 +38,23 @@ const action = z.union([
   z.strictObject({ requestId, action: z.literal('submitSurvey'), taskId: z.uuidv4() }),
   z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
   z.strictObject({ requestId, action: z.literal('inspectWorks'), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
+  z.strictObject({ action: z.literal('acceptWorksGoal'), taskId: z.uuidv4() }),
+  z.strictObject({ action: z.literal('askWorksGoal'), taskId: z.uuidv4() }),
+  z.strictObject({ action: z.literal('inspectWorksGoal'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
   z.strictObject({ requestId, action: z.literal('goFishing') }),
 ]);
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-shared', version: '0.3.0' });
+  const server = new McpServer({ name: 'nexciv-shared', version: '0.4.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取授权居民的位置、会面、调研和咖啡摊队伍。会面中参考 nextSpeaker 和 nextTurnAt。',
+    description: '读取居民及城市。若 pendingWorksGoal 存在，从其中的 availableActions 接手网页调研。到场后观察 openCheckIds，再问管理员或选择点位。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以授权居民移动、点咖啡、发言、调研、巡查或钓鱼。goFishing 会前往北岸码头，按实际到场顺序使用钓位。使用相同的请求 ID 重试同一动作。',
+    description: '以授权居民行动。网页调研使用观察返回的 taskId 和允许的接手、询问或巡查动作。同一任务步骤可安全重试。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
-  }, ({ command }) => send({ ...command, requestId: command.requestId ?? randomUUID() }));
+  }, ({ command }) => send('requestId' in command ? { ...command, requestId: command.requestId ?? randomUUID() }
+    : command.action.endsWith('WorksGoal') ? command : { ...command, requestId: randomUUID() }));
   server.registerTool('ask_cafe_vendor', {
     description: '询问咖啡摊主菜单、排队情况和附近休息地点。',
     inputSchema: z.strictObject({ question: z.string().trim().min(1).max(120) }),

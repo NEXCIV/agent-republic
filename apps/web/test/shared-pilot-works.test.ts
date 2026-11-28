@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import { expect, it } from 'vitest';
 import { SharedPilotStore } from '../src/lib/shared-pilot-store';
 import { modelChoices } from '../src/lib/shared-pilot-model';
@@ -106,6 +107,63 @@ it('accepts only the owner goal, then chooses an available check from the site s
     now++;
     expect(store.observe(a).works.briefs[0]).toMatchObject({ stage: 'completed', visit: { report: { recordedAt: now } } });
     expect(store.observe(a).works.visits.filter(visit => visit.residentId === '01')).toHaveLength(1);
+  } finally {
+    store.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+it('hands off a browser goal to its own MCP resident and records only a legitimate on-site choice', () => {
+  const folder = mkdtempSync(path.join(tmpdir(), 'nexciv-works-handoff-'));
+  const file = path.join(folder, 'shared.sqlite');
+  let now = 100000;
+  let store = new SharedPilotStore(file, () => now);
+  try {
+    const a = store.issueCredential('01').token;
+    const b = store.issueCredential('02').token;
+    const { session } = store.claim({ name: '小满', avatar: 'citizen' }, ['01'], '');
+    store.close();
+    const sqlite = process.getBuiltinModule('node:sqlite') as { DatabaseSync: typeof DatabaseSync };
+    const legacy = new sqlite.DatabaseSync(file);
+    legacy.exec('DROP TABLE shared_pilot_works_goals; PRAGMA user_version=7;');
+    legacy.close();
+    store = new SharedPilotStore(file, () => now);
+    const cmd = { action: 'surveyWorksSite', requestId: randomUUID(), driver: 'mcp' };
+    const queued = store.startWorksBrief(session, cmd, ['01']);
+    expect(store.startWorksBrief(session, cmd, ['01'])).toEqual(queued);
+    expect(store.observe(a).works.briefs[0]).toMatchObject({ stage: 'waiting', visit: null });
+    expect(store.observe(a).residents[0]!.movement).toBeNull();
+    const goal = store.observe(a).pendingWorksGoal!;
+    expect(goal).toMatchObject({ stage: 'waiting' });
+    expect(store.observe(b).pendingWorksGoal).toBeNull();
+    expect(JSON.stringify(store.observe(b))).not.toContain(goal.taskId);
+    const accept = { action: 'acceptWorksGoal', taskId: goal.taskId };
+    expect(() => store.actOnWorksGoal(b, accept)).toThrow(expect.objectContaining({ code: 'NOT_FOUND' }));
+    const visit = { action: 'inspectWorksGoal', taskId: goal.taskId, checkId: 'entrance-path' };
+    expect(() => store.actOnWorksGoal(a, visit)).toThrow(expect.objectContaining({ code: 'BUSY' }));
+    store.close();
+    store = new SharedPilotStore(file, () => now);
+    const started = store.actOnWorksGoal(a, accept);
+    expect(started).toMatchObject({ stage: 'travelling', claimedAt: now });
+    expect(store.actOnWorksGoal(a, accept)).toEqual(started);
+    expect(() => store.actOnWorksGoal(a, visit)).toThrow(expect.objectContaining({ code: 'BUSY' }));
+    now = store.observe(a).residents[0]!.movement!.arrivesAt;
+    store.requestInspection(b, { action: 'inspectWorks', requestId: randomUUID(), checkId: 'entrance-path' });
+    expect(store.observe(a).pendingWorksGoal).toMatchObject({ stage: 'deciding', openCheckIds: ['pedestrian-passage'] });
+    expect(() => store.actOnWorksGoal(a, visit)).toThrow(expect.objectContaining({ code: 'BUSY' }));
+    const ask = { action: 'askWorksGoal', taskId: goal.taskId };
+    expect(store.actOnWorksGoal(a, ask)).toMatchObject({ managerReply: expect.stringContaining('施工区人行通道还可以领') });
+    now++;
+    store.actOnWorksGoal(a, { ...visit, checkId: 'pedestrian-passage' });
+    expect(() => store.actOnWorksGoal(a, visit)).toThrow(expect.objectContaining({ code: 'CONFLICT' }));
+    const dispatched = store.observe(a).works.briefs[0]!;
+    expect(dispatched.decision).toMatchObject({ checkId: 'pedestrian-passage', otherPointOccupied: true });
+    expect(dispatched.visit!.report).toBeNull();
+    now = dispatched.visit!.reportAt;
+    expect(store.observe(a).works.briefs[0]).toMatchObject({ stage: 'completed', visit: { report: { recordedAt: now } } });
+    expect(store.observe(a).pendingWorksGoal).toBeNull();
+    expect(store.observe(a).works.events.filter(event => event.kind === 'WORKS_GOAL_CLAIMED')).toHaveLength(1);
+    expect(store.observe(a).works.events.filter(event => event.kind === 'WORKS_GOAL_ASKED')).toHaveLength(1);
   } finally {
     store.close();
     rmSync(folder, { recursive: true, force: true });
