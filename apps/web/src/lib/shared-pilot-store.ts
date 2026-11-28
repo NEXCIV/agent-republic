@@ -6,7 +6,7 @@ import {
   SHARED_PILOT_PLACE_IDS, SHARED_PILOT_PROVENANCE, SHARED_PILOT_RESIDENT_IDS, sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
   type SharedPilotPlaceId, type SharedPilotResidentId,
 } from '@agent-republic/domain';
-import type { CityPoint } from './cafe-geometry';
+import { CAFE_BENCH_FRONT, type CityPoint } from './cafe-geometry';
 import { positionOnWalk, type CityRoute, type CityWalk } from './city-movement';
 import { CITY_MAP, planCityWalk } from './city-navigation';
 import { advanceSocial, emptySocialState, meetingActive, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
@@ -19,6 +19,7 @@ import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, SURVE
 import { FISHING_TABLE, FISHING_WAIT, FishingVisits, fishingOutcome, fishingPose, goFishingSchema } from './shared-pilot-fishing';
 import { explorationActionSchema, explorationScenes, explorationView, type FirstExplorationObservation } from './shared-pilot-exploration';
 import { noteActivityLabel, playerNoteView, resolvePlayerNoteSchema, submitPlayerNoteSchema } from './shared-pilot-notes';
+import { BENCH_COOLDOWN_MS, BENCH_RANGE, BENCH_SEAT, benchProjection, benchRest, benchRestSchema, localDistance, nearbyAt } from './shared-pilot-bench';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
@@ -82,6 +83,7 @@ type MovementRow = {
   arrives_at: number;
   completed_at: number | null;
 };
+type ActivityRoute = InspectionRoute & { benchRest?: true };
 type ResidentRow = { id: SharedPilotResidentId; place: SharedPilotPlaceId };
 type MovementEventRow = {
   seq: number;
@@ -631,6 +633,7 @@ export class SharedPilotStore {
           case 'orderCoffee': this.orderCoffee(token, activity); break;
           case 'inspectWorks': this.requestInspection(token, activity); break;
           case 'goFishing': this.goFishing(token, activity); break;
+          case 'restAtBench': this.restAtBench(token, activity); break;
         }
         activityLabel = noteActivityLabel(activity);
       }
@@ -654,8 +657,8 @@ export class SharedPilotStore {
       if (social.requests[actor][requestId] || survey.requests[actor][requestId] || this.coffee.find(actor, requestId)) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different city action.');
       const previous = this.findReceipt(actor, requestId);
       if (previous) {
-        const route = JSON.parse(previous.route_json) as InspectionRoute;
-        if (previous.destination !== destination.place || this.fishing.find(actor, requestId) || route.worksInspection || route.worksBrief) {
+        const route = JSON.parse(previous.route_json) as ActivityRoute;
+        if (previous.destination !== destination.place || this.fishing.find(actor, requestId) || route.worksInspection || route.worksBrief || route.benchRest) {
           throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different movement.');
         }
         return toReceipt(previous);
@@ -683,24 +686,73 @@ export class SharedPilotStore {
 
   private beginMove(actor: SharedPilotResidentId, requestId: string, place: SharedPilotPlaceId, at: number,
     target: Parameters<typeof planCityWalk>[1], name?: string,
-    works?: Pick<InspectionRoute, 'worksInspection' | 'worksBrief'>) {
+    activity?: Pick<ActivityRoute, 'worksInspection' | 'worksBrief' | 'benchRest'>) {
     if (this.db.prepare('SELECT seq FROM shared_pilot_moves WHERE resident_id=? AND completed_at IS NULL').get(actor)) {
       throw new SharedPilotError('BUSY', 'This resident already has an accepted movement.');
+    }
+    const last = this.lastMove(actor);
+    if (last && (JSON.parse(last.route_json) as ActivityRoute).benchRest && benchRest(last, at).stage === 'resting') {
+      throw new SharedPilotError('BUSY', '居民正在长椅上休息。');
     }
     const count = Number(this.db.prepare('SELECT count(*) AS count FROM shared_pilot_moves WHERE resident_id=?').get(actor)?.count);
     if (count >= MAX_MOVES_PER_RESIDENT) throw new SharedPilotError('LIMIT_REACHED', 'This resident has reached the local pilot journal limit.');
     const resident = this.db.prepare('SELECT id,place FROM shared_pilot_residents WHERE id=?').get(actor) as unknown as ResidentRow;
-    const route: InspectionRoute | null = planCityWalk(this.residentPosition(actor, resident.place, at), target);
+    const route = planCityWalk(last ? positionOnWalk(toWalk(last), at) : point(resident.place), target);
     if (!route) throw new SharedPilotError('UNREACHABLE', 'No surveyed route to this pilot place.');
     if (name) route.name = name;
-    if (works?.worksBrief && count >= MAX_MOVES_PER_RESIDENT - 1) {
+    if (activity?.worksBrief && count >= MAX_MOVES_PER_RESIDENT - 1) {
       throw new SharedPilotError('LIMIT_REACHED', '此居民的行程记录已接近上限，无法安排完整调研。');
     }
     const arrivesAt = at + Math.ceil(route.metres / SPEED * 1000);
     const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
-      VALUES (?,?,?,?,?,?)`).run(actor, requestId, place, JSON.stringify({ ...route, ...works }), at, arrivesAt);
+      VALUES (?,?,?,?,?,?)`).run(actor, requestId, place, JSON.stringify({ ...route, ...activity }), at, arrivesAt);
     this.db.prepare("INSERT INTO shared_pilot_events (movement_seq,kind,happened_at) VALUES (?,'MOVE_STARTED',?)").run(result.lastInsertRowid, at);
     return arrivesAt;
+  }
+
+  private benchRows() {
+    return this.db.prepare(`SELECT * FROM shared_pilot_moves WHERE json_extract(route_json, '$.benchRest')=1
+      ORDER BY seq DESC LIMIT 24`).all() as unknown as MovementRow[];
+  }
+
+  private recentBenchRest(actor: SharedPilotResidentId, at: number) {
+    const row = this.db.prepare(`SELECT * FROM shared_pilot_moves WHERE resident_id=? AND json_extract(route_json, '$.benchRest')=1
+      ORDER BY seq DESC LIMIT 1`).get(actor) as unknown as MovementRow | undefined;
+    const last = row && benchRest(row, at);
+    return last?.stage === 'completed' ? { place: 'cafe' as const, endedAt: last.endsAt } : null;
+  }
+
+  restAtBench(token: string, input: unknown) {
+    return this.transaction(at => {
+      const actor = this.authenticate(token, at);
+      const parsed = benchRestSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '请指定现有长椅。');
+      const { requestId } = parsed.data;
+      this.settle(at);
+      const previous = this.findReceipt(actor, requestId);
+      if (previous) {
+        if (!(JSON.parse(previous.route_json) as ActivityRoute).benchRest) throw new SharedPilotError('CONFLICT', '请求编号已用于其他活动。');
+        return benchRest(previous, at);
+      }
+      const pending = this.latestWorksGoal(actor);
+      if (pending?.closed_at === null || this.activeInspections(at).some(visit => visit.residentId === actor)
+        || this.pendingWorksBrief()) throw new SharedPilotError('BUSY', '请先执行完当前的安排。');
+      this.ensureWorksAvailable(actor, at);
+      const state = this.db.prepare('SELECT place FROM shared_pilot_residents WHERE id=?').get(actor) as unknown as { place: SharedPilotPlaceId };
+      if (localDistance(this.residentPosition(actor, state.place, at), CAFE_BENCH_FRONT) > BENCH_RANGE) {
+        throw new SharedPilotError('UNREACHABLE', '先走到咖啡街长椅附近。');
+      }
+      if (this.benchRows().some(row => benchRest(row, at).stage !== 'completed')) throw new SharedPilotError('BUSY', '长椅已有居民使用。');
+      const recent = this.recentBenchRest(actor, at);
+      if (recent && at < recent.endedAt + BENCH_COOLDOWN_MS) throw new SharedPilotError('BUSY', '这位居民刚在这里休息过。');
+      if (this.readSocial().requests[actor][requestId] || this.readSurvey().requests[actor][requestId]) {
+        throw new SharedPilotError('CONFLICT', '请求编号已用于其他活动。');
+      }
+      const [x, , z] = CAFE_BENCH_FRONT;
+      this.beginMove(actor, requestId, 'cafe', at, { x, z }, '前往咖啡街长椅', { benchRest: true });
+      this.settle(at);
+      return benchRest(this.findReceipt(actor, requestId)!, at);
+    });
   }
 
   private ensureWorksAvailable(actor: SharedPilotResidentId, at: number) {
@@ -1027,6 +1079,9 @@ export class SharedPilotStore {
       if (!social.requests[actor][parsed.data.requestId] && this.coffee.hasActiveOrder(at)) throw new SharedPilotError('BUSY', '咖啡摊有居民正在点单。');
       if (!social.requests[actor][parsed.data.requestId] && (this.pendingWorksBrief() || this.claimedWorksGoal() || this.activeInspections(at).length)) throw new SharedPilotError('BUSY', '有居民正在执行现场调研。');
       if (!social.requests[actor][parsed.data.requestId] && this.fishing.active(at)) throw new SharedPilotError('BUSY', '有居民正在北岸钓鱼。');
+      if (!social.requests[actor][parsed.data.requestId] && this.benchRows().some(row => benchRest(row, at).stage !== 'completed')) {
+        throw new SharedPilotError('BUSY', '有居民正在使用咖啡街长椅。');
+      }
       if (surveyActive(survey.task) && !social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('BUSY', 'A shared survey is active.');
       try {
         const residents = this.socialResidents(at);
@@ -1053,6 +1108,9 @@ export class SharedPilotStore {
       if (!survey.requests[actor][parsed.data.requestId] && this.coffee.hasActiveOrder(at)) throw new SharedPilotError('BUSY', '咖啡摊有居民正在点单。');
       if (!survey.requests[actor][parsed.data.requestId] && (this.pendingWorksBrief() || this.claimedWorksGoal() || this.activeInspections(at).length)) throw new SharedPilotError('BUSY', '有居民正在执行现场调研。');
       if (!survey.requests[actor][parsed.data.requestId] && this.fishing.active(at)) throw new SharedPilotError('BUSY', '有居民正在北岸钓鱼。');
+      if (!survey.requests[actor][parsed.data.requestId] && this.benchRows().some(row => benchRest(row, at).stage !== 'completed')) {
+        throw new SharedPilotError('BUSY', '有居民正在使用咖啡街长椅。');
+      }
       try {
         const residents = this.socialResidents(at);
         const receipt = performSurvey(survey, actor, parsed.data, at, residents, social.meeting);
@@ -1087,6 +1145,7 @@ export class SharedPilotStore {
       const latest = this.db.prepare('SELECT * FROM shared_pilot_moves WHERE resident_id=? ORDER BY seq DESC LIMIT 1');
       const cafe = this.coffee.view(at);
       const fishing = this.fishing.view(at);
+      const bench = benchProjection(this.benchRows().reverse(), at);
       const inspections = this.db.prepare(`SELECT * FROM shared_pilot_moves
         WHERE destination='works' AND json_extract(route_json, '$.worksInspection') IS NOT NULL
         ORDER BY seq DESC LIMIT 16`).all() as unknown as MovementRow[];
@@ -1112,7 +1171,8 @@ export class SharedPilotStore {
         const visit = latestResidentActivity(fishing.visits, id);
         const atDock = visit && fishingPose(visit, at);
         return {
-          residentId: id, place, position: atDock?.point ?? atCounter?.point ?? (movement ? positionOnWalk(toWalk(movement), at) : point(place)),
+          residentId: id, place, position: bench.visits.some(visit => visit.residentId === id && visit.stage === 'resting') ? BENCH_SEAT
+            : atDock?.point ?? atCounter?.point ?? (movement ? positionOnWalk(toWalk(movement), at) : point(place)),
           movement: movement ? publicMovement(movement) : null,
         };
       });
@@ -1137,11 +1197,24 @@ export class SharedPilotStore {
         .all() as unknown as SharedPilotProfile[];
       let firstExploration: FirstExplorationObservation | null = null;
       const self = residents.find(resident => resident.residentId === viewerResidentId)!;
+      const recentRest = this.recentBenchRest(viewerResidentId, at);
+      const restedRecently = Boolean(recentRest && at < recentRest.endedAt + BENCH_COOLDOWN_MS);
+      const engaged = Boolean(pendingWorksGoal) || meetingActive(social.meeting) || surveyActive(survey.task)
+        || [cafe.orders, fishing.visits, works.visits, bench.visits].some(visits => visits.some(visit =>
+          visit.residentId === viewerResidentId && visit.stage !== 'completed'));
+      const waitingForSiteBrief = briefs.some(brief => brief.driver === 'rules' && (brief.stage === 'travelling' || brief.stage === 'deciding'));
+      const busy = self.movement?.status === 'walking' || engaged || waitingForSiteBrief;
+      const local = nearbyAt(self.position, !busy && !bench.occupied && !restedRecently,
+        bench.occupied ? '已有居民在使用' : restedRecently ? '刚在这里休息过' : busy ? '先完成当前活动' : undefined);
+      const peer = residents.find(resident => resident.residentId !== viewerResidentId)!;
+      const peerDistance = localDistance(self.position, peer.position);
+      const nearby = peerDistance > 22 ? local : [...local, {
+        id: `resident.${peer.residentId}`, kind: 'resident' as const, metres: Math.round(peerDistance),
+        name: profiles.find(profile => profile.residentId === peer.residentId)?.name ?? `${peer.residentId} 号居民`,
+        activity: peer.movement?.status === 'walking' ? '正在路上' : '可以尝试邀请会面',
+      }];
       const firstTrip = social.firstExplorations?.[viewerResidentId];
-      if (profiles.some(profile => profile.residentId === viewerResidentId)
-        && !meetingActive(social.meeting) && !surveyActive(survey.task) && !pendingWorksGoal
-        && ![cafe.orders, fishing.visits, works.visits].some(visits => visits.some(visit =>
-          visit.residentId === viewerResidentId && visit.stage !== 'completed'))) {
+      if (profiles.some(profile => profile.residentId === viewerResidentId) && !engaged) {
         const sites = explorationScenes({ cafe, fishing, freeWorksChecks: 2 - works.visits.filter(visit => visit.stage !== 'completed').length });
         if (!firstTrip && self.movement?.status !== 'walking') {
           firstExploration = { phase: 'intro', place: self.place, destinations: sites.filter(site => site.place !== self.place) };
@@ -1161,6 +1234,9 @@ export class SharedPilotStore {
         revision: events.at(-1)?.id ?? '0', residents, events,
         cafe,
         fishing,
+        bench,
+        nearby,
+        recentRest,
         works: { ...works, briefs, events: [...works.events, ...goals.flatMap(({ row, view }) => worksGoalEvents(row, view))]
           .sort((a, b) => a.happenedAt - b.happenedAt) },
         pendingWorksGoal,

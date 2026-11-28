@@ -11,12 +11,13 @@ import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, works
 import { fishingTalkSchema, goFishingSchema } from '../../../../lib/shared-pilot-fishing';
 import { explorationActionSchema } from '../../../../lib/shared-pilot-exploration';
 import { resolvePlayerNoteSchema, submitPlayerNoteSchema } from '../../../../lib/shared-pilot-notes';
+import { benchRestSchema } from '../../../../lib/shared-pilot-bench';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 14;
+const PILOT_RUNTIME_VERSION = 15;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -118,7 +119,8 @@ function readCommand(body: Record<string, unknown> | undefined): SharedAgentComm
   if (!body) return;
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
   for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
-    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema, explorationActionSchema, resolvePlayerNoteSchema]) {
+    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema, explorationActionSchema,
+    resolvePlayerNoteSchema, benchRestSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
   }

@@ -1220,6 +1220,12 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const [x, y, z] = resident.position;
         const previous = move?.points.at(-2);
         observedPosition.set(x, y, z);
+        const rest = projection?.bench.visits.find(visit => visit.residentId === id && visit.stage === 'resting');
+        if (rest && serverTime < rest.endsAt) {
+          patrol.observe(poseDt, seatedHips, seatFacing, false, undefined, true);
+          continue;
+        }
+        if (rest) observedPosition.copy(seatFront);
         const fishingVisit = projection && latestResidentActivity(projection.fishing.visits, id);
         const onDock = fishingVisit && fishingPose(fishingVisit, serverTime);
         if (onDock) {

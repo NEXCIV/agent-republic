@@ -11,12 +11,13 @@ import { worksBriefActive, type CancelWorksGoal, type InspectWorks, type SurveyW
 import type { FishingTalk, GoFishing } from './shared-pilot-fishing';
 import type { ExplorationAction } from './shared-pilot-exploration';
 import type { ResolvePlayerNote, SubmitPlayerNote } from './shared-pilot-notes';
+import type { BenchRest } from './shared-pilot-bench';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
 export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest
   | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | ExplorationAction
-  | ResolvePlayerNote | { action: 'observe' };
+  | ResolvePlayerNote | BenchRest | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
   '02': ['cafe', 'works', 'plaza', 'governance'],
@@ -196,6 +197,8 @@ export class SharedPilotRuntime {
         return this.store.actOnWorksGoal(token, command);
       case 'goFishing':
         return this.store.goFishing(token, command);
+      case 'restAtBench':
+        return this.store.restAtBench(token, command);
       case 'fishingTalk':
         return this.store.fishingTalk(command.question, token);
       case 'invite':
@@ -309,6 +312,7 @@ export class SharedPilotRuntime {
       if (observation.works.visits.some(visit => visit.stage !== 'completed')) continue;
       if (observation.works.briefs.some(brief => brief.stage !== 'waiting' && worksBriefActive(brief))) continue;
       if (observation.fishing.visits.some(visit => visit.stage !== 'completed')) continue;
+      if (observation.bench.occupied) continue;
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation, external.size === 0)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
@@ -336,9 +340,9 @@ export class SharedPilotRuntime {
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, exploration } = this.observeConnection(this.connections[0]!);
+    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, bench, exploration } = this.observeConnection(this.connections[0]!);
     const external = this.externallyControlled(profiles);
-    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, exploration,
+    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, bench, exploration,
       engines: this.connections.map(({ residentId }) => {
         const run = this.modelRuns.get(residentId);
         if (run) return { residentId, driver: 'MODEL' as const, status: run.view.status };
@@ -347,7 +351,7 @@ export class SharedPilotRuntime {
         return { residentId, driver: 'EXTERNAL' as const, connected: lastCall !== undefined && serverTime - lastCall <= 120000 };
       }),
       running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting)
-        || surveyActive(survey.task) || works.briefs.some(worksBriefActive) || fishing.visits.some(visit => visit.stage !== 'completed')),
+        || surveyActive(survey.task) || works.briefs.some(worksBriefActive) || fishing.visits.some(visit => visit.stage !== 'completed') || bench.occupied),
     };
   }
 

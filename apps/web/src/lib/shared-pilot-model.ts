@@ -14,10 +14,11 @@ import type { GoFishing } from './shared-pilot-fishing';
 import { explorationTextSchema, type ExplorationAction, type ExplorationActivity, type ExplorationPlace } from './shared-pilot-exploration';
 import { SHARED_AVATARS } from './shared-pilot-profiles';
 import { noteActivitySchema, resolvePlayerNoteSchema, type NoteActivity, type ResolvePlayerNote } from './shared-pilot-notes';
+import { BENCH_ID, type BenchRest } from './shared-pilot-bench';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
-type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing | ExplorationAction;
+type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing | ExplorationAction | BenchRest;
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
 type ExplorationChoice = { action: 'exploreSite'; place: ExplorationPlace } | { action: 'exploreArrival'; activity: ExplorationActivity };
 type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] };
@@ -217,6 +218,7 @@ function availableModelChoices(observation: ModelObservation, canAskCafe: boolea
     || works.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
   const fishingActive = fishing.visits.filter(visit => visit.stage !== 'completed');
   if (fishingActive.some(visit => visit.residentId === actor)) return choices;
+  if (observation.bench.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
   const task = survey.task;
   if (task && surveyActive(task)) {
     if (task.status === 'proposed' && task.invitee === actor) {
@@ -253,7 +255,8 @@ function availableModelChoices(observation: ModelObservation, canAskCafe: boolea
   }
   const peer = actor === '01' ? '02' : '01';
   const inspections = works.visits.filter(visit => visit.stage !== 'completed');
-  if (!followUp && !activeBriefs.length && !inspections.length && !fishingActive.length && !cafe.orders.some(order => order.stage !== 'completed')) {
+  if (!followUp && !activeBriefs.length && !inspections.length && !fishingActive.length
+    && !observation.bench.occupied && !cafe.orders.some(order => order.stage !== 'completed')) {
     add(`invite:${peer}`, '邀请另一位居民到咖啡街见面', { action: 'invite', target: peer, venue: 'cafe', requestId: randomUUID() });
     if (survey.eligibleMeetingId) add(`survey:${survey.eligibleMeetingId}:propose`, '提议共同调研公共建设中心',
       { action: 'proposeSurvey', meetingId: survey.eligibleMeetingId, requestId: randomUUID() });
@@ -274,6 +277,9 @@ function availableModelChoices(observation: ModelObservation, canAskCafe: boolea
   if (own.place === 'pier' && !fishing.visits.some(visit => visit.residentId === actor && at < (visit.endsAt ?? at) + 90000)) {
     add(`${prefix}fishing:cast`, fishing.occupied ? '在北岸码头等候钓位，再钓一竿' : '在北岸码头钓一竿',
       { action: 'goFishing', requestId: randomUUID() });
+  }
+  if (!observation.pendingWorksGoal && observation.nearby.some(item => item.kind === 'object' && item.id === BENCH_ID && item.available)) {
+    add(`${prefix}rest:bench`, '在附近的咖啡街长椅坐一会儿', { action: 'restAtBench', benchId: BENCH_ID, requestId: randomUUID() });
   }
   return followUp ? choices.slice(1) : choices;
 }
@@ -315,6 +321,8 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     memories: observation.privateSocial.memories.slice(-3).map(({ text }) => text),
     exploration: first && { ...first, placeName: CITY_PLACES[first.place], role },
     playerNote: playerNote?.text,
+    nearby: observation.nearby,
+    lastBenchRest: observation.recentRest,
     choices: choices.map(({ id, label, speech, exploration }) => ({ id, label, surveyIntents: speech?.surveyIntents, exploration })),
   };
   const tokenLimit = config.endpoint.hostname === MIMO_HOST
@@ -329,6 +337,7 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
       'For an exploration choice, return exactly {"choice":"the-id","text":"one natural first-person Chinese line, at most 38 characters"}. On intro, react with curiosity using your current place and the given site observations, then say where you want to go. On arrival, ask the contact a real question if choosing ask, or react to the observed activity if choosing look. Only refer to the given facts. Do not claim to have arrived before travel or invent NPC replies.',
       'When exploration.phase is followUp, use the most recent local exchange and the current site state to decide whether to do an available activity here or leave for a different place. Return only {"choice":"the-id"}.',
       'When playerNote is present it is private advice from your player. Consider your role, current location and the observed world. Return exactly {"choice":"the-id","decision":"adopted or adapted","reason":"brief Chinese reason for your player"} for an activity, or choose note:skip and decision skipped. Never publish or repeat the private note in public dialogue. Decide independently.',
+      'Nearby describes people and facilities around your actual position. Consider your last completed bench rest when deciding whether to rest, explore or meet someone.',
     ].join(' ') },
     { role: 'user', content: JSON.stringify(data) },
   ] });

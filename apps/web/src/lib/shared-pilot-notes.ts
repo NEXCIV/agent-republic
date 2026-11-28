@@ -5,6 +5,7 @@ import { COFFEE_MENU, orderCoffeeSchema } from './shared-pilot-cafe';
 import { safePilotSpeech } from './shared-pilot-exploration';
 import { goFishingSchema } from './shared-pilot-fishing';
 import { inspectWorksSchema, WORKS_CHECKS } from './shared-pilot-works';
+import { benchRestSchema } from './shared-pilot-bench';
 
 export const NOTE_MAX_LENGTH = SHARED_PILOT_SPEECH_LIMIT;
 export const NOTE_LIFETIME_MS = 15 * 60_000;
@@ -15,7 +16,7 @@ export const submitPlayerNoteSchema = z.object({
 }).strict();
 
 export const noteActivitySchema = z.union([
-  sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema.options[0], orderCoffeeSchema, inspectWorksSchema, goFishingSchema,
+  sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema.options[0], orderCoffeeSchema, inspectWorksSchema, goFishingSchema, benchRestSchema,
 ]);
 const resolution = { action: z.literal('resolvePlayerNote'), noteId, reason: noteText };
 export const resolvePlayerNoteSchema = z.union([
@@ -48,5 +49,6 @@ export function noteActivityLabel(activity: NoteActivity) {
     case 'orderCoffee': return `点一杯${COFFEE_MENU[activity.drink]}`;
     case 'inspectWorks': return `巡查${WORKS_CHECKS[activity.checkId].label}`;
     case 'goFishing': return '去北岸码头钓鱼';
+    case 'restAtBench': return '到咖啡街长椅休息';
   }
 }

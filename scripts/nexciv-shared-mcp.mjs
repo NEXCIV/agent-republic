@@ -30,6 +30,7 @@ const noteActivities = [
   z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
   z.strictObject({ requestId, action: z.literal('inspectWorks'), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
   z.strictObject({ requestId, action: z.literal('goFishing') }),
+  z.strictObject({ requestId, action: z.literal('restAtBench'), benchId: z.literal('cafe.bench') }),
 ];
 const action = z.union([
   ...noteActivities,
@@ -57,9 +58,9 @@ const resolution = z.union([
 ]);
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-shared', version: '0.6.0' });
+  const server = new McpServer({ name: 'nexciv-shared', version: '0.7.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取居民、城市及 firstExploration。playerNotes 仅含本居民的私人纸条，用 resolve_player_note 回复待处理建议。首次探索用 exploreSite 启程，到场用 exploreArrival 观察或询问。pendingWorksGoal 列出网页调研动作。',
+    description: '读取本居民的 nearby、recentRest 和城市状态。发现可用长椅时可用 restAtBench。playerNotes 仅含本居民的私人纸条。首次探索用 exploreSite 启程，到场用 exploreArrival 互动。pendingWorksGoal 列出网页调研动作。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
