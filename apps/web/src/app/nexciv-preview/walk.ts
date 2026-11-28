@@ -3,6 +3,7 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
+import { cityGaitLoader, matchCityGait } from './city-gait';
 import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, createPromenadeLightPools, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
 import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING, COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
@@ -1981,10 +1982,20 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
+  const loadCityGait = cityGaitLoader(signal);
   async function request(name: string, priority: RequestPriority = 'auto') {
     const response = await fetch(`${ASSET_PATH}${name}`, { signal, priority });
     if (!response.ok) throw new Error(`Missing preview asset ${name}`);
     return response;
+  }
+
+  async function loadCityAgent(file: string, priority: RequestPriority = 'auto') {
+    const match = loadCityGait(file, priority);
+    const bytes = await request(file, priority).then((response) => response.arrayBuffer());
+    const gait = await matchCityGait(await match, bytes);
+    signal.throwIfAborted();
+    const asset = await loader.parseAsync(bytes, ASSET_PATH);
+    return { ...asset, gait };
   }
 
   function loadPromenadeAsset(file: string, install: (asset: THREE.Group) => void, priority: RequestPriority = 'low') {
@@ -2033,8 +2044,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function loadCafeVendor() {
     if (!sharedMode || vendorLoading || ended || contextLost) return;
     vendorLoading = true;
-    request(SHARED_AVATARS.service.asset, 'low').then(response => response.arrayBuffer())
-      .then(bytes => loader.parseAsync(bytes, ASSET_PATH)).then(asset => {
+    loadCityAgent(SHARED_AVATARS.service.asset, 'low').then(asset => {
         if (ended || contextLost) { disposeModel(asset.scene); return; }
         try {
           const patrol = createAgentPatrol(asset, [CAFE_HOST, CAFE_COUNTER], [counter.x, counter.z]);
@@ -2268,12 +2278,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   function loadMarketGuest() {
     if (!route || marketGuestRequested || ended || contextLost) return;
     marketGuestRequested = true;
-    Promise.all([
-      request('market-greeting.json', 'low').then((response) => response.json() as Promise<{ points: RoutePoint[] }>),
-      request('agent-02.glb', 'low').then((response) => response.arrayBuffer()),
-    ]).then(async ([layout, bytes]) => {
+    request('market-greeting.json', 'low')
+      .then((response) => response.json() as Promise<{ points: RoutePoint[] }>).then(async (layout) => {
       if (ended || contextLost) return;
-      const asset = await loader.parseAsync(bytes, ASSET_PATH);
+      const asset = await loadCityAgent('agent-02.glb', 'low');
       if (ended || contextLost) { disposeModel(asset.scene); return; }
       try {
         const patrol = createAgentPatrol(asset, layout.points, [marketEntrance.x, marketEntrance.z]);
@@ -2290,9 +2298,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function loadSiteHost(point: CityPoint) {
     siteHostRequested = true;
-    request(sharedMode ? SHARED_AVATARS.technician.asset : 'agent-02.glb', 'low').then((response) => response.arrayBuffer()).then(async (bytes) => {
-      if (ended || contextLost) return;
-      const asset = await loader.parseAsync(bytes, ASSET_PATH);
+    loadCityAgent(sharedMode ? SHARED_AVATARS.technician.asset : 'agent-02.glb', 'low').then((asset) => {
       if (ended || contextLost) { disposeModel(asset.scene); return; }
       const position = new THREE.Vector3(...point);
       const facing = position.clone().add(new THREE.Vector3(-1, 0, -0.4));
@@ -2365,11 +2371,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       sharedActors.delete(id);
       sharedJourneys.delete(id);
     };
-    let asset: GLTF | undefined;
+    let asset: Awaited<ReturnType<typeof loadCityAgent>> | undefined;
     try {
-      const bytes = await (await request(file)).arrayBuffer();
-      if (!current()) return;
-      asset = await loader.parseAsync(bytes, ASSET_PATH);
+      asset = await loadCityAgent(file);
       if (!current()) { disposeModel(asset.scene); return; }
       const start: RoutePoint = [...CAFE_COUNTER];
       const facing: RoutePoint = [start[0], start[1], start[2] + 1];

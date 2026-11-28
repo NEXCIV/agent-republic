@@ -78,6 +78,8 @@ export function motionSources(sourceDir, readGlb, rig, solveSourcePose) {
   const ualRig = rig(ual);
   const walk = solveSourcePose(ual, ualRig, 'Walk_Loop');
   const ualSource = trackSource(ualRig.byName, walk.sample, false);
+  const jogRig = rig(ual);
+  const jog = { rig: jogRig, ...solveSourcePose(ual, jogRig, 'Jog_Fwd_Loop') };
 
   const { skeleton, clip } = new BVHLoader().parse(readFileSync(resolve(sourceDir, 'Neutral_FW.bvh'), 'utf8'));
   const bones = Object.fromEntries(skeleton.bones.map((bone) => [bone.name, bone]));
@@ -91,7 +93,7 @@ export function motionSources(sourceDir, readGlb, rig, solveSourcePose) {
     root.updateMatrixWorld(true);
   }, true);
 
-  return [['Quaternius', ualSource], ['100STYLE', captured]];
+  return { walkSources: [['Quaternius', ualSource], ['100STYLE', captured]], jog };
 }
 
 function setWorldRotation(bone, rotation) {
@@ -292,4 +294,107 @@ export function bakePreviewLocomotion(label, source, target, soles, baseline, tu
   for (let i = 4; i < hipKeys.length; i += 3) maxHipStep = Math.max(maxHipStep, Math.abs(hipKeys[i] - hipKeys[i - 3]));
   if (maxHipStep > 0.013) throw new Error(`${label}: hip moves ${maxHipStep.toFixed(4)}m in one frame`);
   return { clip: new THREE.AnimationClip(`${label}_${turning ? 'Turn' : 'Walk'}`, duration, baked), error, lift, maxHipStep };
+}
+
+function cutMotion(clip, name, start, end, loop = false) {
+  const duration = end - start;
+  const count = Math.round(duration * fps);
+  const times = Array.from({ length: count + 1 }, (_, index) => index * duration / count);
+  const tracks = clip.tracks.filter((track) => !track.name.startsWith('Root.')).map((track) => {
+    const sample = track.createInterpolant();
+    const initial = sample.evaluate(start).slice();
+    const size = track.getValueSize();
+    const rotation = new THREE.Quaternion();
+    const reference = new THREE.Quaternion().fromArray(initial);
+    const values = times.flatMap((time) => {
+      const value = Array.from(sample.evaluate(start + time));
+      if (!loop || time < duration - 0.06) return value;
+      const weight = smoothstep(time, duration - 0.06, duration);
+      if (size === 4) return rotation.fromArray(value).slerp(reference, weight).toArray();
+      return value.map((component, index) => lerp(component, initial[index], weight));
+    });
+    const Track = size === 4 ? THREE.QuaternionKeyframeTrack : THREE.VectorKeyframeTrack;
+    return new Track(track.name, times, values);
+  });
+  return new THREE.AnimationClip(name, duration, tracks);
+}
+
+export function cityLocomotion(walk, turn) {
+  // Cut the central two steps at cruising speed. The city supplies root motion.
+  const start = 0.39 + 3 * stepTime;
+  const duration = 2 * stepTime;
+  return {
+    stride: walkPath.speed * duration,
+    clips: [
+      cutMotion(walk, 'Quaternius_WalkLoop', start, start + duration, true),
+      cutMotion(turn, 'Quaternius_Pivot', 0.25, 1.50),
+    ],
+  };
+}
+
+export function bakeCityJog(target, soles, jog) {
+  const source = jog.rig;
+  const links = [
+    ...upperBody.map(([key, sourceName, , child, sourceChild]) => [key, sourceName, child, sourceChild]),
+    ...sides.flatMap((side) => {
+      const letter = side.toLowerCase();
+      return [
+        [`Thigh.${side}`, `thigh_${letter}`, `Shin.${side}`, `calf_${letter}`],
+        [`Shin.${side}`, `calf_${letter}`, `Foot.${side}`, `foot_${letter}`],
+        [`Foot.${side}`, `foot_${letter}`],
+      ];
+    }),
+  ].map(([key, sourceName, child, sourceChild]) => {
+    const targetRotation = target.bind[key].rotation;
+    const sourceRotation = source.bind[sourceName].rotation;
+    const alignment = new THREE.Quaternion();
+    if (child && sourceChild) {
+      alignment.setFromUnitVectors(
+        target.bind[child].position.clone().sub(target.bind[key].position).normalize(),
+        source.bind[sourceChild].position.clone().sub(source.bind[sourceName].position).normalize(),
+      );
+    }
+    return { bone: target.byName[key], sourceBone: source.byName[sourceName],
+      basis: sourceRotation.clone().invert().multiply(alignment).multiply(targetRotation), values: [] };
+  });
+  for (const [key, bone] of Object.entries(target.byName)) {
+    bone.quaternion.copy(target.bind[key].localRotation);
+    bone.position.copy(target.bind[key].localPosition);
+  }
+  const legLength = (rig, knee, foot) =>
+    rig.byName[knee].position.length() + rig.byName[foot].position.length();
+  const scale = legLength(target, 'Shin.L', 'Foot.L') / legLength(source, 'calf_l', 'foot_l');
+  const hips = target.byName.Hips;
+  const hipKeys = [];
+  const count = Math.round(jog.duration * fps);
+  const times = Array.from({ length: count + 1 }, (_, index) => index * jog.duration / count);
+  const center = source.bind.pelvis.position;
+  const pelvis = new THREE.Vector3();
+  const root = new THREE.Vector3();
+  jog.sample(0);
+  const start = source.byName.root.getWorldPosition(new THREE.Vector3());
+  for (const time of times) {
+    jog.sample(time);
+    source.byName.pelvis.getWorldPosition(pelvis).sub(source.byName.root.getWorldPosition(root));
+    hips.position.copy(target.bind.Hips.localPosition);
+    hips.position.x += (pelvis.x - center.x) * scale;
+    hips.position.z += (pelvis.z - center.z) * scale;
+    for (const { bone, sourceBone, basis, values } of links) {
+      const rotation = sourceBone.getWorldQuaternion(new THREE.Quaternion()).multiply(basis);
+      setWorldRotation(bone, rotation);
+      values.push(...bone.quaternion.toArray());
+    }
+    const soleY = Math.min(...soles.flatMap(({ foot, points }) =>
+      points.map((point) => foot.localToWorld(point.clone()).y)));
+    const sourceSole = Math.min(...['l', 'r'].map((side) =>
+      source.byName[`ball_${side}`].getWorldPosition(new THREE.Vector3()).y));
+    hips.position.y += clamp((sourceSole - 0.024) * scale, 0, 0.12) - soleY;
+    hipKeys.push(...hips.position.toArray());
+  }
+  const tracks = links.map(({ bone, values }) => new THREE.QuaternionKeyframeTrack(
+    `${THREE.PropertyBinding.sanitizeNodeName(bone.name)}.quaternion`, times, values,
+  ));
+  tracks.push(new THREE.VectorKeyframeTrack('Hips.position', times, hipKeys));
+  const clip = new THREE.AnimationClip('Quaternius_JogLoop', jog.duration, tracks);
+  return { stride: root.distanceTo(start) * scale, clip: cutMotion(clip, clip.name, 0, jog.duration, true) };
 }

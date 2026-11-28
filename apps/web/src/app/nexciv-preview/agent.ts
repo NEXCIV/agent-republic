@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import type { CityAgentAsset } from './city-gait';
 
 export type RoutePoint = [number, number, number];
 export type AgentPhase = 'outbound' | 'arrived' | 'inbound' | 'atNexus';
@@ -10,6 +11,7 @@ export type PatrolCue = {
 };
 
 const SPEED = 1.25;
+const JOG_SPEED = 2.4;
 const STOP_SECONDS = 4;
 const UP = new THREE.Vector3(0, 1, 0);
 const PITCH_AXIS = new THREE.Vector3(1, 0, 0);
@@ -50,7 +52,7 @@ function createInstallationPose(asset: GLTF, mixer: THREE.AnimationMixer) {
   return mixer.clipAction(new THREE.AnimationClip('Install lighting', 3.2, tracks, THREE.AdditiveAnimationBlendMode));
 }
 
-export function benchIdle(idle: THREE.AnimationClip) {
+function benchIdle(idle: THREE.AnimationClip) {
   const clip = idle.clone();
   clip.name = 'Bench rest';
   const delta = new THREE.Quaternion();
@@ -89,12 +91,13 @@ export function measuredRoute(points: RoutePoint[]) {
   };
 }
 
-export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDestination: [number, number], moveSpeed = SPEED) {
+export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], initialDestination: [number, number], moveSpeed = SPEED) {
   let { length, positionAt } = measuredRoute(points);
   let destination = initialDestination;
+  const gait = asset.gait;
   const idleClip = THREE.AnimationClip.findByName(asset.animations, 'Idle');
-  const walkClip = THREE.AnimationClip.findByName(asset.animations, 'Walk');
-  const stride = Number(asset.scene.children.find((object) => object.userData.walk_stride_m)?.userData.walk_stride_m);
+  const walkClip = gait?.walk ?? THREE.AnimationClip.findByName(asset.animations, 'Walk');
+  const stride = gait?.stride ?? Number(asset.scene.children.find((object) => object.userData.walk_stride_m)?.userData.walk_stride_m);
   if (!idleClip || !walkClip || !Number.isFinite(stride) || stride <= 0) {
     throw new Error('Invalid Agent motion clips or stride');
   }
@@ -114,7 +117,9 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   const mixer = new THREE.AnimationMixer(asset.scene);
   const idle = mixer.clipAction(idleClip).play();
   const walk = mixer.clipAction(walkClip);
-  walk.setEffectiveTimeScale(moveSpeed * walkClip.duration / stride);
+  walk.setEffectiveTimeScale(gait ? 0 : moveSpeed * walkClip.duration / stride);
+  const jog = gait && mixer.clipAction(gait.jog).setEffectiveTimeScale(0);
+  const pivot = gait && mixer.clipAction(gait.pivot).setLoop(THREE.LoopOnce, 1).setEffectiveTimeScale(0);
   const waveClip = THREE.AnimationClip.findByName(asset.animations, 'Wave');
   const wave = waveClip ? mixer.clipAction(waveClip).setLoop(THREE.LoopOnce, 1) : undefined;
   if (wave) wave.clampWhenFinished = true;
@@ -130,12 +135,18 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   const ahead = new THREE.Vector3();
   const behind = new THREE.Vector3();
   const heading = new THREE.Quaternion();
+  const relativeHeading = new THREE.Quaternion();
+  const previousPosition = new THREE.Vector3();
+  let turn: { from: THREE.Quaternion; to: THREE.Quaternion; elapsed: number; right: boolean } | undefined;
 
   let seatedPose: THREE.AnimationAction | undefined;
   const standingY = asset.scene.position.y;
-  function updatePose(dt: number, cue?: PatrolCue, heldAtStart = false, observed?: THREE.Vector3, walking?: boolean, seated = false) {
+  function updatePose(dt: number, cue?: PatrolCue, heldAtStart = false, observed?: THREE.Vector3, walking?: boolean,
+    seated = false, routeSpeed = moveSpeed, journeyDistance?: number) {
+    previousPosition.copy(root.position);
     if (observed) root.position.copy(observed);
     else positionAt(distance, root.position);
+    const travel = Math.hypot(root.position.x - previousPosition.x, root.position.z - previousPosition.z);
     const tangent = positionAt(distance + 0.45, ahead).sub(positionAt(distance - 0.45, behind));
     const alongRoute = Math.atan2(tangent.x * direction, tangent.z * direction);
     let yaw = alongRoute;
@@ -143,17 +154,58 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
     if (dwell > STOP_SECONDS - 1.1) yaw = alongRoute + Math.PI;
     if (cue?.face) yaw = Math.atan2(cue.face.x - root.position.x, cue.face.z - root.position.z);
     heading.setFromAxisAngle(UP, yaw);
-    if (dt > 0) root.quaternion.rotateTowards(heading, dt * 3.2);
-    else root.quaternion.copy(heading);
 
     const moving = walking ?? (!heldAtStart && (phase === 'outbound' || phase === 'inbound'));
+    if (pivot) {
+      const canPivot = dt > 0 && !moving && !seated && !cue?.gesture && travel < 0.015;
+      if (!canPivot || (turn && turn.to.angleTo(heading) > 0.22)) turn = undefined;
+      const angle = root.quaternion.angleTo(heading);
+      if (canPivot && !turn && angle >= 0.66 && angle <= 1.85) {
+        relativeHeading.copy(root.quaternion).invert().multiply(heading);
+        turn = { from: root.quaternion.clone(), to: heading.clone(), elapsed: 0,
+          right: relativeHeading.y * relativeHeading.w < 0 };
+      }
+      if (turn) {
+        turn.elapsed += dt;
+        const duration = pivot.getClip().duration;
+        if (turn.elapsed >= duration) {
+          root.quaternion.copy(turn.to);
+          turn = undefined;
+        } else {
+          // Match the actor's heading to the baked foot changes, in either direction.
+          const time = turn.right ? turn.elapsed : duration - turn.elapsed;
+          const amount = THREE.MathUtils.smoothstep(time, 0.05, 1.11);
+          root.quaternion.copy(turn.from).slerp(turn.to, turn.right ? amount : 1 - amount);
+        }
+      }
+    }
+    if (!turn) {
+      if (dt > 0) root.quaternion.rotateTowards(heading, dt * 3.2);
+      else root.quaternion.copy(heading);
+    }
+
     if (seated) seatedPose ??= mixer.clipAction(benchIdle(idleClip!));
-    const next = seated && seatedPose ? seatedPose : moving ? walk : (cue?.gesture === 'wave' && wave) || idle;
-    if ((dt > 0 || observed) && next !== action) {
+    const locomotion = jog && routeSpeed >= JOG_SPEED ? jog : walk;
+    const next = seated && seatedPose ? seatedPose : turn && pivot ? pivot
+      : moving && (!gait || dt > 0) ? locomotion : (cue?.gesture === 'wave' && wave) || idle;
+    if ((dt > 0 || observed || gait) && next !== action) {
       next.reset().setEffectiveWeight(1).play();
       if (dt > 0) next.crossFadeFrom(action, 0.18, false);
       else action.stop();
       action = next;
+    }
+    const stepLength = next === jog && gait ? gait.jogStride : stride;
+    if (gait && dt > 0 && next === locomotion) {
+      const duration = locomotion.getClip().duration;
+      if (journeyDistance !== undefined) {
+        // Network progress is authoritative along a planned path, including across dropped frames.
+        locomotion.time = (journeyDistance % stepLength) / stepLength * duration;
+      } else if (travel < Math.min(stepLength, 2)) {
+        locomotion.time = (locomotion.time + travel * duration / stepLength) % duration;
+      }
+    }
+    if (pivot && turn) {
+      pivot.time = turn.right ? turn.elapsed : pivot.getClip().duration - turn.elapsed;
     }
     const shouldNod = cue?.gesture === 'nod';
     if (shouldNod && !nodding) {
@@ -179,13 +231,14 @@ export function createAgentPatrol(asset: GLTF, points: RoutePoint[], initialDest
   return {
     root,
     observe(dt: number, position: THREE.Vector3, face: THREE.Vector3, moving = false, gesture?: PatrolCue['gesture'], seated = false) {
-      if (moving) walk.setEffectiveTimeScale(moveSpeed * walkClip.duration / stride);
+      if (moving && !gait) walk.setEffectiveTimeScale(moveSpeed * walkClip.duration / stride);
       updatePose(dt, { face, gesture }, false, position, moving, seated);
     },
     observeJourney(dt: number, progress: number, duration: number) {
       distance = progress * length;
-      walk.setEffectiveTimeScale(length / duration * walkClip.duration / stride);
-      updatePose(dt, undefined, false, undefined, progress < 1);
+      const routeSpeed = length / duration;
+      if (!gait) walk.setEffectiveTimeScale(routeSpeed * walkClip.duration / stride);
+      updatePose(dt, undefined, false, undefined, progress < 1, false, routeSpeed, distance);
     },
     get phase() { return phase; },
     get progress() { return Math.round(100 * distance / length); },

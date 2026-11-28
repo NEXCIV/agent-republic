@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { URL } from 'node:url';
 import * as THREE from 'three';
-import { bakePreviewLocomotion, motionSources, walkPath } from './preview-locomotion.mjs';
+import { bakeCityJog, bakePreviewLocomotion, cityLocomotion, motionSources, walkPath } from './preview-locomotion.mjs';
 
 const sourceDir = process.argv[2];
 if (!sourceDir) throw new Error('Pass the directory containing the KayKit Rig_Medium GLBs.');
@@ -209,7 +209,18 @@ function bake(file, source, target, soles, name) {
   return { clip: new THREE.AnimationClip(name, motion.duration, tracks), hipKeys, worldPose };
 }
 
-const sources = motionSources(sourceDir, readGlb, rig, solveSourcePose);
+const { walkSources, jog } = motionSources(sourceDir, readGlb, rig, solveSourcePose);
+function clipJson(clip) {
+  // Keep sub-millimetre precision and avoid serializing the random runtime UUID.
+  const json = THREE.AnimationClip.toJSON(clip.optimize());
+  delete json.uuid;
+  for (const track of json.tracks) {
+    track.times = track.times.map((time) => +time.toFixed(5));
+    track.values = track.values.map((value) => +value.toFixed(5));
+  }
+  return json;
+}
+
 mkdirSync(output, { recursive: true });
 for (const id of ['02', '06']) {
   const file = readGlb(new URL(`agent-${id}.glb`, assets));
@@ -233,7 +244,7 @@ for (const id of ['02', '06']) {
       }
     }
   }
-  for (const [label, source] of sources) {
+  for (const [label, source] of walkSources) {
     for (const turning of [false, true]) {
       const { clip, error, lift, maxHipStep } = bakePreviewLocomotion(label, source, target, soles, standing, turning);
       clips.push(clip);
@@ -241,16 +252,13 @@ for (const id of ['02', '06']) {
         'maximum sole lift (cm)', (lift * 100).toFixed(1), 'largest hip frame step (mm)', (maxHipStep * 1000).toFixed(1));
     }
   }
-  const sidecar = { modelHash: file.hash, seat, walkPath, clips: clips.map((clip) => {
-    // Keep sub-millimetre precision and avoid serializing the random runtime UUID.
-    const json = THREE.AnimationClip.toJSON(clip.optimize());
-    delete json.uuid;
-    for (const track of json.tracks) {
-      track.times = track.times.map((time) => +time.toFixed(5));
-      track.values = track.values.map((value) => +value.toFixed(5));
-    }
-    return json;
-  }) };
+  const gait = cityLocomotion(clips.find((clip) => clip.name === 'Quaternius_Walk'),
+    clips.find((clip) => clip.name === 'Quaternius_Turn'));
+  const jogging = bakeCityJog(target, soles, jog);
+  const sidecar = { modelHash: file.hash, seat, walkPath, clips: clips.map(clipJson) };
   writeFileSync(new URL(`agent-${id}.json`, output), JSON.stringify(sidecar));
+  writeFileSync(new URL(`agent-${id}-city-v1.json`, output),
+    JSON.stringify({ modelHash: file.hash, stride: gait.stride, jogStride: jogging.stride,
+      clips: [...gait.clips, jogging.clip].map(clipJson) }));
   console.log(id, 'seat', seat, 'clips', clips.map((clip) => clip.name));
 }
