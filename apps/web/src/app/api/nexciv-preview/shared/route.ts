@@ -6,12 +6,13 @@ import { SharedPilotRuntime, type SharedAgentCommand } from '../../../../lib/sha
 import { SharedPilotError } from '../../../../lib/shared-pilot-store';
 import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, isSharedPilotAvatar } from '../../../../lib/shared-pilot-profiles';
 import { parseModelConfig } from '../../../../lib/shared-pilot-model';
+import { cafeTalkSchema, orderCoffeeSchema } from '../../../../lib/shared-pilot-cafe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 4;
+const PILOT_RUNTIME_VERSION = 5;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -107,7 +108,7 @@ async function readBody(request: NextRequest): Promise<Record<string, unknown> |
 function readCommand(body: Record<string, unknown> | undefined): SharedAgentCommand | undefined {
   if (!body) return;
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
-  for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema]) {
+  for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema, orderCoffeeSchema, cafeTalkSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
   }
@@ -116,11 +117,15 @@ function readCommand(body: Record<string, unknown> | undefined): SharedAgentComm
 async function changeProfile(request: NextRequest, file: string, config: NonNullable<ReturnType<typeof connections>>) {
   const origin = `${request.nextUrl.protocol}//${request.headers.get('host')}`;
   if (request.headers.get('origin') !== origin) return json({ error: '请从当前本机城市页面操作。' }, 403);
-  if (!config.profileResidents.length) return json({ error: '本机试玩名额已分配给测试 Agent。' }, 409);
   const body = await readBody(request);
   if (!body) return json({ error: '角色操作无效。' }, 400);
   const session = request.cookies.get(profileCookie)?.value ?? '';
   const pilot = pilotFor(file, config.externalResidents);
+  const chat = cafeTalkSchema.safeParse(body);
+  if (chat.success) return json(pilot.cafeTalk(chat.data.question));
+  const coffee = orderCoffeeSchema.safeParse(body);
+  if (coffee.success) return json(pilot.orderCoffee(session, config.profileResidents, coffee.data));
+  if (!config.profileResidents.length) return json({ error: '本机试玩名额已分配给测试 Agent。' }, 409);
   if (body.action === 'claim') {
     const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim() : '';
     const { avatar } = body;

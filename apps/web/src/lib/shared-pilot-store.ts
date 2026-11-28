@@ -9,14 +9,15 @@ import {
 import type { CityPoint } from './cafe-geometry';
 import { positionOnWalk, type CityRoute, type CityWalk } from './city-movement';
 import { CITY_MAP, planCityWalk } from './city-navigation';
-import { advanceSocial, emptySocialState, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
+import { advanceSocial, emptySocialState, meetingActive, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
 import { advanceSurvey, emptySurveyState, performSurvey, publicSurvey, SURVEY_CHECKPOINTS, surveyActive, SurveyActionError, type SurveyState, type SurveyReceipt } from './shared-pilot-survey';
 import { SHARED_AVATARS, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, type SharedPilotProfile, type SharedPilotProfileView } from './shared-pilot-profiles';
+import { CAFE_ORDERS_TABLE, CAFE_QUEUE, cafePose, CafeOrders, latestCoffeeOrder, orderCoffeeSchema } from './shared-pilot-cafe';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
 const APPLICATION_ID = 0x4e585350; // NXSP
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 const CREDENTIAL_LIFETIME = 3600000;
 const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
@@ -28,7 +29,8 @@ const V1_TABLES = [
 ];
 const V2_TABLES = [...V1_TABLES, 'shared_pilot_social'];
 const V3_TABLES = [...V2_TABLES, 'shared_pilot_survey'];
-const EXPECTED_TABLES = [...V3_TABLES, 'shared_pilot_profiles'].sort();
+const V5_TABLES = [...V3_TABLES, 'shared_pilot_profiles'].sort();
+const EXPECTED_TABLES = [...V5_TABLES, 'shared_pilot_cafe_orders'].sort();
 const PROFILE_TABLE = `CREATE TABLE shared_pilot_profiles (
   resident_id TEXT PRIMARY KEY REFERENCES shared_pilot_residents(id),
   name TEXT NOT NULL, avatar TEXT NOT NULL CHECK(avatar IN (${Object.keys(SHARED_AVATARS).map((id) => `'${id}'`).join(',')})),
@@ -169,6 +171,7 @@ function toReceipt(row: MovementRow): SharedPilotReceipt {
 /** Operator-only local store; tokens are emitted at rotation, never stored raw. */
 export class SharedPilotStore {
   private readonly db: DatabaseSync;
+  private readonly coffee: CafeOrders;
 
   constructor(filename: string, private readonly clock: () => number) {
     const sqlite = process.getBuiltinModule?.('node:sqlite') as typeof import('node:sqlite') | undefined;
@@ -178,9 +181,10 @@ export class SharedPilotStore {
     const initialAt = existing ? null : checkTime(clock());
     mkdirSync(path.dirname(file), { recursive: true });
     this.db = new sqlite.DatabaseSync(file);
+    this.coffee = new CafeOrders(this.db);
     try {
       // Reject unrelated DBs before setting WAL or running any schema changes.
-      let migrateFrom: 1 | 2 | 3 | 4 | undefined;
+      let migrateFrom: 1 | 2 | 3 | 4 | 5 | undefined;
       if (existing) {
         const application = Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
@@ -188,7 +192,7 @@ export class SharedPilotStore {
         if (application === APPLICATION_ID && version === 1 && JSON.stringify(tables) === JSON.stringify(V1_TABLES)) migrateFrom = 1;
         if (application === APPLICATION_ID && version === 2 && JSON.stringify(tables) === JSON.stringify(V2_TABLES)) migrateFrom = 2;
         if (application === APPLICATION_ID && version === 3 && JSON.stringify(tables) === JSON.stringify(V3_TABLES)) migrateFrom = 3;
-        if (application === APPLICATION_ID && version === 4 && JSON.stringify(tables) === JSON.stringify(EXPECTED_TABLES)) migrateFrom = 4;
+        if (application === APPLICATION_ID && (version === 4 || version === 5) && JSON.stringify(tables) === JSON.stringify(V5_TABLES)) migrateFrom = version;
         if (!migrateFrom && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
           throw new SharedPilotError('INCOMPATIBLE_DB', 'Refusing to open a non-pilot database.');
         }
@@ -233,6 +237,7 @@ export class SharedPilotStore {
         CREATE TABLE shared_pilot_social (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);
         CREATE TABLE shared_pilot_survey (id INTEGER PRIMARY KEY CHECK(id=1), state TEXT NOT NULL);
         ${PROFILE_TABLE}
+        ${CAFE_ORDERS_TABLE}
       `);
       this.db.prepare('INSERT INTO shared_pilot_meta (id,logical_now) VALUES (1,?)').run(at);
       this.db.prepare('INSERT INTO shared_pilot_social (id,state) VALUES (1,?)').run(JSON.stringify(emptySocialState()));
@@ -246,7 +251,7 @@ export class SharedPilotStore {
     }
   }
 
-  private migratePilot(version: 1 | 2 | 3 | 4) {
+  private migratePilot(version: 1 | 2 | 3 | 4 | 5) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       if (this.db.prepare('PRAGMA user_version').get()?.user_version === SCHEMA_VERSION) {
@@ -271,9 +276,10 @@ export class SharedPilotStore {
             FROM shared_pilot_profiles_v4;
           DROP TABLE shared_pilot_profiles_v4;
         `);
-      } else {
+      } else if (version < 4) {
         this.db.exec(PROFILE_TABLE);
       }
+      this.db.exec(CAFE_ORDERS_TABLE);
       this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}; COMMIT`);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
@@ -420,6 +426,7 @@ export class SharedPilotStore {
     if (advanceSocial(social, at, residents)) this.saveSocial(social);
     const survey = this.readSurvey();
     if (advanceSurvey(survey, at, residents)) this.saveSurvey(survey);
+    this.coffee.settle(at);
   }
 
   /** Server operator only. Issues a new secret and immediately invalidates the old one. */
@@ -461,37 +468,89 @@ export class SharedPilotStore {
       this.settle(at);
       const social = this.readSocial();
       const survey = this.readSurvey();
-      if (social.requests[actor][requestId] || survey.requests[actor][requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different city action.');
+      if (social.requests[actor][requestId] || survey.requests[actor][requestId] || this.coffee.find(actor, requestId)) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different city action.');
       const previous = this.findReceipt(actor, requestId);
       if (previous) {
         if (previous.destination !== destination.place) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different movement.');
         return toReceipt(previous);
       }
-      if (this.db.prepare('SELECT seq FROM shared_pilot_moves WHERE resident_id=? AND completed_at IS NULL').get(actor)) {
-        throw new SharedPilotError('BUSY', 'This resident already has an accepted movement.');
-      }
-      const count = Number(this.db.prepare('SELECT count(*) AS count FROM shared_pilot_moves WHERE resident_id=?').get(actor)?.count);
-      if (count >= MAX_MOVES_PER_RESIDENT) throw new SharedPilotError('LIMIT_REACHED', 'This resident has reached the local pilot journal limit.');
-      const resident = this.db.prepare('SELECT id,place FROM shared_pilot_residents WHERE id=?').get(actor) as unknown as ResidentRow;
+      if (this.coffee.active(actor, at)) throw new SharedPilotError('BUSY', '居民正在咖啡摊点单。');
       if (social.meeting?.status === 'talking' || (social.meeting?.status === 'accepted' && destination.place !== 'cafe')) {
         throw new SharedPilotError('BUSY', 'Resident is attending a café meeting.');
       }
       if (survey.task?.status === 'surveying' || (survey.task?.status === 'accepted' && destination.place !== 'works')) {
         throw new SharedPilotError('BUSY', 'Resident is attending a construction center survey.');
       }
-      const origin = this.residentPosition(actor, resident.place, at);
       const anchor = social.meeting?.status === 'accepted' ? meetingPoint(actor) : undefined;
       const checkpoint = survey.task?.status === 'accepted' ? SURVEY_CHECKPOINTS[actor] : undefined;
-      const route = planCityWalk(origin, checkpoint ? { x: checkpoint.x, z: checkpoint.z } : anchor ? { x: anchor[0], z: anchor[2] } : destination);
-      if (!route) throw new SharedPilotError('UNREACHABLE', 'No surveyed route to this pilot place.');
-      if (anchor) route.name = '咖啡街会面';
-      if (checkpoint) route.name = `共同调研 · ${checkpoint.label}`;
-      const arrivesAt = at + Math.ceil(route.metres / SPEED * 1000);
-      const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
-        VALUES (?,?,?,?,?,?)`).run(actor, requestId, destination.place, JSON.stringify(route), at, arrivesAt);
-      this.db.prepare("INSERT INTO shared_pilot_events (movement_seq,kind,happened_at) VALUES (?,'MOVE_STARTED',?)").run(result.lastInsertRowid, at);
+      const target = checkpoint ? { x: checkpoint.x, z: checkpoint.z } : anchor ? { x: anchor[0], z: anchor[2] } : destination;
+      this.beginMove(actor, requestId, destination.place, at, target, checkpoint ? `共同调研 · ${checkpoint.label}` : anchor ? '咖啡街会面' : undefined);
       this.settle(at); // A zero-distance route completes immediately, once.
       return toReceipt(this.findReceipt(actor, requestId)!);
+    });
+  }
+
+  private beginMove(actor: SharedPilotResidentId, requestId: string, place: SharedPilotPlaceId, at: number,
+    target: Parameters<typeof planCityWalk>[1], name?: string) {
+    if (this.db.prepare('SELECT seq FROM shared_pilot_moves WHERE resident_id=? AND completed_at IS NULL').get(actor)) {
+      throw new SharedPilotError('BUSY', 'This resident already has an accepted movement.');
+    }
+    const count = Number(this.db.prepare('SELECT count(*) AS count FROM shared_pilot_moves WHERE resident_id=?').get(actor)?.count);
+    if (count >= MAX_MOVES_PER_RESIDENT) throw new SharedPilotError('LIMIT_REACHED', 'This resident has reached the local pilot journal limit.');
+    const resident = this.db.prepare('SELECT id,place FROM shared_pilot_residents WHERE id=?').get(actor) as unknown as ResidentRow;
+    const route = planCityWalk(this.residentPosition(actor, resident.place, at), target);
+    if (!route) throw new SharedPilotError('UNREACHABLE', 'No surveyed route to this pilot place.');
+    if (name) route.name = name;
+    const arrivesAt = at + Math.ceil(route.metres / SPEED * 1000);
+    const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
+      VALUES (?,?,?,?,?,?)`).run(actor, requestId, place, JSON.stringify(route), at, arrivesAt);
+    this.db.prepare("INSERT INTO shared_pilot_events (movement_seq,kind,happened_at) VALUES (?,'MOVE_STARTED',?)").run(result.lastInsertRowid, at);
+    return arrivesAt;
+  }
+
+  orderCoffee(credential: string, input: unknown, profileResidents?: readonly SharedPilotResidentId[]) {
+    return this.transaction((at) => {
+      const actor = profileResidents ? this.browserProfile(credential, at)?.residentId : this.authenticate(credential, at);
+      if (!actor || (profileResidents && !profileResidents.includes(actor))) {
+        throw new SharedPilotError('AUTH_REQUIRED', '请先在此浏览器创建居民。');
+      }
+      const parsed = orderCoffeeSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '咖啡订单无效。');
+      const order = parsed.data;
+      this.settle(at);
+      const previous = this.coffee.find(actor, order.requestId);
+      if (previous) {
+        if (previous.drink !== order.drink) throw new SharedPilotError('CONFLICT', '请求编号已用于另一笔订单。');
+        return this.coffee.receipt(previous);
+      }
+      const social = this.readSocial();
+      const survey = this.readSurvey();
+      if (this.findReceipt(actor, order.requestId) || social.requests[actor][order.requestId] || survey.requests[actor][order.requestId]) {
+        throw new SharedPilotError('CONFLICT', '请求编号已用于其他城市行动。');
+      }
+      if (this.coffee.active(actor, at)) throw new SharedPilotError('BUSY', '请先等当前咖啡订单完成。');
+      if (meetingActive(social.meeting) || surveyActive(survey.task)) {
+        throw new SharedPilotError('BUSY', '居民正在赴约或调研，请稍后再点单。');
+      }
+      const [x, , z] = CAFE_QUEUE[actor];
+      const arrivesAt = this.beginMove(actor, order.requestId, 'cafe', at, { x, z }, '前往咖啡摊点单');
+      this.coffee.insert(actor, order, at, arrivesAt);
+      this.settle(at);
+      return this.coffee.receipt(this.coffee.find(actor, order.requestId)!);
+    });
+  }
+
+  cafeTalk(question: string, token?: string) {
+    return this.transaction((at) => {
+      const actor = token === undefined ? undefined : this.authenticate(token, at);
+      this.settle(at);
+      if (actor) {
+        const resident = this.db.prepare('SELECT place FROM shared_pilot_residents WHERE id=?').get(actor);
+        if (resident?.place !== 'cafe' || this.lastMove(actor)?.completed_at === null) {
+          throw new SharedPilotError('UNREACHABLE', '先到咖啡摊，再和阿棠说话。');
+        }
+      }
+      return this.coffee.talk(question, at);
     });
   }
 
@@ -505,6 +564,7 @@ export class SharedPilotStore {
       const social = this.readSocial();
       const survey = this.readSurvey();
       if (survey.requests[actor][parsed.data.requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a survey action.');
+      if (!social.requests[actor][parsed.data.requestId] && this.coffee.hasActiveOrder(at)) throw new SharedPilotError('BUSY', '咖啡摊有居民正在点单。');
       if (surveyActive(survey.task) && !social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('BUSY', 'A shared survey is active.');
       try {
         const residents = this.socialResidents(at);
@@ -528,6 +588,7 @@ export class SharedPilotStore {
       const social = this.readSocial();
       if (this.findReceipt(actor, parsed.data.requestId) || social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies another city action.');
       const survey = this.readSurvey();
+      if (!survey.requests[actor][parsed.data.requestId] && this.coffee.hasActiveOrder(at)) throw new SharedPilotError('BUSY', '咖啡摊有居民正在点单。');
       try {
         const residents = this.socialResidents(at);
         const receipt = performSurvey(survey, actor, parsed.data, at, residents, social.meeting);
@@ -560,10 +621,13 @@ export class SharedPilotStore {
       this.settle(at);
       const rows = this.db.prepare('SELECT id,place FROM shared_pilot_residents ORDER BY id').all() as unknown as ResidentRow[];
       const latest = this.db.prepare('SELECT * FROM shared_pilot_moves WHERE resident_id=? ORDER BY seq DESC LIMIT 1');
+      const cafe = this.coffee.view(at);
       const residents = rows.map(({ id, place }) => {
         const movement = latest.get(id) as unknown as MovementRow | undefined;
+        const order = latestCoffeeOrder(cafe.orders, id);
+        const atCounter = order && cafePose(order, at);
         return {
-          residentId: id, place, position: movement ? positionOnWalk(toWalk(movement), at) : point(place),
+          residentId: id, place, position: atCounter ? atCounter.point : movement ? positionOnWalk(toWalk(movement), at) : point(place),
           movement: movement ? publicMovement(movement) : null,
         };
       });
@@ -580,6 +644,7 @@ export class SharedPilotStore {
       return {
         mode: 'DEMO' as const, provenance: SHARED_PILOT_PROVENANCE, viewerResidentId, serverTime: at, profiles,
         revision: events.at(-1)?.id ?? '0', residents, events,
+        cafe,
         social: publicSocial(social, this.socialResidents(at)),
         survey: publicSurvey(survey, this.socialResidents(at), social.meeting),
         privateSocial: { memories: social.memories[viewerResidentId], encounters: social.encounters[viewerResidentId] },

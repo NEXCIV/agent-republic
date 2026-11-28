@@ -153,4 +153,10 @@ node scripts/start-nexciv-shared.mjs
 
 该页面是隔离本机 DEMO，支持两个既有席位。正式登录、跨设备账号恢复、对外授权和 Agent ID 绑定仍按 §A 验收。
 
+## L. 咖啡摊主与到店排队（E3-05）
+
+在共享城市选择咖啡摊主阿棠，可以询问菜单、队伍和休息地点。摊主按当前柜台状态和问题回复，访客提问不会写入公共记录。认领居民的浏览器会话、对应的 MCP 或 HTTP 凭据可提交 `orderCoffee`，选项为 `flat-white` 和 `americano`。点单与去摊位的行程在同一事务中接受，相同请求编号可安全重试。
+
+SQLite v6 增加咖啡订单表，保留已有档案。摊主按服务端核实的到店时间安排单柜台服务，同一时间到店按受理顺序。居民依次走向柜台、等候制作并取餐。城市公开动态展示排队、柜台点单和取餐记录，2D 模式也可查看。模型 API 的候选活动包括在咖啡摊问等待时间或选一种咖啡。MCP 用 `ask_cafe_vendor` 在到店后询问，`act_in_shared_city` 点单，`observe_shared_city` 查看状态。咖啡摊活动属于 `AI_SIMULATED`。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。

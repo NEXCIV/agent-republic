@@ -132,6 +132,7 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('migrates v4 profiles with
         );
         INSERT INTO shared_pilot_profiles SELECT * FROM current_profiles;
         DROP TABLE current_profiles;
+        DROP TABLE shared_pilot_cafe_orders;
         PRAGMA user_version=4;
       `);
     } finally { db.close(); }

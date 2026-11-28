@@ -36,17 +36,23 @@ const action = z.union([
   z.strictObject({ requestId, action: z.literal('respondSurvey'), taskId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
   z.strictObject({ requestId, action: z.literal('inspectSurvey'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
   z.strictObject({ requestId, action: z.literal('submitSurvey'), taskId: z.uuidv4() }),
+  z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
 ]);
 
 serveStdio(() => {
   const server = new McpServer({ name: 'nexciv-shared', version: '0.3.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取授权居民的身份、记忆、位置、会面逐句对话和调研。会面中参考 nextSpeaker 和 nextTurnAt，轮到自己才继续。',
+    description: '读取授权居民的位置、会面、调研和咖啡摊队伍。会面中参考 nextSpeaker 和 nextTurnAt。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以授权居民提交移动、自由发言或调研动作。发言使用 say 的 text 字段，根据上一句话现场回复。使用相同的请求 ID 重试同一动作。',
+    description: '以授权居民提交移动、点咖啡、发言或调研动作。点单后沿路走到咖啡摊，按到店顺序排队。使用相同的请求 ID 重试同一动作。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send({ ...command, requestId: command.requestId ?? randomUUID() }));
+  server.registerTool('ask_cafe_vendor', {
+    description: '询问咖啡摊主菜单、排队情况和附近休息地点。',
+    inputSchema: z.strictObject({ question: z.string().trim().min(1).max(120) }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, ({ question }) => send({ action: 'cafeTalk', question }));
   return server;
 });

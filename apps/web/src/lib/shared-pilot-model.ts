@@ -8,10 +8,11 @@ import type { SharedPilotStore } from './shared-pilot-store';
 import { availableSurveyIntents, meetingActive, nextSpeaker } from './shared-pilot-social';
 import { surveyActive, SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS } from './shared-pilot-survey';
 import { CITY_PLACES } from './city-movement';
+import { COFFEE_MENU, type CafeTalk, type OrderCoffee } from './shared-pilot-cafe';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
-type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest;
+type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk;
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
 type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] } };
 type ModelDecision = string | ({ choice: string } & Speech);
@@ -119,14 +120,23 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
   });
 }
 
-export function modelChoices(observation: ModelObservation): Choice[] {
-  const { viewerResidentId: actor, serverTime: at, social, survey, residents } = observation;
+export function modelChoices(observation: ModelObservation, canAskCafe = true): Choice[] {
+  const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe } = observation;
   const own = residents.find(({ residentId }) => residentId === actor)!;
   const choices: Choice[] = [{ id: 'wait', label: '休息或等待' }];
   const move = (place: typeof SHARED_PILOT_PLACE_IDS[number], label = `前往${CITY_PLACES[place]}`, id = `move:${place}`) =>
     choices.push({ id, label, command: { action: 'moveTo', destination: { place }, requestId: randomUUID() } });
   const add = (id: string, label: string, command: Command) => choices.push({ id, label, command });
   const moving = own.movement?.status === 'walking';
+  const askCafe = () => {
+    if (canAskCafe && !moving && own.place === 'cafe') {
+      add('coffee:ask', '问咖啡摊主现在要排多久', { action: 'cafeTalk', question: '现在要排多久？' });
+    }
+  };
+  if (cafe.orders.some(order => order.residentId === actor && order.stage !== 'completed')) {
+    askCafe();
+    return choices;
+  }
   const task = survey.task;
   if (task && surveyActive(task)) {
     if (task.status === 'proposed' && task.invitee === actor) {
@@ -155,15 +165,24 @@ export function modelChoices(observation: ModelObservation): Choice[] {
     return choices;
   }
   if (moving) return choices;
+  askCafe();
   for (const place of SHARED_PILOT_PLACE_IDS) if (place !== own.place) move(place);
   const peer = actor === '01' ? '02' : '01';
-  add(`invite:${peer}`, '邀请另一位居民到咖啡街见面', { action: 'invite', target: peer, venue: 'cafe', requestId: randomUUID() });
-  if (survey.eligibleMeetingId) add(`survey:${survey.eligibleMeetingId}:propose`, '提议共同调研公共建设中心',
-    { action: 'proposeSurvey', meetingId: survey.eligibleMeetingId, requestId: randomUUID() });
+  if (!cafe.orders.some(order => order.stage !== 'completed')) {
+    add(`invite:${peer}`, '邀请另一位居民到咖啡街见面', { action: 'invite', target: peer, venue: 'cafe', requestId: randomUUID() });
+    if (survey.eligibleMeetingId) add(`survey:${survey.eligibleMeetingId}:propose`, '提议共同调研公共建设中心',
+      { action: 'proposeSurvey', meetingId: survey.eligibleMeetingId, requestId: randomUUID() });
+  }
+  if (own.place === 'cafe' && !cafe.orders.some(order => order.residentId === actor && at < (order.finishedAt ?? at) + 60000)) {
+    for (const drink of ['flat-white', 'americano'] as const) {
+      add(`coffee:${drink}`, `向咖啡摊主点一杯${COFFEE_MENU[drink]}${cafe.serving ? '（柜台忙，可能排队）' : ''}`,
+        { action: 'orderCoffee', drink, requestId: randomUUID() });
+    }
+  }
   return choices;
 }
 
-export async function chooseModelAction(config: ModelConfig, observation: ModelObservation, choices: Choice[], signal: AbortSignal) {
+export async function chooseModelAction(config: ModelConfig, observation: ModelObservation, choices: Choice[], signal: AbortSignal, cafeReply?: string) {
   const meeting = observation.social.meeting;
   const data = {
     resident: observation.viewerResidentId,
@@ -172,6 +191,7 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     meeting: meeting && { status: meeting.status, venue: CITY_PLACES[meeting.venue],
       transcript: meeting.lines.map(({ residentId, text }) => ({ residentId, text })) },
     survey: observation.survey.task?.status,
+    cafe: { serving: observation.cafe.serving, queued: observation.cafe.queued, reply: cafeReply },
     memories: observation.privateSocial.memories.slice(-3).map(({ text }) => text),
     choices: choices.map(({ id, label, speech }) => ({ id, label, surveyIntents: speech?.surveyIntents })),
   };
@@ -196,8 +216,10 @@ export class SharedPilotModelRun {
   private timer?: ReturnType<typeof setTimeout>;
   private config?: ModelConfig;
   private state: ModelRunView;
+  private cafeReply?: string;
+  private nextCafeQuestionAt = 0;
 
-  constructor(config: ModelConfig, private readonly observe: () => ModelObservation, private readonly act: (command: Command) => void,
+  constructor(config: ModelConfig, private readonly observe: () => ModelObservation, private readonly act: (command: Command) => unknown,
     private readonly choose: typeof chooseModelAction) {
     this.config = config;
     this.state = { status: 'starting', model: config.model, calls: 0, limit: MODEL_CALL_LIMIT, endsAt: Date.now() + MODEL_RUN_MS };
@@ -227,21 +249,31 @@ export class SharedPilotModelRun {
     if (Date.now() >= this.state.endsAt || this.state.calls >= MODEL_CALL_LIMIT) { this.stop('finished'); return; }
     try {
       const observation = this.observe();
-      const choices = modelChoices(observation);
+      const choices = modelChoices(observation, observation.serverTime >= this.nextCafeQuestionAt);
       if (choices.length === 1) { this.schedule(POLL_MS); return; }
       this.state.calls++;
-      const decision = await this.choose(this.config, observation, choices, this.aborter.signal);
+      const decision = await this.choose(this.config, observation, choices, this.aborter.signal, this.cafeReply);
       if (!this.active) return;
       const id = typeof decision === 'string' ? decision : decision.choice;
       if (!choices.some((choice) => choice.id === id)) { this.stop('error', '模型未返回合法动作。'); return; }
       if (Date.now() >= this.state.endsAt) { this.stop('finished'); return; }
       // Recheck against current world state after the model's response.
-      const current = modelChoices(this.observe()).find((choice) => choice.id === id);
+      const refreshed = this.observe();
+      const current = modelChoices(refreshed, refreshed.serverTime >= this.nextCafeQuestionAt).find((choice) => choice.id === id);
       let label = current?.label ?? '世界状态已变化，重新观察';
       if (current?.speech && typeof decision !== 'string') {
         this.act({ action: 'say', requestId: randomUUID(), meetingId: current.speech.meetingId, text: decision.text, surveyIntent: decision.surveyIntent });
         label = '已在咖啡街发言';
-      } else if (current?.command) this.act(current.command);
+      } else if (current?.command) {
+        const result = this.act(current.command);
+        if (current.command.action === 'cafeTalk') {
+          this.nextCafeQuestionAt = refreshed.serverTime + 60000;
+          if (result && typeof result === 'object' && 'text' in result && typeof result.text === 'string') {
+            this.cafeReply = result.text;
+            label = `咖啡摊主回复：${result.text}`;
+          }
+        }
+      }
       this.state = { ...this.state, status: 'running', lastAction: label };
       this.schedule(DECISION_GAP_MS);
     } catch (error) {

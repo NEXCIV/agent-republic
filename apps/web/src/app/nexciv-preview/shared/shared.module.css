@@ -60,3 +60,34 @@
 @media (max-width: 580px) {
   .viewer[data-joining="true"] { min-height: 100svh; }
 }
+.cafeVendor { margin-top: 14px; display: grid; gap: 12px; }
+.cafeState { display: flex; gap: 7px; align-items: center; margin: 0; color: #e0d5b8; font-size: 12px; }
+.cafeState i { width: 7px; height: 7px; border-radius: 50%; background: #89c8a4; }
+.cafeState[data-cafe-state="busy"] i { background: #f0b90b; }
+.cafeQuestion, .cafeOrder { display: grid; gap: 6px; margin: 0; }
+.cafeQuestion > div { display: flex; gap: 6px; }
+.cafeVendor label { font-size: 13px; font-weight: 600; }
+.cafeVendor input, .cafeVendor select, .cafeVendor button {
+  min-height: 36px;
+  padding: 5px 8px;
+  border: 1px solid #645a45;
+  border-radius: 5px;
+  background: #242427;
+  color: #f7efdf;
+  font: inherit;
+  font-size: 13px;
+}
+.cafeVendor input { width: 100%; min-width: 0; }
+.cafeVendor input::placeholder { color: #c4baa8; }
+.cafeVendor button { cursor: pointer; color: #f4d78a; white-space: nowrap; }
+.cafeVendor button:hover:not(:disabled) { background: #373021; }
+.cafeVendor button:disabled { opacity: 0.64; cursor: default; }
+.cafeVendor :is(input, select, button, a):focus-visible { outline: 2px solid #f0b90b; outline-offset: 2px; }
+.cafeOrder { border-top: 1px solid #514c3f; padding-top: 10px; }
+.cafeOrder button:enabled { background: #f0b90b; color: #16130b; font-weight: 650; }
+.cafeOrder button:enabled:hover { background: #ffd054; }
+.cafeOrder p, .cafeReply p, .cafeJoin, .cafeError { margin: 0; font-size: 13px; line-height: 1.55; }
+.cafeReply { padding: 8px 10px; background: #25231e; border-radius: 5px; overflow-wrap: anywhere; }
+.cafeReply span, .cafeReply small { color: #d2c2a2; font-size: 11px; }
+.cafeJoin a { color: #f4d78a; }
+.cafeError { color: #ffb1a7; }

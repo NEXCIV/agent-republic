@@ -21,6 +21,7 @@ import { createDuskReflection, lightOverview, lightStreetSurfaces } from './over
 import { landscapeVisibility, LANDSCAPE_REGION, regionFor, substituteLandscapeRetail } from './city-landscape';
 import { createTraffic, removeParkedVehicles } from './traffic';
 import { createCityCrowd, type PedestrianPath } from './city-crowd';
+import { CAFE_VENDOR, cafePose, latestCoffeeOrder } from '../../lib/shared-pilot-cafe';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -31,10 +32,11 @@ export type AgentId = ResidentId;
 export type FollowId = AgentId | '02';
 export type WalkLandmarkId = 'registry' | 'works' | 'center' | 'governance' | 'market' | 'forum' | 'west-pool';
 const WORKS_MANAGER = 'works.manager';
-type ActorId = FollowId | typeof WORKS_MANAGER;
+type PersonId = typeof WORKS_MANAGER | typeof CAFE_VENDOR.id;
+type ActorId = FollowId | PersonId;
 export type WalkSelection = { kind: 'building'; id: WalkLandmarkId }
   | { kind: 'resident'; id: FollowId }
-  | { kind: 'person'; id: typeof WORKS_MANAGER };
+  | { kind: 'person'; id: PersonId };
 type Activity = 'outbound' | 'arrived' | 'greeting';
 export type AgentStatus = Activity | 'loading' | 'unavailable';
 export type AgentReport = { status: AgentStatus; progress: number; from?: Place; destination?: Place };
@@ -117,7 +119,7 @@ const DETAIL_FILES = {
 };
 type Detail = keyof typeof DETAIL_FILES;
 const LANDMARK_DETAILS = ['registry', 'works', 'center', 'hall'] as const;
-const LANDMARK_FRAMING: Record<WalkLandmarkId, { center: CityPoint; yaw: number; distance: number; pitch?: number; district?: District }> = {
+const LANDMARK_FRAMING: Record<WalkLandmarkId | 'cafe-vendor', { center: CityPoint; yaw: number; distance: number; pitch?: number; district?: District }> = {
   registry: { center: [80, 4, -23.5], yaw: -0.45, distance: 27, district: 'east' },
   works: { center: [95, 6, 82], yaw: -2.76, distance: 33, district: 'east' },
   center: { center: [-98.6, 6, -64.6], yaw: 1.05, distance: 31, district: 'research' },
@@ -125,6 +127,7 @@ const LANDMARK_FRAMING: Record<WalkLandmarkId, { center: CityPoint; yaw: number;
   market: { center: [18, 3.8, 60.5], yaw: -1.03, distance: 42 },
   forum: { center: [-95, 1.5, 87], yaw: 2.76, distance: 33, district: 'west' },
   'west-pool': { center: [-80.6, 0.74, 32.5], yaw: -0.16, distance: 24.8, pitch: 0.16, district: 'west' },
+  'cafe-vendor': { center: [11.8, 1, 72.05], yaw: -2.74, distance: 8.2, pitch: 0.36 },
 };
 const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_01_Governance_Hall', 'governance'],
@@ -133,7 +136,7 @@ const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_04_Public_Construction', 'works'],
   ['Market', 'market'],
 ];
-const SELECTABLE_ACTORS = ['01', '02', '03', WORKS_MANAGER] as const;
+const SELECTABLE_ACTORS = ['01', '02', '03', WORKS_MANAGER, CAFE_VENDOR.id] as const;
 
 function isRendered(object: THREE.Object3D) {
   for (let node: THREE.Object3D | null = object; node; node = node.parent) {
@@ -550,8 +553,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const residentMarkers = new Map<ActorId, THREE.Sprite>();
   if (callbacks.onSelect) {
     for (const id of SELECTABLE_ACTORS) {
-      if (sharedMode && id !== '01' && id !== '02') continue;
-      const material = sharedMode ? createResidentMarkerMaterial(id, id === '01' ? '#f0b90b' : '#79bab7') : markerMaterial;
+      if (sharedMode ? id !== '01' && id !== '02' && id !== CAFE_VENDOR.id : id === CAFE_VENDOR.id) continue;
+      const material = sharedMode ? createResidentMarkerMaterial(id === CAFE_VENDOR.id ? '咖' : id, id === '02' ? '#79bab7' : '#f0b90b') : markerMaterial;
       if (!material) continue;
       if (sharedMode) sharedMarkerMaterials.push(material);
       const marker = new THREE.Sprite(material);
@@ -582,7 +585,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   buildingOutline.visible = residentOutline.visible = false;
   scene.add(buildingOutline, residentOutline);
   let selection: WalkSelection | null = null;
-  let framedLandmark: WalkLandmarkId | undefined;
+  let framedLandmark: WalkLandmarkId | 'cafe-vendor' | undefined;
+  let cafeVendor: { asset: GLTF; patrol: Patrol } | undefined;
+  let vendorLoading = false;
+  let takeawayCup: THREE.Group | undefined;
+  const cupOffset = new THREE.Vector3();
   const retailPlacements: { mid: THREE.Object3D; bounds: THREE.Sphere; close?: THREE.Object3D }[] = [];
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const tween = !reducedMotion.matches;
@@ -726,6 +733,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function selectableActor(id: ActorId) {
+    if (id === CAFE_VENDOR.id) return cafeVendor;
     if (sharedMode) return id === '01' || id === '02' ? sharedActors.get(id) : undefined;
     const assignedWorker = cityObservation?.lightingPilot?.worker;
     if (id === WORKS_MANAGER) return assignedWorker ? undefined : siteHost;
@@ -781,16 +789,17 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const markerScale = 2 * (sharedMode ? 27 : 16) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
     for (const [id, marker] of residentMarkers) {
       const root = selectableActor(id)?.patrol.root;
-      marker.visible = Boolean(root && isRendered(root) && camera.position.distanceTo(root.position) > 62);
-      if (!marker.visible || !root) continue;
-      marker.position.copy(root.position);
-      marker.position.y += 2.15;
+      const position = id === CAFE_VENDOR.id ? coworker : root?.position;
+      marker.visible = Boolean(position && (id === CAFE_VENDOR.id || (root && isRendered(root))) && camera.position.distanceTo(position) > (id === CAFE_VENDOR.id ? 10 : 62));
+      if (!marker.visible || !position) continue;
+      marker.position.copy(position);
+      marker.position.y += id === CAFE_VENDOR.id ? 3.15 : 2.15;
       marker.scale.setScalar(markerScale);
     }
   }
 
   function zoom(factor: number) {
-    if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 16, 94);
+    if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, framedLandmark === 'cafe-vendor' ? 5.5 : 16, 94);
     else if (mode === 'follow' && followedPatrol()) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
     else if (mode === 'overview' && citywide) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 155, 465);
     else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north || sideDistrictLoaded() ? 176 : 139);
@@ -846,7 +855,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function focusSelection(target: WalkSelection) {
-    if (target.kind !== 'building') {
+    if (target.kind !== 'building' && target.id !== CAFE_VENDOR.id) {
       const root = selectableActor(target.id)?.patrol.root;
       if (target.kind === 'person' || (root && isRendered(root))) setView('follow', target.id);
       return;
@@ -858,11 +867,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       orbitDistance = camera.position.distanceTo(aim);
     }
     mode = 'overview';
-    framedLandmark = target.id;
-    const framing = LANDMARK_FRAMING[target.id];
+    framedLandmark = target.kind === 'building' ? target.id : 'cafe-vendor';
+    const framing = LANDMARK_FRAMING[framedLandmark];
     landmarkTarget.set(...framing.center);
     resetOrbit();
-    if (framing.district) loadDistrict(framing.district, true);
+    if (framedLandmark === 'cafe-vendor') {
+      loadCafeVendor();
+      if (!cafeStreetRequested) loadCafeStreet();
+    } else if (framing.district) loadDistrict(framing.district, true);
     else if (target.id === 'governance') loadNorth(true);
     else loadDetail('market');
   }
@@ -1057,8 +1069,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const projection = sharedSnapshot;
     const elapsed = Math.max(0, now - sharedReceivedAt);
     const serverTime = (projection?.serverTime ?? 0) + Math.min(elapsed, 1600);
+    cafeVendor?.patrol.observe(reducedMotion.matches ? 0 : poseDt, coworker, counter, false, projection?.cafe.serving ? 'nod' : undefined);
+    if (takeawayCup) takeawayCup.visible = false;
     for (const id of SHARED_RESIDENTS) {
-      const patrol = sharedActors.get(id)?.patrol;
+      const actor = sharedActors.get(id);
+      const patrol = actor?.patrol;
       const resident = projection?.residents.find(({ residentId }) => residentId === id);
       if (patrol) patrol.root.visible = Boolean(resident);
       if (!resident) continue;
@@ -1083,6 +1098,27 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const [x, y, z] = resident.position;
         const previous = move?.points.at(-2);
         observedPosition.set(x, y, z);
+        const order = projection && latestCoffeeOrder(projection.cafe.orders, id);
+        const atCafe = order && cafePose(order, serverTime);
+        if (atCafe) {
+          patrol.observe(poseDt, observedPosition.set(...atCafe.point), observedFacing.set(...atCafe.facing), atCafe.walking);
+          if (takeawayCup && order.readyAt !== null && serverTime >= order.readyAt) {
+            const hand = actor.asset.scene.getObjectByName('HandR');
+            if (hand) {
+              hand.getWorldPosition(takeawayCup.position);
+              cupOffset.set(-0.055, 0.045, 0.035).applyQuaternion(patrol.root.quaternion);
+              takeawayCup.position.add(cupOffset);
+              takeawayCup.visible = true;
+            }
+          }
+          continue;
+        }
+        if (order && order.stage !== 'completed' && order.stage !== 'travelling') {
+          const point = move?.points.at(-1);
+          if (point) observedPosition.set(...point);
+          patrol.observe(poseDt, observedPosition, counter);
+          continue;
+        }
         const meeting = projection?.social?.meeting;
         const task = projection?.survey?.task;
         const surveying = task?.status === 'surveying' && projection?.survey.arrived.includes(id);
@@ -1508,6 +1544,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     let worksDistance = Infinity;
     const closeToCafe = !wide && camera.position.distanceToSquared(counter) < 87 ** 2;
     if (closeToCafe && !cafeStreetRequested) loadCafeStreet();
+    if (sharedMode && closeToCafe) loadCafeVendor();
+    if (cafeVendor) cafeVendor.patrol.root.visible = closeToCafe;
     if (kioskDetail && kioskDetail.visible !== closeToCafe) {
       kioskDetail.visible = closeToCafe;
       if (kioskProxy) kioskProxy.visible = !closeToCafe;
@@ -1604,7 +1642,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.006, 0.16, 1.18);
     } else {
       orbitYaw -= dx * 0.006;
-      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, framedLandmark === 'west-pool' ? 0.14 : 0.48, 1.45);
+      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, framedLandmark === 'west-pool' || framedLandmark === 'cafe-vendor' ? 0.14 : 0.48, 1.45);
     }
   }
 
@@ -1632,16 +1670,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
     for (const id of SELECTABLE_ACTORS) {
       const actor = selectableActor(id);
-      if (!actor || !isRendered(actor.patrol.root)) continue;
       const marker = residentMarkers.get(id);
       const hits = marker?.visible ? raycaster.intersectObject(marker, false) : [];
-      actor.asset.scene.traverseVisible((node) => {
+      if (actor && isRendered(actor.patrol.root)) actor.asset.scene.traverseVisible((node) => {
         if (node instanceof THREE.Mesh) node.raycast(raycaster, hits);
       });
       for (const hit of hits) {
         if (hit.distance < nearest) {
           nearest = hit.distance;
-          target = id === WORKS_MANAGER ? { kind: 'person', id } : { kind: 'resident', id };
+          target = id === WORKS_MANAGER || id === CAFE_VENDOR.id ? { kind: 'person', id } : { kind: 'resident', id };
         }
       }
     }
@@ -1746,6 +1783,30 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       southGardens = asset;
       street.add(asset);
     });
+  }
+
+  function loadCafeVendor() {
+    if (!sharedMode || vendorLoading || ended || contextLost) return;
+    vendorLoading = true;
+    request(SHARED_AVATARS.service.asset, 'low').then(response => response.arrayBuffer())
+      .then(bytes => loader.parseAsync(bytes, ASSET_PATH)).then(asset => {
+        if (ended || contextLost) { disposeModel(asset.scene); return; }
+        try {
+          const patrol = createAgentPatrol(asset, [CAFE_HOST, CAFE_COUNTER], [counter.x, counter.z]);
+          patrol.root.name = 'Cafe vendor';
+          patrol.observe(0, coworker, counter);
+          actorLayer.add(patrol.root);
+          cafeVendor = { asset, patrol };
+          takeawayCup = new THREE.Group();
+          takeawayCup.name = 'Cafe takeaway cup';
+          const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.059, 0.043, 0.135, 12), new THREE.MeshStandardMaterial({ color: '#f3ddae', roughness: 0.75 }));
+          const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.064, 0.06, 0.025, 12), new THREE.MeshStandardMaterial({ color: '#38291d', roughness: 0.6 }));
+          lid.position.y = 0.072;
+          takeawayCup.add(cup, lid);
+          takeawayCup.visible = false;
+          actorLayer.add(takeawayCup);
+        } catch { disposeModel(asset.scene); }
+      }).catch(() => { /* The cafe directory remains available. */ });
   }
 
   function addPromenade() {
@@ -2168,6 +2229,11 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         marketGuest.patrol.dispose();
         disposeModel(marketGuest.asset.scene);
       }
+      if (cafeVendor) {
+        cafeVendor.patrol.dispose();
+        disposeModel(cafeVendor.asset.scene);
+      }
+      if (takeawayCup) disposeModel(takeawayCup);
       for (const { asset, patrol } of sharedActors.values()) {
         patrol.dispose();
         disposeModel(asset.scene);

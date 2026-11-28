@@ -3,6 +3,7 @@ import type { ReactNode, RefObject } from 'react';
 import { CITY_PLACES } from '../../lib/city-movement';
 import type { AgentReport, FollowId, WalkLandmarkId, WalkSelection } from './walk';
 import { WORKS_MANAGER } from './CityVisitPanel';
+import { CAFE_VENDOR, CAFE_VENDOR_NAME } from '../../lib/shared-pilot-cafe';
 import styles from './preview.module.css';
 
 const LANDMARKS = {
@@ -43,6 +44,7 @@ type Props = {
   cafeLink?: boolean;
   workerStatus?: string;
   managerPresent: boolean;
+  cafeVendor?: boolean;
   children?: ReactNode;
   heading: RefObject<HTMLHeadingElement | null>;
   onOpen: () => void;
@@ -51,15 +53,16 @@ type Props = {
   onFocus: (selection: WalkSelection) => void;
 };
 
-export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, residentNames, cafeLink = false, workerStatus, managerPresent, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
+export function CityExplorer({ selection, open, sceneState, focusActive, residentReport, residentIds, residentNames, cafeLink = false, workerStatus, managerPresent, cafeVendor, children, heading, onOpen, onClose, onSelect, onFocus }: Props) {
   if (!open) return null;
 
   const landmark = selection?.kind === 'building' ? LANDMARKS[selection.id] : undefined;
-  const manager = selection?.kind === 'person';
+  const manager = selection?.kind === 'person' && selection.id === WORKS_MANAGER.id;
+  const vendor = selection?.kind === 'person' && selection.id === CAFE_VENDOR.id;
   const name = selection?.kind === 'building' ? landmarkName(selection.id)
-    : selection?.kind === 'resident' ? residentNames?.[selection.id] ?? `${selection.id} 号居民` : manager ? '现场管理员' : '地点与居民';
+    : selection?.kind === 'resident' ? residentNames?.[selection.id] ?? `${selection.id} 号居民` : vendor ? CAFE_VENDOR_NAME : manager ? '现场管理员' : '地点与居民';
   const marketGuest = selection?.kind === 'resident' && selection.id === '02' && workerStatus !== undefined;
-  const canFocus = sceneState === 'ready' && (selection?.kind === 'building' || (manager && managerPresent) || (marketGuest && workerStatus)
+  const canFocus = sceneState === 'ready' && (selection?.kind === 'building' || vendor || (manager && managerPresent) || (marketGuest && workerStatus)
     || (residentReport !== undefined && residentReport.status !== 'unavailable'));
   const residentStatus = sceneState === 'fallback' ? '静态预览中无法获取实时位置'
     : marketGuest ? workerStatus ?? '在街角市集活动' : residentActivity(residentReport);
@@ -71,13 +74,13 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
     </header>
     <h2 ref={heading} id="city-explorer-title" tabIndex={-1} className={styles.explorerTitle}>{name}</h2>
     {selection ? <div className={styles.explorerDetail}>
-      <p className={styles.explorerMeta}>{landmark ? landmark.area : selection.kind === 'resident' ? `${selection.id} 号居民 · 模拟行为` : '公共建设中心 · 模拟居民'}</p>
-      {landmark ? <p className={styles.explorerDescription}>{landmark.description}</p> : !manager && <p className={styles.explorerDescription} aria-live="polite">
+      <p className={styles.explorerMeta}>{landmark ? landmark.area : selection.kind === 'resident' ? `${selection.id} 号居民 · 模拟行为` : vendor ? '咖啡街 · 模拟居民' : '公共建设中心 · 模拟居民'}</p>
+      {landmark ? <p className={styles.explorerDescription}>{landmark.description}</p> : !manager && !vendor && <p className={styles.explorerDescription} aria-live="polite">
         {residentStatus}
       </p>}
       <div className={styles.explorerActions}>
         <button type="button" disabled={!canFocus} aria-pressed={focusActive} onClick={() => onFocus(selection)}>
-          {selection.kind === 'building' ? (selection.id === 'west-pool' ? '查看水景' : '聚焦建筑') : manager ? '聚焦管理员' : '跟随居民'}
+          {selection.kind === 'building' ? (selection.id === 'west-pool' ? '查看水景' : '聚焦建筑') : vendor ? '查看摊位' : manager ? '聚焦管理员' : '跟随居民'}
         </button>
         {cafeLink && selection.kind === 'building' && selection.id === 'market' && <Link href="/nexciv-preview/cafe" prefetch={false}>打开咖啡街试玩</Link>}
       </div>
@@ -101,6 +104,11 @@ export function CityExplorer({ selection, open, sceneState, focusActive, residen
         {managerPresent && <li>
           <button type="button" aria-label="现场管理员" onClick={() => onSelect(WORKS_MANAGER)}>
             <span>现场管理员</span><small>公共建设中心</small>
+          </button>
+        </li>}
+        {cafeVendor && <li>
+          <button type="button" onClick={() => onSelect(CAFE_VENDOR)}>
+            <span>{CAFE_VENDOR_NAME}</span><small>咖啡街</small>
           </button>
         </li>}
       </ul>
