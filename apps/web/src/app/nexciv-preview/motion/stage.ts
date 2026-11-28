@@ -1,25 +1,19 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
-import { benchIdle } from '../agent';
 
 export type Character = '02' | '06';
-export type Motion = 'walk' | 'turn' | 'sit';
+export type Motion = 'walk' | 'turn';
 export type View = 'front' | 'side';
-export type Gait = '100STYLE' | 'Quaternius';
 
-export const durations: Record<Motion, number> = { walk: 4.1, turn: 2.4, sit: 3.4 };
+export const durations: Record<Motion, number> = { walk: 4.1, turn: 2.4 };
 
 type Sidecar = {
-  seat: { y: number; z: number };
   walkPath: { speed: number; start: number; duration: number; ramp: number };
   clips: Omit<ReturnType<typeof THREE.AnimationClip.toJSON>, 'uuid'>[];
 };
-type MotionSample = [name: string, time: number, weight?: number];
-
-const smooth = THREE.MathUtils.smoothstep;
-const chairDepth = 0.31;
-const legacySeatShift = -0.28;
+const gaitOrder = ['100STYLE', 'Quaternius'] as const;
+const clipSuffix: Record<Motion, string> = { walk: 'Walk', turn: 'Turn' };
 
 function walkDistance(time: number, { speed, start, duration, ramp }: Sidecar['walkPath']) {
   const elapsed = THREE.MathUtils.clamp(time - start, 0, duration);
@@ -28,30 +22,7 @@ function walkDistance(time: number, { speed, start, duration, ramp }: Sidecar['w
   return speed * (elapsed - ramp / 2);
 }
 
-function getClip(clips: THREE.AnimationClip[], name: string) {
-  const clip = THREE.AnimationClip.findByName(clips, name);
-  if (!clip) throw new Error(`Missing motion: ${name}`);
-  return clip;
-}
-
-function chair(y: number, z: number) {
-  const group = new THREE.Group();
-  const wood = new THREE.MeshStandardMaterial({ color: '#9a6e40', roughness: 0.84 });
-  const metal = new THREE.MeshStandardMaterial({ color: '#333b41', roughness: 0.58 });
-  function piece(w: number, h: number, d: number, x: number, height: number, depth: number, material: THREE.Material) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
-    mesh.position.set(x, height, depth);
-    group.add(mesh);
-  }
-  piece(0.38, 0.035, chairDepth, 0, y - 0.0175, z, wood);
-  for (const x of [-0.154, 0.154]) {
-    for (const depth of [-0.125, 0.125]) piece(0.026, y - 0.035, 0.026, x, (y - 0.035) / 2, z + depth, metal);
-  }
-  return group;
-}
-
-function buildLane(model: THREE.Object3D, clips: THREE.AnimationClip[], stride: number,
-  { seat, walkPath }: Pick<Sidecar, 'seat' | 'walkPath'>, candidate: boolean) {
+function buildLane(model: THREE.Object3D, clips: Record<Motion, THREE.AnimationClip>) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#23272a');
   scene.add(new THREE.HemisphereLight('#fff3e0', '#aeb5c4', 2.45));
@@ -70,15 +41,11 @@ function buildLane(model: THREE.Object3D, clips: THREE.AnimationClip[], stride: 
   const grid = new THREE.GridHelper(8, 16, '#64635c', '#505457');
   grid.position.y = -0.009;
   scene.add(grid);
-  const stool = chair(seat.y, seat.z);
-  scene.add(stool);
-  const actor = new THREE.Group();
   // Root translation moves the skin beyond its rest-pose bounds during the walking trial.
   model.traverse((node) => {
     if (node instanceof THREE.SkinnedMesh) node.frustumCulled = false;
   });
-  actor.add(model);
-  scene.add(actor);
+  scene.add(model);
   const contact = new THREE.Mesh(new THREE.PlaneGeometry(1.18, 1.02), new THREE.ShaderMaterial({
     transparent: true,
     depthWrite: false,
@@ -93,75 +60,23 @@ function buildLane(model: THREE.Object3D, clips: THREE.AnimationClip[], stride: 
   const hips = model.getObjectByName('Hips')!;
   const hipCenter = new THREE.Vector3();
   const mixer = new THREE.AnimationMixer(model);
-  const actions = new Map(clips.map((clip) => {
+  function prepare(clip: THREE.AnimationClip) {
     const action = mixer.clipAction(clip).setLoop(THREE.LoopOnce, 1);
     action.paused = true;
     action.setEffectiveWeight(0).play();
-    return [clip.name, action];
-  }));
-  const idle = candidate ? 'Idle_A' : 'Idle';
-  const walkDuration = candidate ? 0 : getClip(clips, 'Walk').duration;
+    return action;
+  }
+  const actions = { walk: prepare(clips.walk), turn: prepare(clips.turn) };
 
-  function pose(motion: Motion, time: number, gait: Gait) {
-    actor.position.set(0, 0, 0);
-    model.position.y = 0;
-    stool.visible = motion === 'sit';
-    let samples: MotionSample[];
-    if (candidate && motion !== 'sit') {
-      samples = [[`${gait}_${motion === 'walk' ? 'Walk' : 'Turn'}`, time]];
-    } else if (motion === 'walk') {
-      // The same path and speed for each lane, with clip cadence driven by its own stride.
-      const { start, duration } = walkPath;
-      const stop = start + duration;
-      const distance = walkDistance(time, walkPath);
-      actor.position.z = distance - walkDistance(stop, walkPath) / 2;
-      const amount = smooth(time, start, start + 0.24) * (1 - smooth(time, stop - 0.24, stop));
-      samples = [[idle, time, 1 - amount], ['Walk', walkDuration * ((distance / stride) % 1), amount]];
-    } else if (motion === 'turn') {
-      const turn = 'TurnRight90';
-      const duration = getClip(clips, turn).duration;
-      const amount = smooth(time, 0.25, 0.48);
-      // The last frame holds the turn orientation, with both lanes restarting together.
-      samples = [[idle, time, 1 - amount], [turn, time - 0.25, amount]];
-      if (time >= 0.25 + duration) samples = [[turn, duration]];
-    } else if (candidate) {
-      const up = 2.35;
-      const down = 0.25;
-      if (time < down) {
-        const amount = smooth(time, 0.05, down);
-        samples = [[idle, time, 1 - amount], ['Sit_Chair_Down', 0, amount]];
-      } else if (time < down + 0.8) {
-        samples = [['Sit_Chair_Down', time - down]];
-      } else if (time < up) {
-        const progress = (time - down - 0.8) / (up - down - 0.8);
-        const idleDuration = getClip(clips, 'Sit_Chair_Idle').duration;
-        samples = [['Sit_Chair_Idle', progress * idleDuration]];
-      } else {
-        const phase = time - up;
-        const amount = smooth(phase, 0.8, 1.05);
-        samples = [['Sit_Chair_StandUp', phase, 1 - amount], [idle, time, amount]];
-      }
-    } else {
-      // Compare the actual city's seated pose, including its immediate vertical offset.
-      const seated = time >= 1.05 && time < 2.35;
-      model.position.y = seated ? -0.24 : 0;
-      actor.position.z = seated ? legacySeatShift : 0;
-      samples = [[seated ? 'Bench rest' : idle, time]];
-    }
-
-    for (const action of actions.values()) action.setEffectiveWeight(0);
-    for (const [name, seconds, weight = 1] of samples) {
-      if (weight === 0) continue;
-      const action = actions.get(name)!;
-      const duration = action.getClip().duration;
-      const isIdle = name === idle || name === 'Bench rest';
-      action.time = isIdle ? seconds % duration : THREE.MathUtils.clamp(seconds, 0, duration);
-      action.setEffectiveWeight(weight);
-    }
+  function pose(motion: Motion, time: number) {
+    actions.walk.setEffectiveWeight(motion === 'walk' ? 1 : 0);
+    actions.turn.setEffectiveWeight(motion === 'turn' ? 1 : 0);
+    const action = actions[motion];
+    action.time = Math.min(time, action.getClip().duration);
     mixer.update(0);
     hips.getWorldPosition(hipCenter);
     contact.position.x = hipCenter.x;
-    contact.position.z = hipCenter.z + (motion === 'sit' ? 0.12 : 0);
+    contact.position.z = hipCenter.z;
   }
 
   return { scene, pose, release() { mixer.stopAllAction(); mixer.uncacheRoot(model); } };
@@ -200,31 +115,27 @@ export async function loadLanes(id: Character, signal: AbortSignal) {
     }),
   ]);
   signal.throwIfAborted();
-  const candidateClips = sidecar.clips.map((clip) => THREE.AnimationClip.parse({
-    ...clip,
-    uuid: THREE.MathUtils.generateUUID(),
-  }));
+  const clipsFor = (gait: typeof gaitOrder[number], motion: Motion) => {
+    const name = `${gait}_${clipSuffix[motion]}`;
+    const clip = sidecar.clips.find((entry) => entry.name === name);
+    if (!clip) throw new Error(`Missing motion: ${name}`);
+    return THREE.AnimationClip.parse({ ...clip, uuid: THREE.MathUtils.generateUUID() });
+  };
+  const clips = gaitOrder.map((gait) => ({ walk: clipsFor(gait, 'walk'), turn: clipsFor(gait, 'turn') }));
   let model: GLTF | undefined;
   let second: THREE.Object3D | undefined;
   try {
     model = await new GLTFLoader().parseAsync(modelBytes, '/nexciv-walk/');
     signal.throwIfAborted();
-    const { scene, animations } = model;
-    const stride = Number(scene.children.find((node) => node.userData.walk_stride_m)?.userData.walk_stride_m);
-    if (!(stride > 0)) throw new Error('缺少有效步幅');
-    const hips = scene.getObjectByName('Hips')!;
-    const oldSeat = { y: hips.position.y - 0.24 - 0.105, z: hips.position.z + legacySeatShift + 0.065 };
+    const { scene } = model;
     second = clone(scene);
-    const old = buildLane(scene, [...animations, benchIdle(getClip(animations, 'Idle'))], stride,
-      { seat: oldSeat, walkPath: sidecar.walkPath }, false);
-    const candidate = buildLane(second, candidateClips, stride, sidecar, true);
+    const lanes = [buildLane(scene, clips[0]!), buildLane(second, clips[1]!)];
     return {
-      lanes: [old, candidate],
+      lanes,
       walkPath: sidecar.walkPath,
       dispose() {
-        old.release();
-        candidate.release();
-        disposeScenes(old.scene, candidate.scene);
+        for (const lane of lanes) lane.release();
+        disposeScenes(...lanes.map((lane) => lane.scene));
       },
     };
   } catch (error) {
@@ -245,7 +156,7 @@ export function createStage(canvas: HTMLCanvasElement) {
   let width = 1;
   let height = 1;
   return {
-    draw(data: Awaited<ReturnType<typeof loadLanes>>, motion: Motion, view: View, time: number, gait: Gait) {
+    draw(data: Awaited<ReturnType<typeof loadLanes>>, motion: Motion, view: View, time: number) {
       const nextWidth = Math.max(2, canvas.clientWidth);
       const nextHeight = Math.max(2, canvas.clientHeight);
       if (nextWidth !== width || nextHeight !== height) {
@@ -269,7 +180,7 @@ export function createStage(canvas: HTMLCanvasElement) {
       camera.lookAt(focus);
       camera.updateProjectionMatrix();
       for (const [index, lane] of data.lanes.entries()) {
-        lane.pose(motion, time, gait);
+        lane.pose(motion, time);
         const x = Math.floor(index * width / 2);
         const w = Math.floor((index + 1) * width / 2) - x;
         renderer.setViewport(x, 0, w, height);
