@@ -17,6 +17,7 @@ import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, SURVE
   worksBriefView, worksGoalActionSchema, worksGoalEvents, worksGoalView, worksReply, worksView,
   type InspectionRoute, type WorksBrief, type WorksCheck, type WorksGoalRow } from './shared-pilot-works';
 import { FISHING_TABLE, FISHING_WAIT, FishingVisits, fishingOutcome, fishingPose, goFishingSchema } from './shared-pilot-fishing';
+import { explorationActionSchema, explorationScenes, explorationView, type FirstExplorationObservation } from './shared-pilot-exploration';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
@@ -633,6 +634,59 @@ export class SharedPilotStore {
     }
   }
 
+  explore(token: string, input: unknown) {
+    return this.transaction(at => {
+      const actor = this.authenticate(token, at);
+      const parsed = explorationActionSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '请使用一个可用地点和一句不含链接或凭据的现场对话。');
+      const request = parsed.data;
+      if (!this.db.prepare('SELECT 1 FROM shared_pilot_profiles WHERE resident_id=?').get(actor)) {
+        throw new SharedPilotError('AUTH_REQUIRED', '建立居民档案后可开始首次探索。');
+      }
+      this.settle(at);
+      const social = this.readSocial();
+      const entries = social.firstExplorations ??= {};
+      const trip = entries[actor];
+      const previous = request.action === 'exploreSite' ? trip?.trip : trip?.result?.action;
+      if (previous) {
+        if (JSON.stringify(previous) !== JSON.stringify(request)) throw new SharedPilotError('CONFLICT', '已记录该次探索动作。');
+        return explorationView({ [actor]: trip }).events.at(request.action === 'exploreSite' ? 0 : -1)!;
+      }
+      this.ensureWorksAvailable(actor, at);
+      const occupied = this.activeInspections(at);
+      if (this.latestWorksGoal(actor)?.closed_at === null || occupied.some(item => item.residentId === actor)) {
+        throw new SharedPilotError('BUSY', '请先完成当前巡查。');
+      }
+      const resident = this.db.prepare('SELECT place FROM shared_pilot_residents WHERE id=?').get(actor);
+      if (request.action === 'exploreSite') {
+        if (resident?.place === request.place) throw new SharedPilotError('INVALID_REQUEST', '请选择一个还没到达的探索地点。');
+        const survey = this.readSurvey();
+        if (this.findReceipt(actor, request.requestId) || social.requests[actor][request.requestId] || survey.requests[actor][request.requestId]) {
+          throw new SharedPilotError('CONFLICT', '请求编号已用于其他动作。');
+        }
+        const target = request.place === 'pier' ? { x: 71, z: -186 } : { place: request.place };
+        const arrivesAt = this.beginMove(actor, request.requestId, request.place, at, target);
+        entries[actor] = { trip: request, startedAt: at, arrivesAt };
+      } else {
+        const movement = this.lastMove(actor);
+        if (!trip || request.requestId === trip.trip.requestId || resident?.place !== trip.trip.place
+          || movement?.request_id !== trip.trip.requestId || movement.completed_at === null) {
+          throw new SharedPilotError('BUSY', '完成首次探索的到场行程后才能互动。');
+        }
+        const scenes = explorationScenes({ cafe: this.coffee.view(at), freeWorksChecks: 2 - occupied.length, fishing: this.fishing.view(at) });
+        const site = scenes.find(item => item.place === trip.trip.place)!;
+        const reply = request.activity === 'look' ? site.observation : `${site.contact}：${
+          site.place === 'cafe' ? this.coffee.talk(request.text, at).text
+            : site.place === 'pier' ? this.fishing.talk(request.text, at).text
+              : worksReply(request.text, occupied.map(item => item.checkId), false).text
+        }`;
+        trip.result = { action: request, happenedAt: at, reply };
+      }
+      this.saveSocial(social);
+      return explorationView({ [actor]: entries[actor] }).events.at(-1)!;
+    });
+  }
+
   private beginWorksInspection(actor: SharedPilotResidentId, requestId: string, at: number, checkId: WorksCheck,
     origin?: NonNullable<InspectionRoute['worksInspection']>['origin']) {
     const { x, z, label, finding } = WORKS_CHECKS[checkId];
@@ -1005,6 +1059,22 @@ export class SharedPilotStore {
       const works = worksView(inspections.reverse(), at);
       const profiles = this.db.prepare('SELECT resident_id AS residentId, name, avatar FROM shared_pilot_profiles ORDER BY resident_id')
         .all() as unknown as SharedPilotProfile[];
+      let firstExploration: FirstExplorationObservation | null = null;
+      const self = residents.find(resident => resident.residentId === viewerResidentId)!;
+      const firstTrip = social.firstExplorations?.[viewerResidentId];
+      if (profiles.some(profile => profile.residentId === viewerResidentId) && !firstTrip?.result
+        && !meetingActive(social.meeting) && !surveyActive(survey.task) && !pendingWorksGoal
+        && ![cafe.orders, fishing.visits, works.visits].some(visits => visits.some(visit =>
+          visit.residentId === viewerResidentId && visit.stage !== 'completed'))) {
+        const sites = explorationScenes({ cafe, fishing, freeWorksChecks: 2 - works.visits.filter(visit => visit.stage !== 'completed').length });
+        if (!firstTrip && self.movement?.status !== 'walking') {
+          firstExploration = { phase: 'intro', place: self.place, destinations: sites.filter(site => site.place !== self.place) };
+        } else if (firstTrip && this.lastMove(viewerResidentId)?.request_id === firstTrip.trip.requestId) {
+          const place = firstTrip.trip.place;
+          firstExploration = self.movement?.status === 'walking' ? { phase: 'travelling', place }
+            : { phase: 'onSite', place, site: sites.find(site => site.place === place)! };
+        }
+      }
       return {
         mode: 'DEMO' as const, provenance: SHARED_PILOT_PROVENANCE, viewerResidentId, serverTime: at, profiles,
         revision: events.at(-1)?.id ?? '0', residents, events,
@@ -1013,6 +1083,8 @@ export class SharedPilotStore {
         works: { ...works, briefs, events: [...works.events, ...goals.flatMap(({ row, view }) => worksGoalEvents(row, view))]
           .sort((a, b) => a.happenedAt - b.happenedAt) },
         pendingWorksGoal,
+        firstExploration,
+        exploration: explorationView(social.firstExplorations),
         social: publicSocial(social, this.socialResidents(at)),
         survey: publicSurvey(survey, this.socialResidents(at), social.meeting),
         privateSocial: { memories: social.memories[viewerResidentId], encounters: social.encounters[viewerResidentId] },

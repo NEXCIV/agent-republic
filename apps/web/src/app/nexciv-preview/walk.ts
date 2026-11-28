@@ -24,6 +24,7 @@ import { createCityCrowd, type PedestrianPath } from './city-crowd';
 import { CAFE_VENDOR, cafePose } from '../../lib/shared-pilot-cafe';
 import { WORKS_MANAGER, WORKS_MANAGER_POSITION } from '../../lib/shared-pilot-works';
 import { ANGLER_POSITION, PIER_ANGLER, fishingPose } from '../../lib/shared-pilot-fishing';
+import { EXPLORATION_LINE_MS } from '../../lib/shared-pilot-exploration';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -1282,9 +1283,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const dialogue = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
       const task = projection?.survey?.task;
       const observation = task?.status === 'surveying' ? projection?.survey.events.filter((event) => event.taskId === task.id && (event.kind === 'SURVEY_INSPECTING' || event.kind === 'SURVEY_RECORDED') && event.residentId).at(-1) : undefined;
-      const line = dialogue ? { ...dialogue, key: `${meeting!.id}:${dialogue.happenedAt}` } : observation?.residentId ? { residentId: observation.residentId, text: observation.text, key: observation.id } : undefined;
+      const exploration = projection?.exploration?.events.filter(event => serverTime - event.happenedAt < EXPLORATION_LINE_MS
+        && (mode !== 'follow' || event.residentId === followed)).at(-1);
+      const line = dialogue && mode === 'follow' ? { ...dialogue, key: `${meeting!.id}:${dialogue.happenedAt}` }
+        : observation?.residentId && mode === 'follow' ? { residentId: observation.residentId, text: observation.text, key: observation.id }
+          : exploration ? { ...exploration, key: exploration.id } : undefined;
       const speaker = line && selectableActor(line.residentId)?.patrol.root;
-      speech.visible = Boolean(line && speaker?.visible && mode === 'follow');
+      speech.visible = Boolean(line && speaker?.visible && (mode === 'follow' || mode === 'overview'));
       if (line && speaker && speech.visible) {
         const key = line.key;
         if (key !== speechKey) {

@@ -11,12 +11,16 @@ import { CITY_PLACES } from './city-movement';
 import { COFFEE_MENU, type CafeTalk, type OrderCoffee } from './shared-pilot-cafe';
 import { WORKS_CHECKS, worksBriefActive, type InspectWorks } from './shared-pilot-works';
 import type { GoFishing } from './shared-pilot-fishing';
+import { explorationTextSchema, type ExplorationAction, type ExplorationActivity, type ExplorationPlace } from './shared-pilot-exploration';
+import { SHARED_AVATARS } from './shared-pilot-profiles';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
-type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing;
+type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing | ExplorationAction;
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
-type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] } };
+type ExplorationChoice = { action: 'exploreSite'; place: ExplorationPlace } | { action: 'exploreArrival'; activity: ExplorationActivity };
+type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] };
+  exploration?: ExplorationChoice };
 type ModelDecision = string | ({ choice: string } & Speech);
 export const MODEL_CALL_LIMIT = 30;
 export const MODEL_RUN_MS = 30 * 60_000;
@@ -65,6 +69,11 @@ export function parseModelDecision(raw: unknown, choices: Choice[]): ModelDecisi
     if (!value || typeof value !== 'object' || !('choice' in value) || typeof value.choice !== 'string') return;
     const choice = choices.find(({ id }) => id === value.choice);
     if (!choice) return;
+    if (choice.exploration) {
+      const text = explorationTextSchema.safeParse('text' in value ? value.text : undefined);
+      if (text.success && Object.keys(value).length === 2) return { choice: choice.id, text: text.data };
+      return;
+    }
     if (!choice.speech) return parseModelChoice(raw, [choice.id]);
     if (!Object.keys(value).every((key) => ['choice', 'text', 'surveyIntent'].includes(key))) return;
     const text = sharedPilotSpeechSchema.safeParse('text' in value ? value.text : undefined);
@@ -170,6 +179,14 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
 
 export function modelChoices(observation: ModelObservation, canAskCafe = true): Choice[] {
   const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe, works, fishing } = observation;
+  const first = observation.firstExploration;
+  if (first?.phase === 'intro') return first.destinations.map(({ place }) => ({
+    id: `intro:${place}`, label: `前往${CITY_PLACES[place]}`, exploration: { action: 'exploreSite', place },
+  }));
+  if (first?.phase === 'onSite') return [
+    { id: 'explore:ask', label: `现场问${first.site.contact}一个问题`, exploration: { action: 'exploreArrival', activity: 'ask' } },
+    { id: 'explore:look', label: '看看这里正在发生什么', exploration: { action: 'exploreArrival', activity: 'look' } },
+  ];
   const own = residents.find(({ residentId }) => residentId === actor)!;
   const choices: Choice[] = [{ id: 'wait', label: '休息或等待' }];
   const move = (place: typeof SHARED_PILOT_PLACE_IDS[number], label = `前往${CITY_PLACES[place]}`, id = `move:${place}`) =>
@@ -249,6 +266,8 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
 
 export async function chooseModelAction(config: ModelConfig, observation: ModelObservation, choices: Choice[], signal: AbortSignal, cafeReply?: string) {
   const meeting = observation.social.meeting;
+  const first = observation.firstExploration;
+  const avatar = observation.profiles.find(profile => profile.residentId === observation.viewerResidentId)?.avatar;
   const data = {
     resident: observation.viewerResidentId,
     profiles: observation.profiles,
@@ -261,7 +280,8 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     fishing: { occupied: observation.fishing.occupied, queued: observation.fishing.queued,
       lastResult: observation.fishing.visits.filter(visit => visit.residentId === observation.viewerResidentId && visit.result).at(-1)?.result?.text },
     memories: observation.privateSocial.memories.slice(-3).map(({ text }) => text),
-    choices: choices.map(({ id, label, speech }) => ({ id, label, surveyIntents: speech?.surveyIntents })),
+    exploration: first && { ...first, placeName: CITY_PLACES[first.place], role: avatar ? SHARED_AVATARS[avatar].label : undefined },
+    choices: choices.map(({ id, label, speech, exploration }) => ({ id, label, surveyIntents: speech?.surveyIntents, exploration })),
   };
   const tokenLimit = config.endpoint.hostname === MIMO_HOST
     ? { max_completion_tokens: 512, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }
@@ -272,6 +292,7 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
       'For ordinary actions return {"choice":"the-id"}. For a speech choice (identified by surveyIntents), respond to the actual conversation in Chinese, in your own words. Return {"choice":"the-id","text":"your dialogue"}.',
       `Keep text under ${SHARED_PILOT_SPEECH_LIMIT} characters. Talk about the city, the meeting, what you think or what you might do. Do not invent past actions, claim results, repeat credentials, or include links. You may simply socialize.`,
       'Optionally include "surveyIntent" from that choice’s allowed list only when your dialogue explicitly proposes or responds to joint investigation at the Public Construction Center. Respond independently, including declining if you prefer.',
+      'For an exploration choice, return exactly {"choice":"the-id","text":"one natural first-person Chinese line, at most 38 characters"}. On intro, react with curiosity using your current place and the given site observations, then say where you want to go. On arrival, ask the contact a real question if choosing ask, or react to the observed activity if choosing look. Only refer to the given facts. Do not claim to have arrived before travel or invent NPC replies.',
     ].join(' ') },
     { role: 'user', content: JSON.stringify(data) },
   ] });
@@ -341,7 +362,9 @@ export class SharedPilotModelRun {
       const refreshed = this.observe();
       const current = modelChoices(refreshed, refreshed.serverTime >= this.nextCafeQuestionAt).find((choice) => choice.id === id);
       let label = current?.label ?? '世界状态已变化，重新观察';
-      if (current?.speech && typeof decision !== 'string') {
+      if (current?.exploration && typeof decision !== 'string') {
+        this.act({ ...current.exploration, requestId: randomUUID(), text: decision.text });
+      } else if (current?.speech && typeof decision !== 'string') {
         this.act({ action: 'say', requestId: randomUUID(), meetingId: current.speech.meetingId, text: decision.text, surveyIntent: decision.surveyIntent });
         label = '已在咖啡街发言';
       } else if (current?.command) {

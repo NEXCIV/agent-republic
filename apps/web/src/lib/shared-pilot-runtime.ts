@@ -9,11 +9,12 @@ import { CITY_PLACES } from './city-movement';
 import type { CafeTalk, OrderCoffee } from './shared-pilot-cafe';
 import { worksBriefActive, type CancelWorksGoal, type InspectWorks, type SurveyWorksSite, type WorksGoalAction, type WorksTalk } from './shared-pilot-works';
 import type { FishingTalk, GoFishing } from './shared-pilot-fishing';
+import type { ExplorationAction } from './shared-pilot-exploration';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
 export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest
-  | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | { action: 'observe' };
+  | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | ExplorationAction | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
   '02': ['cafe', 'works', 'plaza', 'governance'],
@@ -178,6 +179,9 @@ export class SharedPilotRuntime {
         return this.store.requestInspection(token, command);
       case 'worksTalk':
         return this.store.worksTalk(command.question, token);
+      case 'exploreSite':
+      case 'exploreArrival':
+        return this.store.explore(token, command);
       case 'acceptWorksGoal':
       case 'askWorksGoal':
       case 'inspectWorksGoal':
@@ -324,9 +328,9 @@ export class SharedPilotRuntime {
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing } = this.observeConnection(this.connections[0]!);
+    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, exploration } = this.observeConnection(this.connections[0]!);
     const external = this.externallyControlled(profiles);
-    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing,
+    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works, fishing, exploration,
       engines: this.connections.map(({ residentId }) => {
         const run = this.modelRuns.get(residentId);
         if (run) return { residentId, driver: 'MODEL' as const, status: run.view.status };

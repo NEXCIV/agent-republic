@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { SHARED_PILOT_LINES, SHARED_PILOT_MAX_TURNS, type SharedPilotResidentId, type SharedPilotSocialRequest } from '@agent-republic/domain';
 import { CAFE_BENCH_FRONT, CAFE_COUNTER, type CityPoint } from './cafe-geometry';
+import { safePilotSpeech, type FirstExploration } from './shared-pilot-exploration';
 
 type Resident = SharedPilotResidentId;
 type Line = typeof SHARED_PILOT_LINES[number];
@@ -24,6 +25,7 @@ export type SocialState = {
   revision: number; meeting: SharedMeeting | null; events: SocialEvent[];
   memories: Record<Resident, Memory[]>; encounters: Record<Resident, number>;
   requests: Record<Resident, Record<string, RequestRecord>>;
+  firstExplorations?: Partial<Record<Resident, FirstExploration>>;
 };
 
 export const SOCIAL_DWELL_MS = 4000;
@@ -81,13 +83,6 @@ export function availableSurveyIntents(meeting: SharedMeeting, actor: Resident):
   if (accepted || proposer === actor) return [];
   if (proposer) return ['accept', 'decline'];
   return meeting.lines.length < SHARED_PILOT_MAX_TURNS - 1 ? ['propose'] : [];
-}
-
-function safePilotSpeech(text: string) {
-  // The local DEMO publishes plain text only. Avoid inserting controls or
-  // common credential and contact formats into the transcript or memories.
-  return !/[\p{Cc}\p{Cf}]/u.test(text)
-    && !/(?:https?:\/\/|www\.|nxc_shared_|\bsk-[a-z\d_-]{12,}|\b[a-z\d_-]{43}\b|0x[a-f\d]{40,}|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b)/i.test(text);
 }
 
 function emit(state: SocialState, at: number, kind: SocialEventKind, text: string, residentId?: Resident) {

@@ -66,7 +66,7 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('starts an authorized mode
     body: JSON.stringify({ action: 'observe' }),
   }));
   const config = { action: 'startModel', baseUrl: 'https://example.com/v1', model: 'test-model', apiKey: 'model-key-for-test' };
-  const choose = vi.spyOn(model, 'chooseModelAction').mockResolvedValue('move:works');
+  const choose = vi.spyOn(model, 'chooseModelAction').mockResolvedValue({ choice: 'intro:works', text: '东边好像有个建设中心，先去看看。' });
   try {
     vi.stubEnv('NODE_ENV', 'test');
     vi.stubEnv('NEXCIV_SHARED_PILOT_DB', join(folder, 'shared.sqlite'));
@@ -86,6 +86,7 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('starts an authorized mode
       const view = await publicView().json();
       expect(view.residents[0].movement?.destination.place).toBe('works');
       expect(view.engines[0]).toMatchObject({ driver: 'MODEL', status: 'running' });
+      expect(view.exploration.events[0]).toMatchObject({ kind: 'EXPLORATION_INTRO', text: '东边好像有个建设中心，先去看看。' });
     });
     expect(choose).toHaveBeenCalledTimes(1);
     expect((await getProfile(cookie).json()).modelRun).toMatchObject({ status: 'running', calls: 1 });

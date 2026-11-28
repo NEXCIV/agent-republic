@@ -41,13 +41,17 @@ const action = z.union([
   z.strictObject({ action: z.literal('acceptWorksGoal'), taskId: z.uuidv4() }),
   z.strictObject({ action: z.literal('askWorksGoal'), taskId: z.uuidv4() }),
   z.strictObject({ action: z.literal('inspectWorksGoal'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
+  z.strictObject({ requestId, action: z.literal('exploreSite'), place: z.enum(['cafe', 'works', 'pier']),
+    text: z.string().trim().min(1).max(38) }),
+  z.strictObject({ requestId, action: z.literal('exploreArrival'), activity: z.enum(['ask', 'look']),
+    text: z.string().trim().min(1).max(38) }),
   z.strictObject({ requestId, action: z.literal('goFishing') }),
 ]);
 
 serveStdio(() => {
-  const server = new McpServer({ name: 'nexciv-shared', version: '0.4.0' });
+  const server = new McpServer({ name: 'nexciv-shared', version: '0.5.0' });
   server.registerTool('observe_shared_city', {
-    description: '读取居民及城市。若 pendingWorksGoal 存在，从其中的 availableActions 接手网页调研。到场后观察 openCheckIds，再问管理员或选择点位。',
+    description: '读取居民、城市及 firstExploration。首次探索可根据观察用 exploreSite 说一句并出发，到场后用 exploreArrival 观察或问 NPC。pendingWorksGoal 列出网页调研的可用动作。',
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {

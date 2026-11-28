@@ -19,6 +19,7 @@ import { EntryCameraContext } from './entry-camera';
 import { CAFE_VENDOR, COFFEE_STATUS } from '../../../lib/shared-pilot-cafe';
 import { WORKS_MANAGER, WORKS_STATUS } from '../../../lib/shared-pilot-works';
 import { FISHING_STATUS, PIER_ANGLER } from '../../../lib/shared-pilot-fishing';
+import { EXPLORATION_LINE_MS } from '../../../lib/shared-pilot-exploration';
 import { SharedNpcPanel } from './SharedNpcPanel';
 import { WorksBriefRecord, WorksSitePanel } from './WorksSitePanel';
 
@@ -197,6 +198,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const surveyTitle = task ? ({ proposed: '等待对方接受', accepted: '前往调研点', surveying: '现场调研中', completed: '共同报告已完成', declined: '调研被拒绝', expired: '调研超时' })[task.status] : '等待会面约定';
   const submitted = task ? Object.values(task.inspections).filter(({ finding }) => finding).length : 0;
   const lastLine = meeting?.lines.at(-1);
+  const exploration = snapshot?.exploration?.events ?? [];
   const meetingTitle = meeting ? ({ invited: '等待回应', accepted: '双方赴约中', talking: '正在交流', completed: '会面已结束', declined: '邀请被婉拒', expired: '会面超时' })[meeting.status] : '暂未发起会面';
   const events = (snapshot ? [...snapshot.events.map((event) => ({ ...event, text: `${event.residentId} 号 ${event.kind === 'MOVE_STARTED' ? '出发前往' : '已到达'} ${CITY_PLACES[event.place]}` })),
     ...(social?.events ?? []).map((event) => ({ ...event, text: event.kind === 'SAID' ? `${event.residentId} 号：${event.text}` : event.text })),
@@ -230,6 +232,8 @@ export function SharedCity({ children }: { children: ReactNode }) {
           const engine = snapshot?.engines.find(({ residentId }) => residentId === id);
           const modelRun = id === ownResident ? snapshot?.ownModelRun : undefined;
           const profile = snapshot?.profiles.find(({ residentId }) => residentId === id);
+          const explorationLine = exploration.filter(line => line.residentId === id
+            && (snapshot?.serverTime ?? 0) - line.happenedAt < EXPLORATION_LINE_MS).at(-1);
           const resident = snapshot?.residents.find(({ residentId }) => residentId === id);
           const movement = resident?.movement;
           const moving = movement?.status === 'walking';
@@ -247,6 +251,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
             <strong role="status" data-resident-status={id}>{fishing && fishing.stage !== 'completed' ? FISHING_STATUS[fishing.stage]
               : visit && visit.stage !== 'completed' ? WORKS_STATUS[visit.stage] : order && order.stage !== 'completed' ? COFFEE_STATUS[order.stage] : resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
             {modelRun?.activity && <p className={styles.modelActivity}>{modelRun.activity}</p>}
+            {explorationLine && <p className={styles.explorationLine} role="status">「{explorationLine.text}」</p>}
             {modelRun?.lastAction && <p className={styles.modelActivity}>最近决策 · {modelRun.lastAction}</p>}
             {modelRun?.error && <p className={styles.alert} role="status">{modelRun.error} <Link href={JOIN_CITY}>角色与接入</Link></p>}
             {inspection ? <div className={styles.progress}><progress aria-label={`${id} 号现场观察进度`} max={8} value={inspection.finding ? 8 : Math.min(8, Math.max(0, ((snapshot?.serverTime ?? 0) - (inspection.startedAt ?? snapshot?.serverTime ?? 0)) / 1000))} /><span>{inspection.finding ? '已记录' : '观察'}</span></div>
@@ -288,6 +293,14 @@ export function SharedCity({ children }: { children: ReactNode }) {
           onFollow={canFollowOwn ? () => followOwn(ownResident) : undefined} onManager={() => inspect(WORKS_MANAGER)} />}
       </CityExplorer>
       <aside id="shared-city-activity" className={styles.journal} aria-label="实时城市动态" hidden={panel !== 'activity'}>
+        {exploration.length > 0 && <section className={styles.meeting} aria-label="居民初次探索">
+          <div className={styles.panelHead}><h2>居民初次探索</h2><small>AI 模拟</small></div>
+          {exploration.map(line => <blockquote key={line.id} data-speaker={line.residentId}>
+            <b>{residentNames[line.residentId]} · {line.kind === 'EXPLORATION_INTRO' ? `想去${CITY_PLACES[line.place]}` : `到达${CITY_PLACES[line.place]}`}</b>
+            {line.text}
+            {line.reply && <p>{line.reply}</p>}
+          </blockquote>)}
+        </section>}
         {snapshot && ownBrief && <section className={styles.meeting} aria-label="我的建设中心调研">
           <div className={styles.panelHead}><h2>我的建设中心调研</h2></div>
           <WorksBriefRecord brief={ownBrief} serverTime={snapshot.serverTime} />
