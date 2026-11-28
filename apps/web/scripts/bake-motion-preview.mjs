@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import process from 'node:process';
 import { URL } from 'node:url';
 import * as THREE from 'three';
-import { bakeCityJog, bakePreviewLocomotion, cityLocomotion, motionSources, walkPath } from './preview-locomotion.mjs';
+import { bakeCityInteraction, bakeCityJog, bakePreviewLocomotion, cityLocomotion, motionSources, walkPath } from './preview-locomotion.mjs';
 import { bakeServiceApron } from './bake-service-apron.mjs';
 
 const sourceDir = process.argv[2];
@@ -214,7 +214,9 @@ function bake(file, source, target, soles, name) {
   return { clip: new THREE.AnimationClip(name, motion.duration, tracks), hipKeys, worldPose };
 }
 
-const { walkSources, jog } = motionSources(sourceDir, readGlb, rig, solveSourcePose);
+const { walkSources, jog, interactions } = motionSources(sourceDir, readGlb, rig, solveSourcePose);
+// Match the café bench seat top and the end of the approach route, in metres.
+const bench = { height: 0.39, depth: 0.65 };
 function clipJson(clip) {
   // Keep sub-millimetre precision and avoid serializing the random runtime UUID.
   const json = THREE.AnimationClip.toJSON(clip.optimize());
@@ -280,8 +282,9 @@ for (const id of ['02', '06', '01', '03', '04', '05', '07', '08']) {
     const sidecar = { modelHash: file.hash, seat, walkPath, clips: clips.map(clipJson) };
     writeFileSync(new URL(`agent-${id}.json`, output), JSON.stringify(sidecar));
   }
+  const interactionClips = interactions.map((motion) => bakeCityInteraction(target, soles, motion, bench));
   writeFileSync(new URL(`agent-${id}-city-v1.json`, output),
     JSON.stringify({ modelHash: file.hash, stride: gait.stride, jogStride: jogging.stride, shoeContacts, apron,
-      clips: [...gait.clips, jogging.clip].map(clipJson) }));
+      clips: [...gait.clips, jogging.clip, ...interactionClips].map(clipJson) }));
   console.log(id, 'city walk stride', gait.stride.toFixed(3), 'jog stride', jogging.stride.toFixed(3));
 }

@@ -71,8 +71,8 @@ export function serviceApronPose(scene: THREE.Object3D) {
   const joint = new THREE.Vector3();
   const tip = new THREE.Vector3();
   const angles = new Float32Array(2);
-  const { clamp, lerp } = THREE.MathUtils;
-  return () => {
+  const { clamp, lerp, smoothstep } = THREE.MathUtils;
+  return (onBench = false) => {
     for (const [index, panel] of panels.entries()) {
       const { thigh, knee } = panel!;
       hips.worldToLocal(thigh.getWorldPosition(joint));
@@ -85,8 +85,10 @@ export function serviceApronPose(scene: THREE.Object3D) {
       const { bone, rest } = panel!;
       // Share some motion across the front seam. Backward strides leave the cloth hanging.
       const bend = lerp(angles[index]!, leading, 0.4);
-      bone.rotation.x = -Math.min(bend * 0.72, 0.89);
-      bone.position.z = rest.z + Math.max(0, bend - 0.13) * clothSafety;
+      const drape = onBench ? smoothstep(bend, 0.72, 1.28) : 0;
+      bone.rotation.x = -lerp(Math.min(bend * 0.72, 0.89), Math.min(bend + 0.18, 1.48), drape);
+      bone.position.y = rest.y + drape * 0.063;
+      bone.position.z = rest.z + lerp(Math.max(0, bend - 0.13) * clothSafety, 0.025, drape);
     }
   };
 }

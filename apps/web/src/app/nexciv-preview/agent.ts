@@ -9,7 +9,7 @@ export type AgentPhase = 'outbound' | 'arrived' | 'inbound' | 'atNexus';
 export type PatrolCue = {
   hold?: 'start' | 'end';
   face?: THREE.Vector3;
-  gesture?: 'wave' | 'nod' | 'install';
+  gesture?: 'wave' | 'nod' | 'talk' | 'install';
 };
 
 const SPEED = 1.25;
@@ -117,6 +117,7 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
   root.add(shadow);
 
   const mixer = new THREE.AnimationMixer(asset.scene);
+  const hips = asset.scene.getObjectByName('Hips');
   const feet = createTerrainFeet(asset.scene, gait?.shoeContacts, asset.groundHeight);
   const poseApron = serviceApronPose(asset.scene);
   const idle = mixer.clipAction(idleClip).play();
@@ -127,6 +128,12 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
   const waveClip = THREE.AnimationClip.findByName(asset.animations, 'Wave');
   const wave = waveClip ? mixer.clipAction(waveClip).setLoop(THREE.LoopOnce, 1) : undefined;
   if (wave) wave.clampWhenFinished = true;
+  const talk = gait?.talk && mixer.clipAction(gait.talk);
+  const bench = gait?.bench && {
+    enter: mixer.clipAction(gait.bench.enter).setEffectiveTimeScale(0),
+    rest: mixer.clipAction(gait.bench.rest).setEffectiveTimeScale(0),
+    exit: mixer.clipAction(gait.bench.exit).setEffectiveTimeScale(0),
+  };
   let nod: THREE.AnimationAction | undefined;
   let nodding = false;
   let installing: THREE.AnimationAction | undefined;
@@ -146,7 +153,8 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
   let seatedPose: THREE.AnimationAction | undefined;
   const standingY = asset.scene.position.y;
   function updatePose(dt: number, cue?: PatrolCue, heldAtStart = false, observed?: THREE.Vector3, walking?: boolean,
-    seated = false, routeSpeed = moveSpeed, journeyDistance?: number) {
+    seated = false, routeSpeed = moveSpeed, journeyDistance?: number,
+    benchPose?: { action: THREE.AnimationAction; time: number }) {
     previousPosition.copy(root.position);
     if (observed) root.position.copy(observed);
     else positionAt(distance, root.position);
@@ -161,7 +169,7 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
 
     const moving = walking ?? (!heldAtStart && (phase === 'outbound' || phase === 'inbound'));
     if (pivot) {
-      const canPivot = dt > 0 && !moving && !seated && !cue?.gesture && travel < 0.015;
+      const canPivot = dt > 0 && !moving && !seated && !benchPose && !cue?.gesture && travel < 0.015;
       if (!canPivot || (turn && turn.to.angleTo(heading) > 0.22)) turn = undefined;
       const angle = root.quaternion.angleTo(heading);
       if (canPivot && !turn && angle >= 0.66 && angle <= 1.85) {
@@ -190,8 +198,9 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
 
     if (seated) seatedPose ??= mixer.clipAction(benchIdle(idleClip!));
     const locomotion = jog && routeSpeed >= JOG_SPEED ? jog : walk;
-    const next = seated && seatedPose ? seatedPose : turn && pivot ? pivot
-      : moving && (!gait || dt > 0) ? locomotion : (cue?.gesture === 'wave' && wave) || idle;
+    const gesture = cue?.gesture === 'wave' ? wave : cue?.gesture === 'talk' ? talk : undefined;
+    const next = benchPose?.action ?? (seated && seatedPose ? seatedPose : turn && pivot ? pivot
+      : moving && (!gait || dt > 0) ? locomotion : gesture ?? idle);
     if ((dt > 0 || observed || gait) && next !== action) {
       next.reset().setEffectiveWeight(1).play();
       if (dt > 0) next.crossFadeFrom(action, 0.18, false);
@@ -211,7 +220,8 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
     if (pivot && turn) {
       pivot.time = turn.right ? turn.elapsed : pivot.getClip().duration - turn.elapsed;
     }
-    const shouldNod = cue?.gesture === 'nod';
+    if (benchPose) benchPose.action.time = benchPose.time;
+    const shouldNod = cue?.gesture === 'nod' || (cue?.gesture === 'talk' && !talk);
     if (shouldNod && !nodding) {
       nod ??= createNod(asset, mixer);
       nod?.reset().play();
@@ -230,8 +240,9 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
     asset.scene.position.y = standingY - (seated ? 0.24 : 0);
     feet?.restore();
     mixer.update(dt);
-    if (!seated) feet?.apply(root.position.y);
-    poseApron?.();
+    if (!seated && !benchPose) feet?.apply(root.position.y);
+    shadow.position.z = benchPose && hips ? hips.position.z * 0.66 : 0;
+    poseApron?.(Boolean(benchPose));
   }
 
   updatePose(0);
@@ -240,6 +251,18 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
     observe(dt: number, position: THREE.Vector3, face: THREE.Vector3, moving = false, gesture?: PatrolCue['gesture'], seated = false) {
       if (moving && !gait) walk.setEffectiveTimeScale(moveSpeed * walkClip.duration / stride);
       updatePose(dt, { face, gesture }, false, position, moving, seated);
+    },
+    observeBench(dt: number, position: THREE.Vector3, face: THREE.Vector3, elapsedMs: number, remainingMs: number) {
+      if (!bench) return false;
+      const enterDuration = bench.enter.getClip().duration;
+      const exitDuration = bench.exit.getClip().duration;
+      const elapsed = Math.max(0, elapsedMs / 1000);
+      const remaining = Math.max(0, remainingMs / 1000);
+      const pose = remaining < exitDuration ? { action: bench.exit, time: exitDuration - remaining }
+        : elapsed < enterDuration ? { action: bench.enter, time: elapsed }
+          : { action: bench.rest, time: (elapsed - enterDuration) % bench.rest.getClip().duration };
+      updatePose(dt, { face }, false, position, false, false, moveSpeed, undefined, pose);
+      return true;
     },
     observeJourney(dt: number, progress: number, duration: number) {
       distance = progress * length;

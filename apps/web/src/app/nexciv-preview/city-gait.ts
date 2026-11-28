@@ -4,6 +4,8 @@ import type { ApronPatch } from './service-apron';
 import type { ShoeContacts } from './terrain-feet';
 import type { GroundHeight } from './city-ground';
 
+type BenchMotion = { enter: THREE.AnimationClip; rest: THREE.AnimationClip; exit: THREE.AnimationClip };
+
 export type CityGait = {
   walk: THREE.AnimationClip;
   jog: THREE.AnimationClip;
@@ -13,6 +15,8 @@ export type CityGait = {
   modelHash: string;
   shoeContacts?: ShoeContacts;
   apron?: ApronPatch;
+  talk?: THREE.AnimationClip;
+  bench?: BenchMotion;
 };
 export type CityAgentAsset = GLTF & { gait?: CityGait; groundHeight?: GroundHeight };
 
@@ -38,13 +42,18 @@ export function cityGaitLoader(signal: AbortSignal) {
           !/^[a-f0-9]{64}$/.test(modelHash)) return undefined;
         const parse = (name: string) => {
           const clip = clips.find((entry) => entry.name === name);
-          return clip && THREE.AnimationClip.parse({ ...clip, uuid: THREE.MathUtils.generateUUID() });
+          return clip && clip.duration > 0 ? THREE.AnimationClip.parse({ ...clip, uuid: THREE.MathUtils.generateUUID() }) : undefined;
         };
         const walk = parse('Quaternius_WalkLoop');
         const jog = parse('Quaternius_JogLoop');
         const pivot = parse('Quaternius_Pivot');
-        if (walk && jog && pivot && walk.duration > 0 && jog.duration > 0 && pivot.duration > 0) {
-          return { walk, jog, pivot, stride, jogStride, modelHash, shoeContacts, apron };
+        if (walk && jog && pivot) {
+          const talk = parse('Quaternius_Idle_Talking_Loop');
+          const enter = parse('Quaternius_Sitting_Enter');
+          const rest = parse('Quaternius_Sitting_Idle_Loop');
+          const exit = parse('Quaternius_Sitting_Exit');
+          const bench = enter && rest && exit ? { enter, rest, exit } : undefined;
+          return { walk, jog, pivot, stride, jogStride, modelHash, shoeContacts, apron, talk, bench };
         }
         return undefined;
       }).catch(() => undefined); // Keep the embedded GLB gait available when the optional file is unavailable.

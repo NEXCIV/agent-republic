@@ -1235,7 +1235,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         observedPosition.set(x, y, z);
         const rest = projection?.bench.visits.find(visit => visit.residentId === id && visit.stage === 'resting');
         if (rest && serverTime < rest.endsAt) {
-          patrol.observe(poseDt, seatedHips, seatFacing, false, undefined, true);
+          if (!patrol.observeBench(poseDt, seatFront, seatFacing, serverTime - rest.arrivesAt, rest.endsAt - serverTime)) {
+            patrol.observe(poseDt, seatedHips, seatFacing, false, undefined, true);
+          }
           continue;
         }
         if (rest) observedPosition.copy(seatFront);
@@ -1296,8 +1298,10 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         else if (peer) observedFacing.set(...peer.position);
         else observedFacing.set(previous ? 2 * x - previous[0] : x, y, previous ? 2 * z - previous[2] : z - 1);
         const line = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
+        const speaking = line?.residentId === id &&
+          serverTime < line.happenedAt + THREE.MathUtils.clamp(line.text.length * 130, 1800, 5400);
         patrol.observe(poseDt, observedPosition, observedFacing, false,
-          inspecting ? 'nod' : line?.residentId === id ? (meeting?.lines.length === 1 ? 'wave' : 'nod') : undefined);
+          inspecting ? 'nod' : speaking ? 'talk' : undefined);
       }
     }
     if (!showingRod) fishingGear?.hide();
@@ -1475,7 +1479,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         primary?.observe(poseDt, observedPosition, seatFront, true);
       } else if (shift?.place === 'bench') {
         const sitting = shift.phase === 'resting';
-        primary?.observe(poseDt, sitting ? seatedHips : seatFront, seatFacing, false, undefined, sitting);
+        if (primary && (!sitting || !primary.observeBench(poseDt, seatFront, seatFacing, time - shift.since, (shift.until ?? time) - time))) {
+          primary.observe(poseDt, sitting ? seatedHips : seatFront, seatFacing, false, undefined, sitting);
+        }
       } else {
         primary?.observe(poseDt, counter, social ? coworker : counterFacing, false, shift?.phase === 'inviting' ? 'wave' : undefined);
       }

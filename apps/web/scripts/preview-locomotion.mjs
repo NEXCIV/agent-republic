@@ -80,6 +80,10 @@ export function motionSources(sourceDir, readGlb, rig, solveSourcePose) {
   const ualSource = trackSource(ualRig.byName, walk.sample, false);
   const jogRig = rig(ual);
   const jog = { rig: jogRig, ...solveSourcePose(ual, jogRig, 'Jog_Fwd_Loop') };
+  const interactions = ['Idle_Talking_Loop', 'Sitting_Enter', 'Sitting_Idle_Loop', 'Sitting_Exit'].map((name) => {
+    const source = rig(ual);
+    return { name, rig: source, ...solveSourcePose(ual, source, name) };
+  });
 
   const { skeleton, clip } = new BVHLoader().parse(readFileSync(resolve(sourceDir, 'Neutral_FW.bvh'), 'utf8'));
   const bones = Object.fromEntries(skeleton.bones.map((bone) => [bone.name, bone]));
@@ -93,7 +97,7 @@ export function motionSources(sourceDir, readGlb, rig, solveSourcePose) {
     root.updateMatrixWorld(true);
   }, true);
 
-  return { walkSources: [['Quaternius', ualSource], ['100STYLE', captured]], jog };
+  return { walkSources: [['Quaternius', ualSource], ['100STYLE', captured]], jog, interactions };
 }
 
 function setWorldRotation(bone, rotation) {
@@ -296,9 +300,9 @@ export function bakePreviewLocomotion(label, source, target, soles, baseline, tu
   return { clip: new THREE.AnimationClip(`${label}_${turning ? 'Turn' : 'Walk'}`, duration, baked), error, lift, maxHipStep };
 }
 
-function cutMotion(clip, name, start, end, loop = false) {
+function cutMotion(clip, name, start, end, loop = false, sampleRate = fps) {
   const duration = end - start;
-  const count = Math.round(duration * fps);
+  const count = Math.round(duration * sampleRate);
   const times = Array.from({ length: count + 1 }, (_, index) => index * duration / count);
   const tracks = clip.tracks.filter((track) => !track.name.startsWith('Root.')).map((track) => {
     const sample = track.createInterpolant();
@@ -332,9 +336,8 @@ export function cityLocomotion(walk, turn) {
   };
 }
 
-export function bakeCityJog(target, soles, jog) {
-  const source = jog.rig;
-  const links = [
+function cityMotionLinks(target, source) {
+  return [
     ...upperBody.map(([key, sourceName, , child, sourceChild]) => [key, sourceName, child, sourceChild]),
     ...sides.flatMap((side) => {
       const letter = side.toLowerCase();
@@ -357,6 +360,11 @@ export function bakeCityJog(target, soles, jog) {
     return { bone: target.byName[key], sourceBone: source.byName[sourceName],
       basis: sourceRotation.clone().invert().multiply(alignment).multiply(targetRotation), values: [] };
   });
+}
+
+export function bakeCityJog(target, soles, jog) {
+  const source = jog.rig;
+  const links = cityMotionLinks(target, source);
   for (const [key, bone] of Object.entries(target.byName)) {
     bone.quaternion.copy(target.bind[key].localRotation);
     bone.position.copy(target.bind[key].localPosition);
@@ -407,4 +415,57 @@ export function bakeCityJog(target, soles, jog) {
   tracks.push(new THREE.VectorKeyframeTrack('Hips.position', times, hipKeys));
   const clip = new THREE.AnimationClip('Quaternius_JogLoop', jog.duration, tracks);
   return { stride: root.distanceTo(start) * scale, clip: cutMotion(clip, clip.name, 0, jog.duration, true) };
+}
+
+export function bakeCityInteraction(target, soles, motion, seat) {
+  const talking = motion.name === 'Idle_Talking_Loop';
+  const idle = motion.name === 'Sitting_Idle_Loop';
+  const leaving = motion.name === 'Sitting_Exit';
+  const source = motion.rig;
+  const links = cityMotionLinks(target, source);
+  for (const [key, bone] of Object.entries(target.byName)) {
+    bone.quaternion.copy(target.bind[key].localRotation);
+    bone.position.copy(target.bind[key].localPosition);
+  }
+  target.root.updateMatrixWorld(true);
+  const feet = bindFeet(target, soles);
+  const hips = target.byName.Hips;
+  const hipKeys = [];
+  const sampleRate = 30;
+  const count = Math.round(motion.duration * sampleRate);
+  const times = Array.from({ length: count + 1 }, (_, index) => index * motion.duration / count);
+  const pelvis = new THREE.Vector3();
+  const center = source.bind.pelvis.position;
+  const rotation = new THREE.Quaternion();
+  for (const time of times) {
+    motion.sample(time);
+    source.byName.pelvis.getWorldPosition(pelvis);
+    const progress = time / motion.duration;
+    const approach = leaving ? 1 - progress : progress;
+    const seated = talking ? 0 : idle ? 1 : smoothstep(approach, 0.20, 0.91);
+    hips.position.copy(target.bind.Hips.localPosition);
+    hips.position.x += pelvis.x * 0.35;
+    hips.position.y = lerp(hips.position.y + (pelvis.y - center.y) * 0.55,
+      seat.height + 0.105, seated);
+    hips.position.z += lerp((pelvis.z - center.z) * 0.17, -(seat.depth - 0.09), seated);
+    for (const { bone, sourceBone, basis } of links) {
+      setWorldRotation(bone, sourceBone.getWorldQuaternion(rotation).multiply(basis));
+    }
+    for (const [index, foot] of feet.entries()) {
+      const shift = talking ? 0 : idle ? 1 : smoothstep(approach, 0.04 + index * 0.16, 0.20 + index * 0.16);
+      const sole = foot.position.clone();
+      sole.z -= (seat.depth - 0.36) * shift;
+      sole.y += Math.sin(Math.PI * shift) * 0.045;
+      solveLeg(foot, desiredAnkle(foot, { sole, yaw: 0, pitch: 0 }), 0);
+    }
+    hipKeys.push(...hips.position.toArray());
+    for (const { bone, values } of links) values.push(...bone.quaternion.toArray());
+  }
+  const tracks = links.map(({ bone, values }) => new THREE.QuaternionKeyframeTrack(
+    `${THREE.PropertyBinding.sanitizeNodeName(bone.name)}.quaternion`, times, values,
+  ));
+  tracks.push(new THREE.VectorKeyframeTrack('Hips.position', times, hipKeys));
+  const name = `Quaternius_${motion.name}`;
+  const clip = new THREE.AnimationClip(name, motion.duration, tracks);
+  return cutMotion(clip, name, 0, motion.duration, talking || idle, sampleRate);
 }

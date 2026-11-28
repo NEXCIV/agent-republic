@@ -87,6 +87,29 @@ describe('Quaternius city locomotion', () => {
     patrol.dispose();
   });
 
+  it('samples seats by activity time and resumes idle or talking on the same actor', () => {
+    const transition = (name: string, from: number, to: number) =>
+      new THREE.AnimationClip(name, 1, [new THREE.VectorKeyframeTrack('Hips.position', [0, 1], [0, from, 0, 0, to, 0])]);
+    const { patrol, hips } = setup({
+      ...gaitFixture(), talk: constantPose('Talk', 0.08),
+      bench: { enter: transition('Sit down', 0, -0.3), rest: constantPose('Seated', -0.3), exit: transition('Stand up', -0.3, 0) },
+    });
+    const position = new THREE.Vector3(1, 0.184, 2);
+    const face = new THREE.Vector3(1, 0.184, 3);
+    expect(patrol.observeBench(0, position, face, 500, 11500)).toBe(true);
+    expect(hips.position.y).toBeCloseTo(-0.15);
+    expect(patrol.root.position.toArray()).toEqual(position.toArray());
+    patrol.observeBench(0, position, face, 5000, 7000);
+    expect(hips.position.y).toBeCloseTo(-0.3);
+    patrol.observeBench(0, position, face, 11750, 250);
+    expect(hips.position.y).toBeCloseTo(-0.075);
+    patrol.observe(0, position, face, false, 'talk');
+    expect(hips.position.y).toBeCloseTo(0.08);
+    patrol.observe(0, position, face);
+    expect(hips.position.y).toBeCloseTo(0);
+    patrol.dispose();
+  });
+
   it.each(Object.values(SHARED_AVATARS))('loads the matching model and loopable clips for $asset', async ({ asset }) => {
     const id = asset.slice(6, 8);
     const data = fs.readFileSync(new URL(`../public/nexciv-motion/agent-${id}-city-v1.json`, import.meta.url), 'utf8');
@@ -103,11 +126,15 @@ describe('Quaternius city locomotion', () => {
       expect(gait?.walk.duration).toBeCloseTo(0.78);
       expect(gait?.jog.duration).toBeCloseTo(0.93333);
       expect(gait?.jogStride).toBeGreaterThan(3.5);
+      expect(gait?.talk?.duration).toBeCloseTo(2.93333);
+      expect(gait?.bench?.enter.duration).toBeCloseTo(1.3);
+      expect(gait?.bench?.rest.duration).toBeCloseTo(1.66667);
+      expect(gait?.bench?.exit.duration).toBeCloseTo(1.03333);
       expect(gait?.shoeContacts).toHaveLength(2);
       const bytes = new Uint8Array(fs.readFileSync(new URL(`../public/nexciv-walk/${asset}`, import.meta.url)));
       expect(await matchCityGait(gait, bytes.buffer)).toBe(gait);
       expect(await matchCityGait(gait, new ArrayBuffer(4))).toBeUndefined();
-      for (const track of [...gait!.walk.tracks, ...gait!.jog.tracks]) {
+      for (const track of [...gait!.walk.tracks, ...gait!.jog.tracks, ...gait!.talk!.tracks, ...gait!.bench!.rest.tracks]) {
         expect(track.name).not.toMatch(/^Root\./);
         const size = track.getValueSize();
         const start = track.values.slice(0, size);
