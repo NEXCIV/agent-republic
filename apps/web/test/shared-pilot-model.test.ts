@@ -89,6 +89,9 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('starts an authorized mode
     });
     expect(choose).toHaveBeenCalledTimes(1);
     expect((await getProfile(cookie).json()).modelRun).toMatchObject({ status: 'running', calls: 1 });
+    expect((await GET(new NextRequest(url, { headers: { host, cookie } })).json()).ownModelRun)
+      .toMatchObject({ status: 'running', calls: 1, lastAction: '前往公共建设中心' });
+    expect((await publicView().json()).ownModelRun).toBeNull();
     expect(JSON.stringify(await getProfile(cookie).json())).not.toContain(config.apiKey);
     expect(JSON.stringify(await publicView().json())).not.toContain(config.apiKey);
     expect((await request({ action: 'stopModel' }, cookie)).status).toBe(200);

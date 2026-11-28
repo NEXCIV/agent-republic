@@ -21,6 +21,7 @@
 .number { width: 37px; height: 37px; border: 1px solid #d1ad57; background: #42391f; color: #f0cf69; border-radius: 50%; display: grid; place-items: center; font-weight: 700; }
 .resident[data-resident="02"] .number { background: #243d40; border-color: #75aaa9; color: #bddcda; }
 .resident>strong { display: block; font-size: 15px; margin-bottom: 6px; font-weight: 650; }
+.modelActivity { margin: 4px 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .progress { display: flex; align-items: center; gap: 9px; font-variant-numeric: tabular-nums; color: #e4c56f; font-size: 12px; margin: 4px 0 6px; }
 .progress progress { flex: 1; height: 8px; accent-color: #f0b90b; }
 .resident[data-resident="02"] .progress progress { accent-color: #75aaa9; }

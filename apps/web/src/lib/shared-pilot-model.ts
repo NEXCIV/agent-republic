@@ -4,7 +4,7 @@ import { BlockList, isIP } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { SHARED_PILOT_MAX_TURNS, SHARED_PILOT_PLACE_IDS, SHARED_PILOT_SPEECH_LIMIT, sharedPilotSpeechSchema, sharedPilotSurveyIntentSchema,
   type SharedPilotMoveRequest, type SharedPilotSocialRequest, type SharedPilotSurveyRequest } from '@agent-republic/domain';
-import type { SharedPilotStore } from './shared-pilot-store';
+import { SharedPilotError, type SharedPilotStore } from './shared-pilot-store';
 import { availableSurveyIntents, meetingActive, nextSpeaker } from './shared-pilot-social';
 import { surveyActive, SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS } from './shared-pilot-survey';
 import { CITY_PLACES } from './city-movement';
@@ -22,6 +22,7 @@ export const MODEL_CALL_LIMIT = 30;
 export const MODEL_RUN_MS = 30 * 60_000;
 const DECISION_GAP_MS = 5_000;
 const POLL_MS = 1_000;
+const MODEL_RETRY_LIMIT = 2;
 
 export type ModelRunView = {
   status: 'starting' | 'running' | 'paused' | 'finished' | 'error';
@@ -30,6 +31,7 @@ export type ModelRunView = {
   limit: number;
   endsAt: number;
   lastAction?: string;
+  activity?: string;
   error?: string;
 };
 
@@ -87,11 +89,21 @@ const proxyVirtualAddresses = new BlockList();
 proxyVirtualAddresses.addSubnet('198.18.0.0', 15);
 const MIMO_HOST = 'api.xiaomimimo.com';
 
+class ModelRequestError extends Error {
+  constructor(message: string, readonly retryAfterMs = 0) { super(message); }
+}
+
+function retryAfter(header?: string) {
+  if (!header) return 0;
+  const delay = /^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now();
+  return Number.isFinite(delay) ? Math.max(0, delay) : 0;
+}
+
 async function resolvePublicAddresses(hostname: string, signal: AbortSignal) {
   const resolver = new Resolver({ timeout: 4000, tries: 1 });
   let addresses: string[];
   try { addresses = await resolver.resolve4(hostname); }
-  catch { throw new Error('无法解析模型服务地址。'); }
+  catch { throw new ModelRequestError('暂时无法解析模型服务地址。'); }
   signal.throwIfAborted();
   if (addresses.length && addresses.every(address => proxyVirtualAddresses.check(address))) {
     // Fake-IP DNS from local proxies can hide the public answer. Query only the
@@ -108,7 +120,7 @@ async function resolvePublicAddresses(hostname: string, signal: AbortSignal) {
       addresses = answer.Answer.flatMap(record => record?.type === 1 && typeof record.data === 'string' ? [record.data] : []);
     } catch {
       signal.throwIfAborted();
-      throw new Error('本机代理返回了虚拟 IP，公网 DNS 暂时无法解析模型域名。');
+      throw new ModelRequestError('本机代理返回了虚拟 IP，公网 DNS 暂时无法解析模型域名。');
     }
   }
   signal.throwIfAborted();
@@ -127,9 +139,14 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
       method: 'POST', agent: false, signal,
       headers: { host: endpoint.host, authorization: `Bearer ${config.apiKey}`, 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) },
     }, (response) => {
-      if (response.statusCode !== 200) {
+      const code = response.statusCode;
+      if (code !== 200) {
         response.destroy();
-        reject(new Error(`模型服务返回 HTTP ${response.statusCode ?? '错误'}，请检查 API Key、地址和模型。`));
+        if (code === 408 || code === 429 || (code && code >= 500)) {
+          reject(new ModelRequestError(`模型服务暂时不可用（HTTP ${code}）。`, retryAfter(response.headers['retry-after'])));
+        } else {
+          reject(new Error(`模型服务返回 HTTP ${code ?? '错误'}，请检查 API Key、地址和模型。`));
+        }
         return;
       }
       const chunks: Buffer[] = [];
@@ -139,14 +156,14 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
         if (size > 65_536) { response.destroy(); reject(new Error('模型响应过大。')); }
         else chunks.push(chunk);
       });
-      response.on('error', () => reject(new Error('模型响应中断。')));
-      response.on('aborted', () => reject(new Error('模型响应中断。')));
+      response.on('error', () => reject(new ModelRequestError('模型响应中断。')));
+      response.on('aborted', () => reject(new ModelRequestError('模型响应中断。')));
       response.on('end', () => {
         try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
-        catch { reject(new Error('模型服务返回了无效 JSON。')); }
+        catch { reject(new ModelRequestError('模型服务返回了无效 JSON。')); }
       });
     });
-    outgoing.on('error', () => reject(new Error('模型服务连接失败或超时。')));
+    outgoing.on('error', () => reject(new ModelRequestError('模型服务连接失败或超时。')));
     outgoing.end(payload);
   });
 }
@@ -246,7 +263,8 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
     memories: observation.privateSocial.memories.slice(-3).map(({ text }) => text),
     choices: choices.map(({ id, label, speech }) => ({ id, label, surveyIntents: speech?.surveyIntents })),
   };
-  const tokenLimit = config.endpoint.hostname === MIMO_HOST ? { max_completion_tokens: 512, thinking: { type: 'disabled' } }
+  const tokenLimit = config.endpoint.hostname === MIMO_HOST
+    ? { max_completion_tokens: 512, thinking: { type: 'disabled' }, response_format: { type: 'json_object' } }
     : config.endpoint.hostname === 'api.openai.com' ? { max_completion_tokens: 512 } : { max_tokens: 512 };
   const payload = JSON.stringify({ model: config.model, ...tokenLimit, messages: [
     { role: 'system', content: [
@@ -259,7 +277,7 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
   ] });
   const result = await providerResponse(config, payload, AbortSignal.any([signal, AbortSignal.timeout(25_000)])) as { choices?: { message?: { content?: unknown } }[] } | null;
   const choice = parseModelDecision(result?.choices?.[0]?.message?.content, choices);
-  if (!choice) throw new Error('模型未返回可执行的合法动作，请检查模型兼容性。');
+  if (!choice) throw new ModelRequestError('模型未返回可执行的合法动作，请检查模型兼容性。');
   return choice;
 }
 
@@ -270,6 +288,7 @@ export class SharedPilotModelRun {
   private state: ModelRunView;
   private cafeReply?: string;
   private nextCafeQuestionAt = 0;
+  private consecutiveFailures = 0;
 
   constructor(config: ModelConfig, private readonly observe: () => ModelObservation, private readonly act: (command: Command) => unknown,
     private readonly choose: typeof chooseModelAction) {
@@ -287,7 +306,7 @@ export class SharedPilotModelRun {
     this.aborter.abort();
     clearTimeout(this.timer);
     this.config = undefined;
-    this.state = { ...this.state, status, error };
+    this.state = { ...this.state, status, error, activity: undefined };
   }
 
   private schedule(delay: number) {
@@ -302,12 +321,21 @@ export class SharedPilotModelRun {
     try {
       const observation = this.observe();
       const choices = modelChoices(observation, observation.serverTime >= this.nextCafeQuestionAt);
-      if (choices.length === 1) { this.schedule(POLL_MS); return; }
+      if (choices.length === 1) {
+        const moving = observation.residents.some(resident => resident.residentId === observation.viewerResidentId
+          && resident.movement?.status === 'walking');
+        this.state.activity = moving ? '正在执行行程，到场后继续决策。'
+          : observation.pendingWorksGoal?.stage === 'waiting' ? '网页调研目标正在等待 MCP Agent 接手。'
+            : '等待现场活动进入下一步。';
+        this.schedule(POLL_MS);
+        return;
+      }
+      this.state.activity = '正在请求模型决定下一步。';
       this.state.calls++;
       const decision = await this.choose(this.config, observation, choices, this.aborter.signal, this.cafeReply);
       if (!this.active) return;
       const id = typeof decision === 'string' ? decision : decision.choice;
-      if (!choices.some((choice) => choice.id === id)) { this.stop('error', '模型未返回合法动作。'); return; }
+      if (!choices.some((choice) => choice.id === id)) throw new ModelRequestError('模型未返回合法动作。');
       if (Date.now() >= this.state.endsAt) { this.stop('finished'); return; }
       // Recheck against current world state after the model's response.
       const refreshed = this.observe();
@@ -326,10 +354,27 @@ export class SharedPilotModelRun {
           }
         }
       }
-      this.state = { ...this.state, status: 'running', lastAction: label };
+      this.consecutiveFailures = 0;
+      this.state = { ...this.state, status: 'running', lastAction: label,
+        activity: id === 'wait' ? 'Agent 选择等待，稍后会重新观察。' : undefined };
       this.schedule(DECISION_GAP_MS);
     } catch (error) {
-      if (this.active) this.stop('error', error instanceof Error ? error.message : 'Agent 运行失败。');
+      if (!this.active) return;
+      if (error instanceof SharedPilotError && (error.code === 'BUSY' || error.code === 'CONFLICT')) {
+        this.state.activity = '现场状态已变，稍后重新观察。';
+        this.schedule(DECISION_GAP_MS);
+        return;
+      }
+      if (error instanceof ModelRequestError) {
+        const delay = Math.max(error.retryAfterMs, DECISION_GAP_MS * (2 ** this.consecutiveFailures));
+        if (this.consecutiveFailures < MODEL_RETRY_LIMIT && this.state.calls < MODEL_CALL_LIMIT && Date.now() + delay < this.state.endsAt) {
+          this.consecutiveFailures++;
+          this.state.activity = `${error.message} ${Math.ceil(delay / 1000)} 秒后重试。`;
+          this.schedule(delay);
+          return;
+        }
+      }
+      this.stop('error', error instanceof Error ? error.message : 'Agent 运行失败。');
     }
   }
 }

@@ -7,6 +7,7 @@ import { SiteHeader } from '@/components/SiteNavigation';
 import { CITY_PREVIEW, JOIN_CITY, SHARED_CITY } from '@/lib/site-routes';
 import { SHARED_PILOT_MAX_TURNS } from '@agent-republic/domain';
 import type { SharedPilotView } from '../../../lib/shared-pilot-runtime';
+import type { ModelRunView } from '../../../lib/shared-pilot-model';
 import { latestResidentActivity, type SharedPilotProfile } from '../../../lib/shared-pilot-profiles';
 import { CITY_PLACES } from '../../../lib/city-movement';
 import { createWalk, type AgentReport, type DistrictStatus, type WalkController, type WalkSelection } from '../walk';
@@ -23,7 +24,7 @@ import { WorksBriefRecord, WorksSitePanel } from './WorksSitePanel';
 
 type ResidentId = '01' | '02';
 type CameraView = 'overview' | 'self';
-type SharedCitySnapshot = SharedPilotView & { ownResidentId: ResidentId | null };
+type SharedCitySnapshot = SharedPilotView & { ownResidentId: ResidentId | null; ownModelRun: ModelRunView | null };
 const names: Record<ResidentId, string> = { '01': '城市居民', '02': '建设工人' };
 const residents = ['01', '02'] as const;
 const endpoint = '/api/nexciv-preview/shared';
@@ -227,6 +228,7 @@ export function SharedCity({ children }: { children: ReactNode }) {
           const visit = snapshot && latestResidentActivity(snapshot.works.visits, id);
           const fishing = snapshot && latestResidentActivity(snapshot.fishing.visits, id);
           const engine = snapshot?.engines.find(({ residentId }) => residentId === id);
+          const modelRun = id === ownResident ? snapshot?.ownModelRun : undefined;
           const profile = snapshot?.profiles.find(({ residentId }) => residentId === id);
           const resident = snapshot?.residents.find(({ residentId }) => residentId === id);
           const movement = resident?.movement;
@@ -244,6 +246,9 @@ export function SharedCity({ children }: { children: ReactNode }) {
               : engine?.driver === 'EXTERNAL' ? (engine.connected ? '外接 Agent 最近活跃' : '等待 Agent 接入') : resident ? '规则 Agent 已接入' : '连接中'}</small></div></div>
             <strong role="status" data-resident-status={id}>{fishing && fishing.stage !== 'completed' ? FISHING_STATUS[fishing.stage]
               : visit && visit.stage !== 'completed' ? WORKS_STATUS[visit.stage] : order && order.stage !== 'completed' ? COFFEE_STATUS[order.stage] : resident ? inspection ? inspection.finding ? '已提交调研记录' : '现场观察中' : waitingSurvey ? '已抵达调研点' : speaking ? (lastLine?.residentId === id ? '正在发言' : '面对面交流') : waiting ? '已到会面站位' : moving && destination ? `前往 ${CITY_PLACES[destination]}` : `停留于 ${CITY_PLACES[resident.place]}` : '等待城市状态'}</strong>
+            {modelRun?.activity && <p className={styles.modelActivity}>{modelRun.activity}</p>}
+            {modelRun?.lastAction && <p className={styles.modelActivity}>最近决策 · {modelRun.lastAction}</p>}
+            {modelRun?.error && <p className={styles.alert} role="status">{modelRun.error} <Link href={JOIN_CITY}>角色与接入</Link></p>}
             {inspection ? <div className={styles.progress}><progress aria-label={`${id} 号现场观察进度`} max={8} value={inspection.finding ? 8 : Math.min(8, Math.max(0, ((snapshot?.serverTime ?? 0) - (inspection.startedAt ?? snapshot?.serverTime ?? 0)) / 1000))} /><span>{inspection.finding ? '已记录' : '观察'}</span></div>
               : movement && <div className={styles.progress}><progress aria-label={`${id} 号行程进度`} max={100} value={progress} /><span>{progress}%</span></div>}
             {resident && <small className={styles.position}>X {resident.position[0].toFixed(1)} · Z {resident.position[2].toFixed(1)}</small>}

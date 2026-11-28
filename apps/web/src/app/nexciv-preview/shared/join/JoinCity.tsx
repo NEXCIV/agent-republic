@@ -210,6 +210,7 @@ export function JoinCity() {
       {mode === 'api' && <div className={styles.form}>
         {run && <div className={styles.modelStatus} role="status">
           <strong>{runLabels[run.status]}</strong><span>{run.model} · {run.calls}/{run.limit} 次模型调用</span>
+          {run.activity && <span>{run.activity}</span>}
           {run.lastAction && <span>最近决策 · {run.lastAction}</span>}
           {run.error && <span className={styles.error}>{run.error}</span>}
         </div>}

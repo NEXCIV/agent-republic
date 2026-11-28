@@ -105,6 +105,7 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('resolves proxy virtual ad
       return Object.assign(new EventEmitter(), { end(payload: string) {
         expect(JSON.parse(payload)).toMatchObject({
           model: 'mimo-v2.6-flash', max_completion_tokens: 512, thinking: { type: 'disabled' },
+          response_format: { type: 'json_object' },
         });
         const response = Object.assign(new PassThrough(), { statusCode: 200 });
         done(response as unknown as IncomingMessage);
@@ -120,6 +121,65 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('resolves proxy virtual ad
     expect(mocks.request).toHaveBeenCalledTimes(1);
   } finally {
     vi.unstubAllGlobals();
+    mocks.resolve.mockReset();
+    mocks.request.mockReset();
+    store.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('recovers from provider rate limiting and invalid choices within the call budget', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'nexciv-provider-retry-'));
+  const store = new SharedPilotStore(join(folder, 'shared.sqlite'), Date.now);
+  const config = parseModelConfig({ baseUrl: 'https://example.com/v1', model: 'test-model', apiKey: 'test-secret' })!;
+  const observe = () => store.observe(token);
+  const token = store.issueCredential('01').token;
+  const act = vi.fn();
+  const run = new SharedPilotModelRun(config, observe, act, chooseModelAction);
+  const denied = new SharedPilotModelRun(config, observe, act, chooseModelAction);
+  const malformed = new SharedPilotModelRun(config, observe, act, chooseModelAction);
+  const outcomes = [
+    { code: 429, retry: '9' },
+    { code: 200, choice: 'unknown' },
+    { code: 200, choice: 'move:works' },
+    { code: 401 },
+  ];
+  vi.useFakeTimers();
+  try {
+    mocks.resolve.mockResolvedValue(['93.184.216.34']);
+    mocks.request.mockImplementation((_: RequestOptions, done: (response: IncomingMessage) => void) => {
+      return Object.assign(new EventEmitter(), { end() {
+        const next = outcomes.shift() ?? { code: 200, choice: 'unknown' };
+        const response = Object.assign(new PassThrough(), { statusCode: next.code, headers: { 'retry-after': next.retry } });
+        done(response as unknown as IncomingMessage);
+        response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ choice: next.choice }) } }] }));
+      } });
+    });
+    run.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.view).toMatchObject({ status: 'starting', calls: 1, activity: expect.stringContaining('9 秒后重试') });
+    await vi.advanceTimersByTimeAsync(8999);
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run.view.calls).toBe(2);
+    expect(act).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(run.view).toMatchObject({ status: 'running', calls: 3 });
+    expect(act).toHaveBeenCalledOnce();
+    run.stop();
+
+    denied.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(denied.view).toMatchObject({ status: 'error', calls: 1, error: expect.stringContaining('HTTP 401') });
+    malformed.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(malformed.view).toMatchObject({ status: 'error', calls: 3, error: expect.stringContaining('合法动作') });
+    expect(act).toHaveBeenCalledOnce();
+  } finally {
+    run.stop();
+    denied.stop();
+    malformed.stop();
+    vi.useRealTimers();
     mocks.resolve.mockReset();
     mocks.request.mockReset();
     store.close();

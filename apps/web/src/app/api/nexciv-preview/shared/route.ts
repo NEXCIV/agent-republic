@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 10;
+const PILOT_RUNTIME_VERSION = 11;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -80,8 +80,9 @@ export function GET(request: NextRequest) {
       return json({ ...view, ...pilot.modelProfile(view.profile.residentId), mcpScript: path.resolve(process.cwd(), '../../scripts/nexciv-shared-mcp.mjs') });
     }
     const resident = session && config.profileResidents.length ? pilot.profile(session).profile?.residentId : undefined;
+    const ownResidentId = resident && config.profileResidents.includes(resident) ? resident : null;
     return json({ ...pilot.snapshot(), profilesEnabled: config.profileResidents.length > 0,
-      ownResidentId: resident && config.profileResidents.includes(resident) ? resident : null });
+      ownResidentId, ownModelRun: ownResidentId ? pilot.modelProfile(ownResidentId).modelRun : null });
   } catch {
     return json({ error: '共享城市暂不可用，请确认本机试验配置。' }, 503);
   }
