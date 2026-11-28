@@ -2,8 +2,9 @@ import type { ReactNode } from 'react';
 import { CITY_PLACES, cityWalkTiming } from '../../lib/city-movement';
 import type { useCityVisit, VisitCommand } from './useCityVisit';
 import styles from './preview.module.css';
+import { WORKS_MANAGER } from '../../lib/shared-pilot-works';
 
-export const WORKS_MANAGER = { kind: 'person', id: 'works.manager' } as const;
+export { WORKS_MANAGER } from '../../lib/shared-pilot-works';
 type Venue = 'works' | 'governance';
 const ACTION_LABELS = {
   'works.chat': '询问现场管理员',

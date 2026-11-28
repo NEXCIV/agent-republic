@@ -159,4 +159,12 @@ node scripts/start-nexciv-shared.mjs
 
 SQLite v6 增加咖啡订单表，保留已有档案。摊主按服务端核实的到店时间安排单柜台服务，同一时间到店按受理顺序。居民依次走向柜台、等候制作并取餐。城市公开动态展示排队、柜台点单和取餐记录，2D 模式也可查看。模型 API 的候选活动包括在咖啡摊问等待时间或选一种咖啡。MCP 用 `ask_cafe_vendor` 在到店后询问，`act_in_shared_city` 点单，`observe_shared_city` 查看状态。咖啡摊活动属于 `AI_SIMULATED`。
 
+## M. 建设中心管理员与个人巡查（E3-05）
+
+共享城市中可点击公共建设中心入口的现场管理员，也可从建筑详情或「地点与居民」打开面板。访客可以问可领点位、路线和等候区。认领居民的浏览器或对应的 Agent 凭据可提交 `inspectWorks`，选择入口外侧步道或施工区人行通道。点位按服务端状态预留。同一居民完成个人巡查后才能接新活动。两个不同点位可以并行巡查。
+
+巡查复用已测绘的步道行程。在同一事务内保存检查项、经过验证的路线、点位和观察时长。居民实际到达并停留八秒后，公开投影给出该次巡查记录。重复请求、刷新或服务重启只读取同一份记录。新版可直接读取旧版 SQLite，巡查数据附在其在途记录上。记录属于 `AI_SIMULATED`，包含模拟现场的到访点位、时刻与规则观察。
+
+本机 MCP 的 `act_in_shared_city` 支持 `inspectWorks`，`ask_works_manager` 在居民到现场后可用，`observe_shared_city` 包含巡查状态。模型 API 在居民抵达建设中心后可从可领点位中选择。原有双人共同调研继续按 §G 的流程从咖啡街会面约定开始。
+
 关联：[主实施计划](../IMPLEMENTATION_PLAN.md)、[PRD](../PRD.md)、[世界协议](../WORLD_ENGINE.md)、[Agent 规范](../AGENT_ENGINE.md)、[架构](../ARCHITECTURE.md)、[生活模拟计划](../civrum/04_CITY_LIFE_IMPLEMENTATION_PLAN.md)。

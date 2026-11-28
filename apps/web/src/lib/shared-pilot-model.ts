@@ -9,10 +9,11 @@ import { availableSurveyIntents, meetingActive, nextSpeaker } from './shared-pil
 import { surveyActive, SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS } from './shared-pilot-survey';
 import { CITY_PLACES } from './city-movement';
 import { COFFEE_MENU, type CafeTalk, type OrderCoffee } from './shared-pilot-cafe';
+import { WORKS_CHECKS, type InspectWorks } from './shared-pilot-works';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
-type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk;
+type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks;
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
 type Choice = { id: string; label: string; command?: Command; speech?: { meetingId: string; surveyIntents: NonNullable<Speech['surveyIntent']>[] } };
 type ModelDecision = string | ({ choice: string } & Speech);
@@ -121,7 +122,7 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
 }
 
 export function modelChoices(observation: ModelObservation, canAskCafe = true): Choice[] {
-  const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe } = observation;
+  const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe, works } = observation;
   const own = residents.find(({ residentId }) => residentId === actor)!;
   const choices: Choice[] = [{ id: 'wait', label: '休息或等待' }];
   const move = (place: typeof SHARED_PILOT_PLACE_IDS[number], label = `前往${CITY_PLACES[place]}`, id = `move:${place}`) =>
@@ -137,6 +138,7 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
     askCafe();
     return choices;
   }
+  if (works.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
   const task = survey.task;
   if (task && surveyActive(task)) {
     if (task.status === 'proposed' && task.invitee === actor) {
@@ -168,7 +170,8 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
   askCafe();
   for (const place of SHARED_PILOT_PLACE_IDS) if (place !== own.place) move(place);
   const peer = actor === '01' ? '02' : '01';
-  if (!cafe.orders.some(order => order.stage !== 'completed')) {
+  const inspections = works.visits.filter(visit => visit.stage !== 'completed');
+  if (!inspections.length && !cafe.orders.some(order => order.stage !== 'completed')) {
     add(`invite:${peer}`, '邀请另一位居民到咖啡街见面', { action: 'invite', target: peer, venue: 'cafe', requestId: randomUUID() });
     if (survey.eligibleMeetingId) add(`survey:${survey.eligibleMeetingId}:propose`, '提议共同调研公共建设中心',
       { action: 'proposeSurvey', meetingId: survey.eligibleMeetingId, requestId: randomUUID() });
@@ -177,6 +180,13 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
     for (const drink of ['flat-white', 'americano'] as const) {
       add(`coffee:${drink}`, `向咖啡摊主点一杯${COFFEE_MENU[drink]}${cafe.serving ? '（柜台忙，可能排队）' : ''}`,
         { action: 'orderCoffee', drink, requestId: randomUUID() });
+    }
+  }
+  if (own.place === 'works') {
+    for (const { checkId, label } of Object.values(WORKS_CHECKS)) {
+      const unavailable = inspections.some(visit => visit.checkId === checkId)
+        || works.visits.some(visit => visit.residentId === actor && visit.checkId === checkId && at < visit.reportAt + 120000);
+      if (!unavailable) add(`works:${checkId}`, `向现场管理员领取${label}巡查`, { action: 'inspectWorks', checkId, requestId: randomUUID() });
     }
   }
   return choices;
@@ -192,6 +202,7 @@ export async function chooseModelAction(config: ModelConfig, observation: ModelO
       transcript: meeting.lines.map(({ residentId, text }) => ({ residentId, text })) },
     survey: observation.survey.task?.status,
     cafe: { serving: observation.cafe.serving, queued: observation.cafe.queued, reply: cafeReply },
+    works: observation.works.visits.slice(-3).map(({ residentId, label, stage, report }) => ({ residentId, label, stage, finding: report?.text })),
     memories: observation.privateSocial.memories.slice(-3).map(({ text }) => text),
     choices: choices.map(({ id, label, speech }) => ({ id, label, surveyIntents: speech?.surveyIntents })),
   };

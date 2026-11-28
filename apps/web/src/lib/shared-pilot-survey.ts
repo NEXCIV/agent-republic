@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { type SharedPilotResidentId, type SharedPilotSurveyRequest } from '@agent-republic/domain';
 import type { CityPoint } from './cafe-geometry';
 import { surveyAgreement, type SharedMeeting, type SocialResident } from './shared-pilot-social';
+import { SURVEY_OBSERVATION_MS, WORKS_CHECKS } from './shared-pilot-works';
+export { SURVEY_OBSERVATION_MS } from './shared-pilot-works';
 
 type Resident = SharedPilotResidentId;
-export const SURVEY_OBSERVATION_MS = 8000;
 export const SURVEY_CHECKPOINTS = {
-  '01': { checkId: 'entrance-path', label: '入口外侧步道', x: 95, z: 67.346, finding: '已记录入口外侧步道的实测路网节点。建议保持入口至前厅的行人连接。' },
-  '02': { checkId: 'pedestrian-passage', label: '施工区人行通道', x: 95, z: 60.55, finding: '已记录施工区人行通道的路网节点。建议在通道入口明确步行引导。' },
+  '01': WORKS_CHECKS['entrance-path'],
+  '02': WORKS_CHECKS['pedestrian-passage'],
 } as const;
 type CheckId = typeof SURVEY_CHECKPOINTS[Resident]['checkId'];
 type SurveyPhase = 'proposed' | 'accepted' | 'surveying' | 'completed' | 'declined' | 'expired';

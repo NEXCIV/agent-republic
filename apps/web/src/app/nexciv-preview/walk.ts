@@ -10,7 +10,7 @@ import type { CafeSnapshot } from '../../lib/cafe-life';
 import { cityWalkTiming, type CityMovement, type CityObservation, type CityRegion } from '../../lib/city-movement';
 import type { CityPoint } from '../../lib/cafe-geometry';
 import type { SharedPilotView } from '../../lib/shared-pilot-runtime';
-import { SHARED_AVATARS, type SharedPilotAvatar } from '../../lib/shared-pilot-profiles';
+import { SHARED_AVATARS, latestResidentActivity, type SharedPilotAvatar } from '../../lib/shared-pilot-profiles';
 import type { LightingPilot } from '../../lib/city-activities';
 import { createFishingGear, FISHING_SPOT } from './fishing';
 import { createInstallationKit, createPilotLamp } from './lighting-pilot';
@@ -21,7 +21,8 @@ import { createDuskReflection, lightOverview, lightStreetSurfaces } from './over
 import { landscapeVisibility, LANDSCAPE_REGION, regionFor, substituteLandscapeRetail } from './city-landscape';
 import { createTraffic, removeParkedVehicles } from './traffic';
 import { createCityCrowd, type PedestrianPath } from './city-crowd';
-import { CAFE_VENDOR, cafePose, latestCoffeeOrder } from '../../lib/shared-pilot-cafe';
+import { CAFE_VENDOR, cafePose } from '../../lib/shared-pilot-cafe';
+import { WORKS_MANAGER, WORKS_MANAGER_POSITION } from '../../lib/shared-pilot-works';
 import { createStageInstallation } from './theatre-stage-installation';
 import { createNavigation, DESTINATION_FACING, placeAt, type AgentStart, type Connection, type EastRoutes, type Place, type ResidentId, type Visits } from './navigation';
 
@@ -31,8 +32,7 @@ export type DistrictStatus = 'idle' | 'loading' | 'ready' | 'unavailable';
 export type AgentId = ResidentId;
 export type FollowId = AgentId | '02';
 export type WalkLandmarkId = 'registry' | 'works' | 'center' | 'governance' | 'market' | 'forum' | 'west-pool';
-const WORKS_MANAGER = 'works.manager';
-type PersonId = typeof WORKS_MANAGER | typeof CAFE_VENDOR.id;
+type PersonId = typeof WORKS_MANAGER.id | typeof CAFE_VENDOR.id;
 type ActorId = FollowId | PersonId;
 export type WalkSelection = { kind: 'building'; id: WalkLandmarkId }
   | { kind: 'resident'; id: FollowId }
@@ -119,7 +119,8 @@ const DETAIL_FILES = {
 };
 type Detail = keyof typeof DETAIL_FILES;
 const LANDMARK_DETAILS = ['registry', 'works', 'center', 'hall'] as const;
-const LANDMARK_FRAMING: Record<WalkLandmarkId | 'cafe-vendor', { center: CityPoint; yaw: number; distance: number; pitch?: number; district?: District }> = {
+type CameraTarget = WalkLandmarkId | 'cafe-vendor' | 'works-manager';
+const LANDMARK_FRAMING: Record<CameraTarget, { center: CityPoint; yaw: number; distance: number; pitch?: number; district?: District }> = {
   registry: { center: [80, 4, -23.5], yaw: -0.45, distance: 27, district: 'east' },
   works: { center: [95, 6, 82], yaw: -2.76, distance: 33, district: 'east' },
   center: { center: [-98.6, 6, -64.6], yaw: 1.05, distance: 31, district: 'research' },
@@ -128,6 +129,7 @@ const LANDMARK_FRAMING: Record<WalkLandmarkId | 'cafe-vendor', { center: CityPoi
   forum: { center: [-95, 1.5, 87], yaw: 2.76, distance: 33, district: 'west' },
   'west-pool': { center: [-80.6, 0.74, 32.5], yaw: -0.16, distance: 24.8, pitch: 0.16, district: 'west' },
   'cafe-vendor': { center: [11.8, 1, 72.05], yaw: -2.74, distance: 8.2, pitch: 0.36 },
+  'works-manager': { center: [95.65, 1.1, 72.45], yaw: -2.73, distance: 8.2, pitch: 0.37, district: 'east' },
 };
 const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_01_Governance_Hall', 'governance'],
@@ -136,7 +138,7 @@ const LANDMARK_NAMES: [string, WalkLandmarkId][] = [
   ['HERO_04_Public_Construction', 'works'],
   ['Market', 'market'],
 ];
-const SELECTABLE_ACTORS = ['01', '02', '03', WORKS_MANAGER, CAFE_VENDOR.id] as const;
+const SELECTABLE_ACTORS = ['01', '02', '03', WORKS_MANAGER.id, CAFE_VENDOR.id] as const;
 
 function isRendered(object: THREE.Object3D) {
   for (let node: THREE.Object3D | null = object; node; node = node.parent) {
@@ -488,6 +490,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const marketEntrance = new THREE.Vector3();
   const counter = new THREE.Vector3(...CAFE_COUNTER);
   const coworker = new THREE.Vector3(...CAFE_HOST);
+  const managerPosition = new THREE.Vector3(...WORKS_MANAGER_POSITION);
   const seat = new THREE.Vector3(...CAFE_BENCH);
   const seatedHips = seat.clone().add(new THREE.Vector3(0, 0, -0.16));
   const seatFront = seat.clone().add(new THREE.Vector3(0, 0, -0.65));
@@ -553,8 +556,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const residentMarkers = new Map<ActorId, THREE.Sprite>();
   if (callbacks.onSelect) {
     for (const id of SELECTABLE_ACTORS) {
-      if (sharedMode ? id !== '01' && id !== '02' && id !== CAFE_VENDOR.id : id === CAFE_VENDOR.id) continue;
-      const material = sharedMode ? createResidentMarkerMaterial(id === CAFE_VENDOR.id ? '咖' : id, id === '02' ? '#79bab7' : '#f0b90b') : markerMaterial;
+      if (sharedMode ? id === '03' : id === CAFE_VENDOR.id) continue;
+      const label = id === WORKS_MANAGER.id ? '工' : id === CAFE_VENDOR.id ? '咖' : id;
+      const material = sharedMode ? createResidentMarkerMaterial(label, id === '02' ? '#79bab7' : '#f0b90b') : markerMaterial;
       if (!material) continue;
       if (sharedMode) sharedMarkerMaterials.push(material);
       const marker = new THREE.Sprite(material);
@@ -585,7 +589,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   buildingOutline.visible = residentOutline.visible = false;
   scene.add(buildingOutline, residentOutline);
   let selection: WalkSelection | null = null;
-  let framedLandmark: WalkLandmarkId | 'cafe-vendor' | undefined;
+  let framedLandmark: CameraTarget | undefined;
   let cafeVendor: { asset: GLTF; patrol: Patrol } | undefined;
   let vendorLoading = false;
   let takeawayCup: THREE.Group | undefined;
@@ -734,9 +738,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function selectableActor(id: ActorId) {
     if (id === CAFE_VENDOR.id) return cafeVendor;
+    if (id === WORKS_MANAGER.id) return cityObservation?.lightingPilot?.worker ? undefined : siteHost;
     if (sharedMode) return id === '01' || id === '02' ? sharedActors.get(id) : undefined;
     const assignedWorker = cityObservation?.lightingPilot?.worker;
-    if (id === WORKS_MANAGER) return assignedWorker ? undefined : siteHost;
     if (id === '02') return cafeMode || assignedWorker ? siteHost : marketGuest;
     if (id === '03' && cafeMode) return pierRegular;
     return agents.get(id);
@@ -789,17 +793,18 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const markerScale = 2 * (sharedMode ? 27 : 16) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / Math.max(1, host.clientHeight);
     for (const [id, marker] of residentMarkers) {
       const root = selectableActor(id)?.patrol.root;
-      const position = id === CAFE_VENDOR.id ? coworker : root?.position;
-      marker.visible = Boolean(position && (id === CAFE_VENDOR.id || (root && isRendered(root))) && camera.position.distanceTo(position) > (id === CAFE_VENDOR.id ? 10 : 62));
+      const location = id === CAFE_VENDOR.id ? coworker : sharedMode && id === WORKS_MANAGER.id ? managerPosition : undefined;
+      const position = location ?? root?.position;
+      marker.visible = Boolean(position && (location || (root && isRendered(root))) && camera.position.distanceTo(position) > (location ? 10 : 62));
       if (!marker.visible || !position) continue;
       marker.position.copy(position);
-      marker.position.y += id === CAFE_VENDOR.id ? 3.15 : 2.15;
+      marker.position.y += id === CAFE_VENDOR.id ? 3.15 : id === WORKS_MANAGER.id && sharedMode ? 2.65 : 2.15;
       marker.scale.setScalar(markerScale);
     }
   }
 
   function zoom(factor: number) {
-    if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, framedLandmark === 'cafe-vendor' ? 5.5 : 16, 94);
+    if (framedLandmark) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' ? 5.5 : 16, 94);
     else if (mode === 'follow' && followedPatrol()) followDistance = THREE.MathUtils.clamp(followDistance * factor, 3.6, 11.5);
     else if (mode === 'overview' && citywide) desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 155, 465);
     else desiredDistance = THREE.MathUtils.clamp(desiredDistance * factor, 24, north || sideDistrictLoaded() ? 176 : 139);
@@ -855,7 +860,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   }
 
   function focusSelection(target: WalkSelection) {
-    if (target.kind !== 'building' && target.id !== CAFE_VENDOR.id) {
+    if (target.kind !== 'building' && target.id !== CAFE_VENDOR.id && (!sharedMode || target.id !== WORKS_MANAGER.id)) {
       const root = selectableActor(target.id)?.patrol.root;
       if (target.kind === 'person' || (root && isRendered(root))) setView('follow', target.id);
       return;
@@ -867,7 +872,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       orbitDistance = camera.position.distanceTo(aim);
     }
     mode = 'overview';
-    framedLandmark = target.kind === 'building' ? target.id : 'cafe-vendor';
+    framedLandmark = target.kind === 'building' ? target.id : target.id === CAFE_VENDOR.id ? 'cafe-vendor' : 'works-manager';
     const framing = LANDMARK_FRAMING[framedLandmark];
     landmarkTarget.set(...framing.center);
     resetOrbit();
@@ -1015,7 +1020,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function poseWorksSite(pilot: LightingPilot | undefined, cityTime: number, poseDt: number, talkTarget?: THREE.Vector3) {
     const worker = pilot?.worker;
-    const host = cityObservation?.nearby?.people.find(({ id }) => id === WORKS_MANAGER);
+    const host = cityObservation?.nearby?.people.find(({ id }) => id === WORKS_MANAGER.id);
     const hostPosition = worker?.movement.points[0] ?? host?.position;
     if (hostPosition && !siteHostRequested) loadSiteHost(hostPosition);
     if (worker && workerAssetsFor !== worker.movement.requestId) {
@@ -1098,7 +1103,13 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const [x, y, z] = resident.position;
         const previous = move?.points.at(-2);
         observedPosition.set(x, y, z);
-        const order = projection && latestCoffeeOrder(projection.cafe.orders, id);
+        const inspection = projection && latestResidentActivity(projection.works.visits, id);
+        if (inspection?.stage === 'observing') {
+          observedFacing.set(x + 2.2, y, z + (inspection.checkId === 'entrance-path' ? 0.85 : -0.45));
+          patrol.observe(poseDt, observedPosition, observedFacing, false, 'nod');
+          continue;
+        }
+        const order = projection && latestResidentActivity(projection.cafe.orders, id);
         const atCafe = order && cafePose(order, serverTime);
         if (atCafe) {
           patrol.observe(poseDt, observedPosition.set(...atCafe.point), observedFacing.set(...atCafe.facing), atCafe.walking);
@@ -1205,7 +1216,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       || (interviewing && !byPier));
     const poseDt = playing ? dt : 0;
     const cityTime = (cityObservation?.serverTime ?? 0) + (playing ? now - cityReceivedAt : 0);
-    if (!sharedMode) poseWorksSite(pilot, cityTime, poseDt, conversation?.person?.id === WORKS_MANAGER ? primary?.root.position : undefined);
+    if (!sharedMode) poseWorksSite(pilot, cityTime, poseDt, conversation?.person?.id === WORKS_MANAGER.id ? primary?.root.position : undefined);
     let observedProgress: number | undefined;
     if (sharedMode) {
       poseShared(now, poseDt);
@@ -1417,7 +1428,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
       const sharedPhase = sharedSnapshot?.social?.meeting?.status;
       const surveyPair = sharedMode && (sharedSnapshot?.survey?.task?.status === 'surveying' || sharedSnapshot?.survey?.task?.status === 'completed') && sharedSnapshot.survey.arrived.length === 2;
-      const sharedPeer = sharedMode && (surveyPair || sharedPhase === 'talking' || sharedPhase === 'completed') && followed !== WORKS_MANAGER
+      const sharedPeer = sharedMode && (surveyPair || sharedPhase === 'talking' || sharedPhase === 'completed') && followed !== WORKS_MANAGER.id
         ? selectableActor(followed === '01' ? '02' : '01')?.patrol.root : undefined;
       const sharedPair = Boolean(sharedPeer?.visible && sharedPeer.position.distanceTo(feet) < (surveyPair ? 9 : 3));
       if (sharedPair && sharedPeer) {
@@ -1543,6 +1554,14 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     }
     let worksDistance = Infinity;
     const closeToCafe = !wide && camera.position.distanceToSquared(counter) < 87 ** 2;
+    if (sharedMode) {
+      const nearManager = !wide && Boolean(districts.east.asset) && camera.position.distanceToSquared(managerPosition) < 55 ** 2;
+      if (nearManager && !siteHostRequested) loadSiteHost(WORKS_MANAGER_POSITION);
+      if (siteHost) {
+        siteHost.patrol.root.visible = nearManager;
+        if (nearManager) siteHost.patrol.observe(reducedMotion.matches ? 0 : poseDt, siteHost.position, siteHost.facing);
+      }
+    }
     if (closeToCafe && !cafeStreetRequested) loadCafeStreet();
     if (sharedMode && closeToCafe) loadCafeVendor();
     if (cafeVendor) cafeVendor.patrol.root.visible = closeToCafe;
@@ -1642,7 +1661,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       followPitch = THREE.MathUtils.clamp(followPitch - dy * 0.006, 0.16, 1.18);
     } else {
       orbitYaw -= dx * 0.006;
-      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, framedLandmark === 'west-pool' || framedLandmark === 'cafe-vendor' ? 0.14 : 0.48, 1.45);
+      orbitPitch = THREE.MathUtils.clamp(orbitPitch - dy * 0.006, framedLandmark === 'west-pool' || framedLandmark === 'cafe-vendor' || framedLandmark === 'works-manager' ? 0.14 : 0.48, 1.45);
     }
   }
 
@@ -1678,7 +1697,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       for (const hit of hits) {
         if (hit.distance < nearest) {
           nearest = hit.distance;
-          target = id === WORKS_MANAGER || id === CAFE_VENDOR.id ? { kind: 'person', id } : { kind: 'resident', id };
+          target = id === WORKS_MANAGER.id || id === CAFE_VENDOR.id ? { kind: 'person', id } : { kind: 'resident', id };
         }
       }
     }
@@ -2045,7 +2064,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function loadSiteHost(point: CityPoint) {
     siteHostRequested = true;
-    request('agent-02.glb', 'low').then((response) => response.arrayBuffer()).then(async (bytes) => {
+    request(sharedMode ? SHARED_AVATARS.technician.asset : 'agent-02.glb', 'low').then((response) => response.arrayBuffer()).then(async (bytes) => {
       if (ended || contextLost) return;
       const asset = await loader.parseAsync(bytes, ASSET_PATH);
       if (ended || contextLost) { disposeModel(asset.scene); return; }
@@ -2053,6 +2072,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       const facing = position.clone().add(new THREE.Vector3(-1, 0, -0.4));
       try {
         const patrol = createAgentPatrol(asset, [point, facing.toArray()], [facing.x, facing.z]);
+        patrol.root.name = 'Construction site manager';
+        patrol.observe(0, position, facing);
         siteHost = { asset, patrol, position, facing };
         actorLayer.add(patrol.root);
       } catch {

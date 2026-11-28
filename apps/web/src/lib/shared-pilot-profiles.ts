@@ -18,6 +18,13 @@ export function isSharedPilotAvatar(value: unknown): value is SharedPilotAvatar 
 
 export type SharedPilotProfile = { residentId: SharedPilotResidentId; name: string; avatar: SharedPilotAvatar };
 export type SharedPilotProfileView = { profile: SharedPilotProfile | null; hasKey: boolean };
+
+export function latestResidentActivity<T extends { residentId: SharedPilotResidentId }>(entries: readonly T[], id: SharedPilotResidentId) {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]!;
+    if (entry.residentId === id) return entry;
+  }
+}
 export const SHARED_PILOT_SESSION_SECONDS = 7 * 24 * 60 * 60;
 export const SHARED_PILOT_SECRET = /^[A-Za-z0-9_-]{43}$/;
 export const SHARED_PILOT_NAME = /^[\p{L}\p{M}\p{N} ·_-]{1,24}$/u;

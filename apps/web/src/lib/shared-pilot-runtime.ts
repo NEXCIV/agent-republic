@@ -7,10 +7,11 @@ import type { SharedPilotProfile } from './shared-pilot-profiles';
 import { chooseModelAction, SharedPilotModelRun, type ModelConfig } from './shared-pilot-model';
 import { CITY_PLACES } from './city-movement';
 import type { CafeTalk, OrderCoffee } from './shared-pilot-cafe';
+import type { InspectWorks, WorksTalk } from './shared-pilot-works';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
-export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | { action: 'observe' };
+export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
   '02': ['cafe', 'works', 'plaza', 'governance'],
@@ -82,8 +83,12 @@ export class SharedPilotRuntime {
 
   profile(session: string) { return this.store.profile(session); }
   cafeTalk(question: string) { return this.store.cafeTalk(question); }
+  worksTalk(question: string) { return this.store.worksTalk(question); }
   orderCoffee(session: string, residents: readonly SharedPilotResidentId[], command: OrderCoffee) {
     return this.store.orderCoffee(session, command, residents);
+  }
+  requestInspection(session: string, residents: readonly SharedPilotResidentId[], command: InspectWorks) {
+    return this.store.requestInspection(session, command, residents);
   }
   claimProfile(profile: Pick<SharedPilotProfile, 'name' | 'avatar'>, profileResidents: readonly SharedPilotResidentId[], session: string) {
     const claimed = this.store.claim(profile, profileResidents, session);
@@ -157,6 +162,10 @@ export class SharedPilotRuntime {
         return this.store.orderCoffee(token, command);
       case 'cafeTalk':
         return this.store.cafeTalk(command.question, token);
+      case 'inspectWorks':
+        return this.store.requestInspection(token, command);
+      case 'worksTalk':
+        return this.store.worksTalk(command.question, token);
       case 'invite':
       case 'respond':
       case 'say':
@@ -265,6 +274,7 @@ export class SharedPilotRuntime {
       if (external.has(connection.residentId)) continue;
       const observation = connection === this.connections[0] ? firstObservation : this.observeConnection(connection);
       if (observation.cafe.orders.some(order => order.stage !== 'completed')) continue;
+      if (observation.works.visits.some(visit => visit.stage !== 'completed')) continue;
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation, external.size === 0)) continue;
       if (connection.decisions >= MAX_DECISIONS) continue;
@@ -292,9 +302,9 @@ export class SharedPilotRuntime {
   }
 
   snapshot() {
-    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe } = this.observeConnection(this.connections[0]!);
+    const { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works } = this.observeConnection(this.connections[0]!);
     const external = this.externallyControlled(profiles);
-    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe,
+    return { mode, provenance, serverTime, revision, residents, events, social, survey, profiles, cafe, works,
       engines: this.connections.map(({ residentId }) => {
         const run = this.modelRuns.get(residentId);
         if (run) return { residentId, driver: 'MODEL' as const, status: run.view.status };

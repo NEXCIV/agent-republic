@@ -7,12 +7,13 @@ import { SharedPilotError } from '../../../../lib/shared-pilot-store';
 import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, isSharedPilotAvatar } from '../../../../lib/shared-pilot-profiles';
 import { parseModelConfig } from '../../../../lib/shared-pilot-model';
 import { cafeTalkSchema, orderCoffeeSchema } from '../../../../lib/shared-pilot-cafe';
+import { inspectWorksSchema, worksTalkSchema } from '../../../../lib/shared-pilot-works';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 5;
+const PILOT_RUNTIME_VERSION = 6;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -108,7 +109,7 @@ async function readBody(request: NextRequest): Promise<Record<string, unknown> |
 function readCommand(body: Record<string, unknown> | undefined): SharedAgentCommand | undefined {
   if (!body) return;
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
-  for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema, orderCoffeeSchema, cafeTalkSchema]) {
+  for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema, orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
   }
@@ -125,6 +126,10 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
   if (chat.success) return json(pilot.cafeTalk(chat.data.question));
   const coffee = orderCoffeeSchema.safeParse(body);
   if (coffee.success) return json(pilot.orderCoffee(session, config.profileResidents, coffee.data));
+  const worksChat = worksTalkSchema.safeParse(body);
+  if (worksChat.success) return json(pilot.worksTalk(worksChat.data.question));
+  const inspection = inspectWorksSchema.safeParse(body);
+  if (inspection.success) return json(pilot.requestInspection(session, config.profileResidents, inspection.data));
   if (!config.profileResidents.length) return json({ error: '本机试玩名额已分配给测试 Agent。' }, 409);
   if (body.action === 'claim') {
     const name = typeof body.name === 'string' ? body.name.normalize('NFC').trim() : '';

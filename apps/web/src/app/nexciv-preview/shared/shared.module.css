@@ -84,8 +84,10 @@
 .cafeVendor button:disabled { opacity: 0.64; cursor: default; }
 .cafeVendor :is(input, select, button, a):focus-visible { outline: 2px solid #f0b90b; outline-offset: 2px; }
 .cafeOrder { border-top: 1px solid #514c3f; padding-top: 10px; }
-.cafeOrder button:enabled { background: #f0b90b; color: #16130b; font-weight: 650; }
-.cafeOrder button:enabled:hover { background: #ffd054; }
+.cafeOrder button[type="submit"]:enabled { background: #f0b90b; color: #16130b; font-weight: 650; }
+.cafeOrder button[type="submit"]:enabled:hover { background: #ffd054; }
+.npcFollow { justify-self: start; }
+.worksEntry { margin-top: 8px; }
 .cafeOrder p, .cafeReply p, .cafeJoin, .cafeError { margin: 0; font-size: 13px; line-height: 1.55; }
 .cafeReply { padding: 8px 10px; background: #25231e; border-radius: 5px; overflow-wrap: anywhere; }
 .cafeReply span, .cafeReply small { color: #d2c2a2; font-size: 11px; }

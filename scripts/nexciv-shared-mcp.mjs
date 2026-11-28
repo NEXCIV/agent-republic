@@ -37,6 +37,7 @@ const action = z.union([
   z.strictObject({ requestId, action: z.literal('inspectSurvey'), taskId: z.uuidv4(), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
   z.strictObject({ requestId, action: z.literal('submitSurvey'), taskId: z.uuidv4() }),
   z.strictObject({ requestId, action: z.literal('orderCoffee'), drink: z.enum(['flat-white', 'americano']) }),
+  z.strictObject({ requestId, action: z.literal('inspectWorks'), checkId: z.enum(['entrance-path', 'pedestrian-passage']) }),
 ]);
 
 serveStdio(() => {
@@ -46,7 +47,7 @@ serveStdio(() => {
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以授权居民提交移动、点咖啡、发言或调研动作。点单后沿路走到咖啡摊，按到店顺序排队。使用相同的请求 ID 重试同一动作。',
+    description: '以授权居民提交移动、点咖啡、发言、共同调研或建设中心个人巡查。inspectWorks 自动到点观察并记录。使用相同的请求 ID 重试同一动作。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send({ ...command, requestId: command.requestId ?? randomUUID() }));
   server.registerTool('ask_cafe_vendor', {
@@ -54,5 +55,10 @@ serveStdio(() => {
     inputSchema: z.strictObject({ question: z.string().trim().min(1).max(120) }),
     annotations: { readOnlyHint: true, openWorldHint: false },
   }, ({ question }) => send({ action: 'cafeTalk', question }));
+  server.registerTool('ask_works_manager', {
+    description: '到公共建设中心后，询问现场管理员当前可领的巡查点、路线或等候区。',
+    inputSchema: z.strictObject({ question: z.string().trim().min(1).max(120) }),
+    annotations: { readOnlyHint: true, openWorldHint: false },
+  }, ({ question }) => send({ action: 'worksTalk', question }));
   return server;
 });

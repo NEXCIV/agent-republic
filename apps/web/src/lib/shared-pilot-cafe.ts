@@ -76,13 +76,6 @@ function stateAt(row: OrderRow, at: number) {
   return { id: `coffee-${row.seq}`, residentId, drink: row.drink, stage, servesAt, counterAt, readyAt, finishedAt, arrivesAt: row.arrives_at };
 }
 
-export function latestCoffeeOrder<T extends { residentId: Resident }>(orders: readonly T[], id: Resident) {
-  for (let index = orders.length - 1; index >= 0; index--) {
-    const order = orders[index]!;
-    if (order.residentId === id) return order;
-  }
-}
-
 export class CafeOrders {
   constructor(private readonly db: DatabaseSync) {}
 
