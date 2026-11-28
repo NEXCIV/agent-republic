@@ -50,7 +50,7 @@ function createInstallationPose(asset: GLTF, mixer: THREE.AnimationMixer) {
   return mixer.clipAction(new THREE.AnimationClip('Install lighting', 3.2, tracks, THREE.AdditiveAnimationBlendMode));
 }
 
-function benchIdle(idle: THREE.AnimationClip) {
+export function benchIdle(idle: THREE.AnimationClip) {
   const clip = idle.clone();
   clip.name = 'Bench rest';
   const delta = new THREE.Quaternion();
