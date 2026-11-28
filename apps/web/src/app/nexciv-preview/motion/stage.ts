@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
+import { cityGaitLoader, matchCityGait } from '../city-gait';
+import { installServiceApron, serviceApronPose } from '../service-apron';
 
 export type Character = '02' | '06';
 export type Motion = 'walk' | 'turn';
@@ -60,6 +62,7 @@ function buildLane(model: THREE.Object3D, clips: Record<Motion, THREE.AnimationC
   const hips = model.getObjectByName('Hips')!;
   const hipCenter = new THREE.Vector3();
   const mixer = new THREE.AnimationMixer(model);
+  const poseApron = serviceApronPose(model);
   function prepare(clip: THREE.AnimationClip) {
     const action = mixer.clipAction(clip).setLoop(THREE.LoopOnce, 1);
     action.paused = true;
@@ -74,6 +77,7 @@ function buildLane(model: THREE.Object3D, clips: Record<Motion, THREE.AnimationC
     const action = actions[motion];
     action.time = Math.min(time, action.getClip().duration);
     mixer.update(0);
+    poseApron?.();
     hips.getWorldPosition(hipCenter);
     contact.position.x = hipCenter.x;
     contact.position.z = hipCenter.z;
@@ -104,7 +108,7 @@ function disposeScenes(...roots: THREE.Object3D[]) {
 
 export async function loadLanes(id: Character, signal: AbortSignal) {
   // Finish fetching both files before creating any Three.js resources.
-  const [modelBytes, sidecar] = await Promise.all([
+  const [modelBytes, sidecar, cityGait] = await Promise.all([
     fetch(`/nexciv-walk/agent-${id}.glb`, { signal }).then((response) => {
       if (!response.ok) throw new Error('无法读取角色模型');
       return response.arrayBuffer();
@@ -113,6 +117,7 @@ export async function loadLanes(id: Character, signal: AbortSignal) {
       if (!response.ok) throw new Error('无法读取对照动作');
       return await response.json() as Sidecar;
     }),
+    id === '06' ? cityGaitLoader(signal)('agent-06.glb', 'auto') : undefined,
   ]);
   signal.throwIfAborted();
   const clipsFor = (gait: typeof gaitOrder[number], motion: Motion) => {
@@ -126,8 +131,10 @@ export async function loadLanes(id: Character, signal: AbortSignal) {
   let second: THREE.Object3D | undefined;
   try {
     model = await new GLTFLoader().parseAsync(modelBytes, '/nexciv-walk/');
+    const gait = await matchCityGait(cityGait, modelBytes);
     signal.throwIfAborted();
     const { scene } = model;
+    if (gait?.apron) installServiceApron(scene, gait.apron);
     second = clone(scene);
     const lanes = [buildLane(scene, clips[0]!), buildLane(second, clips[1]!)];
     return {

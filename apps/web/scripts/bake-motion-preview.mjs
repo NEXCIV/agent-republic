@@ -6,6 +6,7 @@ import process from 'node:process';
 import { URL } from 'node:url';
 import * as THREE from 'three';
 import { bakeCityJog, bakePreviewLocomotion, cityLocomotion, motionSources, walkPath } from './preview-locomotion.mjs';
+import { bakeServiceApron } from './bake-service-apron.mjs';
 
 const sourceDir = process.argv[2];
 if (!sourceDir) throw new Error('Pass the directory containing the KayKit Rig_Medium GLBs.');
@@ -39,7 +40,11 @@ function readGlb(path) {
         content[method](start + Math.floor(i / width) * stride + i % width * size, true) / scale),
     };
   }
-  return { json, accessor, hash: createHash('sha256').update(data).digest('hex') };
+  const bufferView = (index) => {
+    const { byteOffset = 0, byteLength } = json.bufferViews[index];
+    return data.subarray(jsonEnd + 8 + byteOffset, jsonEnd + 8 + byteOffset + byteLength);
+  };
+  return { json, accessor, bufferView, hash: createHash('sha256').update(data).digest('hex') };
 }
 
 function rig({ json }) {
@@ -255,10 +260,22 @@ for (const id of ['02', '06']) {
   const gait = cityLocomotion(clips.find((clip) => clip.name === 'Quaternius_Walk'),
     clips.find((clip) => clip.name === 'Quaternius_Turn'));
   const jogging = bakeCityJog(target, soles, jog);
+  const apron = id === '06' ? await bakeServiceApron(file) : undefined;
+  const shoeContacts = soles.map(({ foot, points }) => {
+    // The lowest part of the original boot supplies reference points for the terrain solver.
+    const location = target.bind[foot.name];
+    const bounds = new THREE.Box3().setFromPoints(points.map((point) => point.clone().applyQuaternion(location.rotation)));
+    const local = location.rotation.clone().invert();
+    const { x } = bounds.getCenter(new THREE.Vector3());
+    const inset = 0.012;
+    return [bounds.min.z + inset, bounds.max.z - inset].map((z) =>
+      new THREE.Vector3(x, bounds.min.y, z).applyQuaternion(local).toArray().map((value) => +value.toFixed(5)),
+    );
+  });
   const sidecar = { modelHash: file.hash, seat, walkPath, clips: clips.map(clipJson) };
   writeFileSync(new URL(`agent-${id}.json`, output), JSON.stringify(sidecar));
   writeFileSync(new URL(`agent-${id}-city-v1.json`, output),
-    JSON.stringify({ modelHash: file.hash, stride: gait.stride, jogStride: jogging.stride,
+    JSON.stringify({ modelHash: file.hash, stride: gait.stride, jogStride: jogging.stride, shoeContacts, apron,
       clips: [...gait.clips, jogging.clip].map(clipJson) }));
   console.log(id, 'seat', seat, 'clips', clips.map((clip) => clip.name));
 }

@@ -56,6 +56,8 @@ export function createCafePaving() {
     new THREE.MeshStandardMaterial({ color: '#948a7c', roughness: 0.92 }),
   );
   base.position.set(west + width / 2, pavement - 0.108, north + depth / 2);
+  // Use the base footprint at the tile tops, including the narrow tile joints.
+  base.userData.walkableOffset = 0.013;
   base.receiveShadow = true;
   corner.add(base);
 

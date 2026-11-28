@@ -1,5 +1,8 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import type { ApronPatch } from './service-apron';
+import type { ShoeContacts } from './terrain-feet';
+import type { GroundHeight } from './city-ground';
 
 export type CityGait = {
   walk: THREE.AnimationClip;
@@ -8,8 +11,10 @@ export type CityGait = {
   stride: number;
   jogStride: number;
   modelHash: string;
+  shoeContacts?: ShoeContacts;
+  apron?: ApronPatch;
 };
-export type CityAgentAsset = GLTF & { gait?: CityGait };
+export type CityAgentAsset = GLTF & { gait?: CityGait; groundHeight?: GroundHeight };
 
 const urls: Partial<Record<string, string>> = {
   'agent-02.glb': '/nexciv-motion/agent-02-city-v1.json',
@@ -25,10 +30,12 @@ export function cityGaitLoader(signal: AbortSignal) {
     if (!pending) {
       pending = fetch(url, { signal, priority }).then(async (response) => {
         if (!response.ok) return undefined;
-        const { stride, jogStride, clips, modelHash } = await response.json() as {
+        const { stride, jogStride, clips, modelHash, shoeContacts, apron } = await response.json() as {
           stride: number;
           jogStride: number;
           modelHash: string;
+          shoeContacts?: ShoeContacts;
+          apron?: ApronPatch;
           clips: Omit<ReturnType<typeof THREE.AnimationClip.toJSON>, 'uuid'>[];
         };
         if (!Number.isFinite(stride) || stride <= 0 || !Number.isFinite(jogStride) || jogStride <= 0 ||
@@ -41,7 +48,7 @@ export function cityGaitLoader(signal: AbortSignal) {
         const jog = parse('Quaternius_JogLoop');
         const pivot = parse('Quaternius_Pivot');
         if (walk && jog && pivot && walk.duration > 0 && jog.duration > 0 && pivot.duration > 0) {
-          return { walk, jog, pivot, stride, jogStride, modelHash };
+          return { walk, jog, pivot, stride, jogStride, modelHash, shoeContacts, apron };
         }
         return undefined;
       }).catch(() => undefined); // Keep the embedded GLB gait available when the optional file is unavailable.

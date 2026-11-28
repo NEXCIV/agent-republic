@@ -371,6 +371,9 @@ export function bakeCityJog(target, soles, jog) {
   const center = source.bind.pelvis.position;
   const pelvis = new THREE.Vector3();
   const root = new THREE.Vector3();
+  const serviceApron = Boolean(target.byName.Service_06);
+  const legDirection = new THREE.Vector3();
+  const limitFlexion = new THREE.Quaternion();
   jog.sample(0);
   const start = source.byName.root.getWorldPosition(new THREE.Vector3());
   for (const time of times) {
@@ -381,6 +384,13 @@ export function bakeCityJog(target, soles, jog) {
     hips.position.z += (pelvis.z - center.z) * scale;
     for (const { bone, sourceBone, basis, values } of links) {
       const rotation = sourceBone.getWorldQuaternion(new THREE.Quaternion()).multiply(basis);
+      if (serviceApron && bone.name.startsWith('Thigh.')) {
+        // The apron cannot clear the source rig's highest running knee without folding above the belt.
+        legDirection.copy(up).applyQuaternion(rotation);
+        const flexion = Math.atan2(legDirection.z, -legDirection.y);
+        const excess = Math.max(0, flexion - 0.66) * smoothstep(flexion, 0.66, 0.90);
+        rotation.premultiply(limitFlexion.setFromAxisAngle(pitchAxis, excess));
+      }
       setWorldRotation(bone, rotation);
       values.push(...bone.quaternion.toArray());
     }

@@ -4,6 +4,8 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { createAgentPatrol, type RoutePoint } from './agent';
 import { cityGaitLoader, matchCityGait } from './city-gait';
+import { createCityGround } from './city-ground';
+import { installServiceApron } from './service-apron';
 import { CAFE_BENCH, CAFE_COUNTER, CAFE_HOST, CAFE_STALL, createCafePaving, createPromenadeLightPools, joinCafeToPier } from './cafe-corner';
 import { createMarketGreeting } from './marketGreeting';
 import { COUNCIL_DEMO_AGENDA, COUNCIL_NOTICE_BOARD, COUNCIL_NOTICE_HEADING, COUNCIL_SURVEY_RECEIPT, LIGHTING_PILOT_STATUS } from '../../lib/council-notice';
@@ -1983,6 +1985,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
   const loadCityGait = cityGaitLoader(signal);
+  const footGround = createCityGround();
   async function request(name: string, priority: RequestPriority = 'auto') {
     const response = await fetch(`${ASSET_PATH}${name}`, { signal, priority });
     if (!response.ok) throw new Error(`Missing preview asset ${name}`);
@@ -1995,7 +1998,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const gait = await matchCityGait(await match, bytes);
     signal.throwIfAborted();
     const asset = await loader.parseAsync(bytes, ASSET_PATH);
-    return { ...asset, gait };
+    if (gait?.apron) installServiceApron(asset.scene, gait.apron);
+    return { ...asset, gait, groundHeight: footGround.height };
   }
 
   function loadPromenadeAsset(file: string, install: (asset: THREE.Group) => void, priority: RequestPriority = 'low') {
@@ -2038,6 +2042,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     loadPromenadeAsset('cafe-south-gardens.glb', asset => {
       southGardens = asset;
       street.add(asset);
+      footGround.add(asset);
     });
   }
 
@@ -2066,7 +2071,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
 
   function addPromenade() {
     scene.add(promenade);
-    promenade.add(createCafePaving(), createPromenadeLightPools());
+    const cafePaving = createCafePaving();
+    promenade.add(cafePaving, createPromenadeLightPools());
+    footGround.add(cafePaving);
     loadPromenadeAsset('coffee-promenade.glb', asset => {
       kioskProxy = asset.getObjectByName('Coffee_kiosk_distance_mesh');
       if (kioskProxy) kioskProxy.visible = !kioskDetail?.visible;
@@ -2141,6 +2148,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       // A failed request leaves the original silhouette visible.
       details.set(kind, asset);
       street.add(asset);
+      if (kind === 'works') footGround.add(asset);
       if (kind !== 'street') registerLandmark(kind === 'hall' ? 'governance' : kind, asset);
       if (kind !== 'street' && kind !== 'market') {
         asset.visible = false;
@@ -2196,6 +2204,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       if (side === 'shore') addLakeRipples(asset, lakeTime);
       softenRetailWindows(asset);
       street.add(asset);
+      footGround.add(asset);
       if (side === 'research' || side === 'west') {
         districts.research.asset?.traverse((object) => {
           if (object.userData.previewTier === 'west_skybridge') object.visible = Boolean(districts.west.asset);
@@ -2251,6 +2260,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       softenRetailWindows(north);
       registerRetail(north);
       registerProxies(north, ['hall']);
+      footGround.add(north);
       focus.set(...layout.target);
       if (mode === 'overview' && desiredDistance === START_DISTANCE && orbitPitch === START_PITCH) {
         desiredDistance = EXPANDED_DISTANCE;
@@ -2411,6 +2421,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     prepareEnvironment(model, streetAnisotropy);
     softenRetailWindows(model);
     street.add(model);
+    footGround.add(model);
     addPromenade();
     registerLandmark('west-pool', westPool);
     loadPromenadeAsset('west-forum-promenade.glb', asset => {

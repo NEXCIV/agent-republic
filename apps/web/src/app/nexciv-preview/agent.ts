@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { CityAgentAsset } from './city-gait';
+import { createTerrainFeet } from './terrain-feet';
+import { serviceApronPose } from './service-apron';
 
 export type RoutePoint = [number, number, number];
 export type AgentPhase = 'outbound' | 'arrived' | 'inbound' | 'atNexus';
@@ -115,6 +117,8 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
   root.add(shadow);
 
   const mixer = new THREE.AnimationMixer(asset.scene);
+  const feet = createTerrainFeet(asset.scene, gait?.shoeContacts, asset.groundHeight);
+  const poseApron = serviceApronPose(asset.scene);
   const idle = mixer.clipAction(idleClip).play();
   const walk = mixer.clipAction(walkClip);
   walk.setEffectiveTimeScale(gait ? 0 : moveSpeed * walkClip.duration / stride);
@@ -224,7 +228,10 @@ export function createAgentPatrol(asset: CityAgentAsset, points: RoutePoint[], i
     }
     working = shouldWork;
     asset.scene.position.y = standingY - (seated ? 0.24 : 0);
+    feet?.restore();
     mixer.update(dt);
+    if (!seated) feet?.apply(root.position.y);
+    poseApron?.();
   }
 
   updatePose(0);
