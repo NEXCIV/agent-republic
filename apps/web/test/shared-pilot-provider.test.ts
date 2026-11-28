@@ -73,3 +73,56 @@ it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('sends bounded requests an
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+it.skipIf(!process.getBuiltinModule?.('node:sqlite'))('resolves proxy virtual addresses without connecting to reserved IPs and uses the MiMo request format', async () => {
+  const folder = mkdtempSync(join(tmpdir(), 'nexciv-mimo-'));
+  const store = new SharedPilotStore(join(folder, 'shared.sqlite'), () => 100000);
+  const doh = vi.fn();
+  vi.stubGlobal('fetch', doh);
+  try {
+    const config = parseModelConfig({
+      baseUrl: 'https://api.xiaomimimo.com/v1',
+      model: 'mimo-v2.6-flash',
+      apiKey: 'test-secret',
+    })!;
+    const observation = store.observe(store.issueCredential('01').token);
+    const choose = () => chooseModelAction(config, observation, modelChoices(observation), new AbortController().signal);
+    mocks.resolve.mockResolvedValue(['198.18.0.69']);
+    const json = (addresses: string[]) => new Response(JSON.stringify({
+      Status: 0, Answer: addresses.map(data => ({ type: 1, data })),
+    }));
+    doh.mockImplementation(async (url: URL, options: RequestInit) => {
+      expect(url.origin).toBe('https://cloudflare-dns.com');
+      expect(url.searchParams.get('name')).toBe('api.xiaomimimo.com');
+      expect(options).toMatchObject({ headers: { Accept: 'application/dns-json' }, redirect: 'error' });
+      expect(JSON.stringify([url, options])).not.toContain(config.apiKey);
+      return json(['8.222.143.90']);
+    });
+    mocks.request.mockImplementation((options: RequestOptions, done: (response: IncomingMessage) => void) => {
+      expect(options).toMatchObject({
+        hostname: '8.222.143.90', servername: 'api.xiaomimimo.com', path: '/v1/chat/completions',
+      });
+      return Object.assign(new EventEmitter(), { end(payload: string) {
+        expect(JSON.parse(payload)).toMatchObject({
+          model: 'mimo-v2.6-flash', max_completion_tokens: 512, thinking: { type: 'disabled' },
+        });
+        const response = Object.assign(new PassThrough(), { statusCode: 200 });
+        done(response as unknown as IncomingMessage);
+        response.end(JSON.stringify({ choices: [{ message: { content: '{"choice":"move:works"}' } }] }));
+      } });
+    });
+    expect(await choose()).toBe('move:works');
+    doh.mockResolvedValueOnce(json(['8.222.143.90', '192.168.1.10']));
+    await expect(choose()).rejects.toThrow('公网 HTTPS');
+    mocks.resolve.mockResolvedValue(['198.18.0.69', '127.0.0.1']);
+    await expect(choose()).rejects.toThrow('公网 HTTPS');
+    expect(doh).toHaveBeenCalledTimes(2);
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.unstubAllGlobals();
+    mocks.resolve.mockReset();
+    mocks.request.mockReset();
+    store.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
