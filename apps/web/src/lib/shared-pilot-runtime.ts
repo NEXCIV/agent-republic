@@ -6,7 +6,7 @@ import { SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS, surveyActive } from './share
 import type { SharedPilotProfile } from './shared-pilot-profiles';
 import { chooseModelAction, SharedPilotModelRun, type ModelConfig } from './shared-pilot-model';
 import { CITY_PLACES } from './city-movement';
-import type { CafeTalk, OrderCoffee } from './shared-pilot-cafe';
+import type { CafeTalk, DrinkCoffee, OrderCoffee } from './shared-pilot-cafe';
 import { worksBriefActive, type CancelWorksGoal, type InspectWorks, type SurveyWorksSite, type WorksGoalAction, type WorksTalk } from './shared-pilot-works';
 import type { FishingTalk, GoFishing } from './shared-pilot-fishing';
 import type { ExplorationAction } from './shared-pilot-exploration';
@@ -17,7 +17,7 @@ import type { CouncilRead, SharedTheatreAction } from './shared-pilot-civic';
 type Observation = ReturnType<SharedPilotStore['observe']>;
 type RuleConnection = { residentId: SharedPilotResidentId; token: string; decisions: number };
 export type SharedAgentCommand = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest
-  | OrderCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | ExplorationAction
+  | OrderCoffee | DrinkCoffee | CafeTalk | InspectWorks | WorksTalk | WorksGoalAction | GoFishing | FishingTalk | ExplorationAction
   | ResolvePlayerNote | BenchRest | CouncilRead | SharedTheatreAction | { action: 'observe' };
 const PREFERENCES: Record<SharedPilotResidentId, readonly SharedPilotPlaceId[]> = {
   '01': ['plaza', 'governance', 'cafe', 'works'],
@@ -105,6 +105,9 @@ export class SharedPilotRuntime {
   orderCoffee(session: string, residents: readonly SharedPilotResidentId[], command: OrderCoffee) {
     return this.store.orderCoffee(session, command, residents);
   }
+  drinkCoffee(session: string, residents: readonly SharedPilotResidentId[], command: DrinkCoffee) {
+    return this.store.drinkCoffee(session, command, residents);
+  }
   requestInspection(session: string, residents: readonly SharedPilotResidentId[], command: InspectWorks) {
     return this.store.requestInspection(session, command, residents);
   }
@@ -189,6 +192,8 @@ export class SharedPilotRuntime {
         return this.store.moveTo(token, command);
       case 'orderCoffee':
         return this.store.orderCoffee(token, command);
+      case 'drinkCoffee':
+        return this.store.drinkCoffee(token, command);
       case 'cafeTalk':
         return this.store.cafeTalk(command.question, token);
       case 'inspectWorks':

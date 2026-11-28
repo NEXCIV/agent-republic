@@ -12,7 +12,7 @@ import { CITY_MAP, planCityWalk } from './city-navigation';
 import { advanceSocial, emptySocialState, meetingActive, meetingPoint, performSocial, publicSocial, SocialActionError, type SocialState, type SocialResident, type SocialReceipt } from './shared-pilot-social';
 import { advanceSurvey, emptySurveyState, performSurvey, publicSurvey, SURVEY_CHECKPOINTS, surveyActive, SurveyActionError, type SurveyState, type SurveyReceipt } from './shared-pilot-survey';
 import { SHARED_AVATARS, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, latestResidentActivity, type SharedPilotProfile, type SharedPilotProfileView } from './shared-pilot-profiles';
-import { CAFE_ORDERS_TABLE, CAFE_QUEUE, cafePose, CafeOrders, orderCoffeeSchema } from './shared-pilot-cafe';
+import { CAFE_ORDERS_TABLE, CAFE_QUEUE, cafePose, coffeeCanSip, CafeOrders, drinkCoffeeSchema, orderCoffeeSchema } from './shared-pilot-cafe';
 import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, SURVEY_OBSERVATION_MS, WORKS_CHECKS, WORKS_GOALS_TABLE,
   worksBriefView, worksGoalActionSchema, worksGoalEvents, worksGoalView, worksReply, worksView,
   type InspectionRoute, type WorksBrief, type WorksCheck, type WorksGoalRow } from './shared-pilot-works';
@@ -27,7 +27,7 @@ import { applyTheatreDecision, observeTheatre, theatreJourney, type TheatreConte
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
 // exposed by a route, guest service, or wallet API. Two operator-controlled slots.
 const APPLICATION_ID = 0x4e585350; // NXSP
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 const CREDENTIAL_LIFETIME = 3600000;
 const MAX_CREDENTIAL_LIFETIME = 86400000;
 const SPEED = 4;
@@ -217,7 +217,7 @@ export class SharedPilotStore {
     this.fishing = new FishingVisits(this.db);
     try {
       // Reject unrelated DBs before setting WAL or running any schema changes.
-      let migrateFrom: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | undefined;
+      let migrateFrom: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | undefined;
       if (existing) {
         const application = Number(this.db.prepare('PRAGMA application_id').get()?.application_id);
         const version = Number(this.db.prepare('PRAGMA user_version').get()?.user_version);
@@ -228,7 +228,7 @@ export class SharedPilotStore {
         if (application === APPLICATION_ID && (version === 4 || version === 5) && JSON.stringify(tables) === JSON.stringify(V5_TABLES)) migrateFrom = version;
         if (application === APPLICATION_ID && version === 6 && JSON.stringify(tables) === JSON.stringify(V6_TABLES)) migrateFrom = 6;
         if (application === APPLICATION_ID && version === 7 && JSON.stringify(tables) === JSON.stringify(V7_TABLES)) migrateFrom = 7;
-        if (application === APPLICATION_ID && version === 8 && JSON.stringify(tables) === JSON.stringify(EXPECTED_TABLES)) migrateFrom = 8;
+        if (application === APPLICATION_ID && (version === 8 || version === 9) && JSON.stringify(tables) === JSON.stringify(EXPECTED_TABLES)) migrateFrom = version;
         if (!migrateFrom && (application !== APPLICATION_ID || version !== SCHEMA_VERSION || JSON.stringify(tables) !== JSON.stringify(EXPECTED_TABLES))) {
           throw new SharedPilotError('INCOMPATIBLE_DB', 'Refusing to open a non-pilot database.');
         }
@@ -279,7 +279,7 @@ export class SharedPilotStore {
     }
   }
 
-  private migratePilot(version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8) {
+  private migratePilot(version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) {
     // The fixed place checks live in two referenced tables. Replace both inside
     // the same transaction, preserving the IDs used by events, profiles and orders.
     this.db.exec('PRAGMA foreign_keys=OFF');
@@ -311,7 +311,10 @@ export class SharedPilotStore {
         this.db.exec(PROFILE_TABLE);
       }
       if (version < 6) this.db.exec(CAFE_ORDERS_TABLE);
-      this.db.exec(`
+      else if (!this.db.prepare('PRAGMA table_info(shared_pilot_cafe_orders)').all().some(column => column.name === 'sipped_at')) {
+        this.db.exec('ALTER TABLE shared_pilot_cafe_orders ADD COLUMN sipped_at INTEGER');
+      }
+      if (version < 9) this.db.exec(`
         ${createResidentsTable('shared_pilot_residents_next')}
         ${createMovesTable('shared_pilot_moves_next', 'shared_pilot_residents_next')}
         INSERT INTO shared_pilot_residents_next SELECT * FROM shared_pilot_residents;
@@ -707,6 +710,7 @@ export class SharedPilotStore {
   }
 
   private requireMovementSlot(actor: SharedPilotResidentId, at: number) {
+    if (this.coffee.sipping(actor, at)) throw new SharedPilotError('BUSY', '居民正在喝咖啡。');
     const last = this.lastMove(actor);
     if (last?.completed_at === null) {
       throw new SharedPilotError('BUSY', 'This resident already has an accepted movement.');
@@ -1063,6 +1067,25 @@ export class SharedPilotStore {
     });
   }
 
+  drinkCoffee(credential: string, input: unknown, profileResidents?: readonly SharedPilotResidentId[]) {
+    return this.transaction((at) => {
+      const residentId = this.browserOrAgent(credential, at, profileResidents);
+      const parsed = drinkCoffeeSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '请选择刚取走的咖啡。');
+      const { orderId } = parsed.data;
+      this.settle(at);
+      const order = this.coffee.findSipOrder(residentId, orderId, at);
+      if (!order) throw new SharedPilotError('NOT_FOUND', '找不到这杯咖啡。');
+      const last = this.lastMove(residentId);
+      if (!order.view.sip && (!last || last.request_id !== order.requestId ||
+        !coffeeCanSip(order.view, at, last.arrives_at) || meetingActive(this.readSocial().meeting) || surveyActive(this.readSurvey().task))) {
+        throw new SharedPilotError('BUSY', '请先取餐，并在离开咖啡摊前喝。');
+      }
+      const timing = order.view.sip ?? this.coffee.sip(residentId, orderId, at);
+      return { mode: 'DEMO' as const, provenance: SHARED_PILOT_PROVENANCE, action: 'drinkCoffee' as const, residentId, orderId, ...timing };
+    });
+  }
+
   requestInspection(credential: string, input: unknown, profileResidents?: readonly SharedPilotResidentId[]) {
     return this.transaction((at) => {
       const actor = this.browserOrAgent(credential, at, profileResidents);
@@ -1300,7 +1323,7 @@ export class SharedPilotStore {
       const self = residents.find(resident => resident.residentId === viewerResidentId)!;
       const recentRest = this.recentBenchRest(viewerResidentId, at);
       const restedRecently = Boolean(recentRest && at < recentRest.endedAt + BENCH_COOLDOWN_MS);
-      const engaged = Boolean(pendingWorksGoal) || meetingActive(social.meeting) || surveyActive(survey.task)
+      const engaged = Boolean(pendingWorksGoal) || meetingActive(social.meeting) || surveyActive(survey.task) || this.coffee.sipping(viewerResidentId, at)
         || [cafe.orders, fishing.visits, works.visits, bench.visits, council.visits].some(visits => visits.some(visit =>
           visit.residentId === viewerResidentId && visit.stage !== 'completed'));
       const waitingForSiteBrief = briefs.some(brief => brief.driver === 'rules' && (brief.stage === 'travelling' || brief.stage === 'deciding'));

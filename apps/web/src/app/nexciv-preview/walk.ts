@@ -25,6 +25,7 @@ import { landscapeVisibility, LANDSCAPE_REGION, regionFor, substituteLandscapeRe
 import { createTraffic, removeParkedVehicles } from './traffic';
 import { createCityCrowd, type PedestrianPath } from './city-crowd';
 import { CAFE_VENDOR, cafePose } from '../../lib/shared-pilot-cafe';
+import { coffeeVendorPose, createCoffeeService } from './coffee-service';
 import { WORKS_MANAGER, WORKS_MANAGER_POSITION } from '../../lib/shared-pilot-works';
 import { ANGLER_POSITION, PIER_ANGLER, fishingPose } from '../../lib/shared-pilot-fishing';
 import { EXPLORATION_LINE_MS } from '../../lib/shared-pilot-exploration';
@@ -610,8 +611,9 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
   let framedLandmark: CameraTarget | undefined;
   let cafeVendor: { asset: GLTF; patrol: Patrol } | undefined;
   let vendorLoading = false;
-  let takeawayCup: THREE.Group | undefined;
-  const cupOffset = new THREE.Vector3();
+  const coffeeService = sharedMode ? createCoffeeService() : undefined;
+  if (coffeeService) actorLayer.add(coffeeService.group);
+  const vendorPosition = coworker.clone();
   const retailPlacements: { mid: THREE.Object3D; bounds: THREE.Sphere; close?: THREE.Object3D }[] = [];
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const tween = !reducedMotion.matches;
@@ -1193,8 +1195,15 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
     const projection = sharedSnapshot;
     const elapsed = Math.max(0, now - sharedReceivedAt);
     const serverTime = (projection?.serverTime ?? 0) + Math.min(elapsed, 1600);
-    cafeVendor?.patrol.observe(reducedMotion.matches ? 0 : poseDt, coworker, counter, false, projection?.cafe.serving ? 'nod' : undefined);
-    if (takeawayCup) takeawayCup.visible = false;
+    const orders = projection?.cafe.orders;
+    coffeeService?.reset();
+    if (cafeVendor) {
+      const currentOrder = orders?.filter(order => order.counterAt != null && order.counterAt <= serverTime).at(-1);
+      const reduced = reducedMotion.matches;
+      const walking = coffeeVendorPose(currentOrder, serverTime, vendorPosition, reduced);
+      const facing = walking && currentOrder?.readyAt != null && serverTime > currentOrder.readyAt ? coworker : counter;
+      cafeVendor.patrol.observe(reduced ? 0 : poseDt, vendorPosition, facing, walking);
+    }
     let showingRod = false;
     for (const id of SHARED_RESIDENTS) {
       const actor = sharedActors.get(id);
@@ -1271,16 +1280,8 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         const order = projection && latestResidentActivity(projection.cafe.orders, id);
         const atCafe = order && cafePose(order, serverTime);
         if (atCafe) {
-          patrol.observe(poseDt, observedPosition.set(...atCafe.point), observedFacing.set(...atCafe.facing), atCafe.walking);
-          if (takeawayCup && order.readyAt !== null && serverTime >= order.readyAt) {
-            const hand = actor.asset.scene.getObjectByName('HandR');
-            if (hand) {
-              hand.getWorldPosition(takeawayCup.position);
-              cupOffset.set(-0.055, 0.045, 0.035).applyQuaternion(patrol.root.quaternion);
-              takeawayCup.position.add(cupOffset);
-              takeawayCup.visible = true;
-            }
-          }
+          const face = cafeVendor && !atCafe.walking ? vendorPosition : observedFacing.set(...atCafe.facing);
+          patrol.observe(poseDt, observedPosition.set(...atCafe.point), face, atCafe.walking);
           continue;
         }
         if (order && order.stage !== 'completed' && order.stage !== 'travelling') {
@@ -1305,6 +1306,16 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
       }
     }
     if (!showingRod) fishingGear?.hide();
+    if (coffeeService && projection && orders) {
+      for (const { residentId, movement } of projection.residents) {
+        const actor = sharedActors.get(residentId);
+        const order = latestResidentActivity(orders, residentId);
+        if (!actor || order?.finishedAt == null ||
+          (movement && movement.startedAt >= order.finishedAt && movement.status !== 'walking')) continue;
+        coffeeService.pose(residentId, order, actor, cafeVendor?.patrol.root, serverTime,
+          poseDt === 0 || reducedMotion.matches);
+      }
+    }
     if (speech && speechCanvas && speechTexture) {
       const meeting = projection?.social?.meeting;
       const dialogue = meeting?.status === 'talking' ? meeting.lines.at(-1) : undefined;
@@ -2064,14 +2075,6 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
           patrol.observe(0, coworker, counter);
           actorLayer.add(patrol.root);
           cafeVendor = { asset, patrol };
-          takeawayCup = new THREE.Group();
-          takeawayCup.name = 'Cafe takeaway cup';
-          const cup = new THREE.Mesh(new THREE.CylinderGeometry(0.059, 0.043, 0.135, 12), new THREE.MeshStandardMaterial({ color: '#f3ddae', roughness: 0.75 }));
-          const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.064, 0.06, 0.025, 12), new THREE.MeshStandardMaterial({ color: '#38291d', roughness: 0.6 }));
-          lid.position.y = 0.072;
-          takeawayCup.add(cup, lid);
-          takeawayCup.visible = false;
-          actorLayer.add(takeawayCup);
         } catch { disposeModel(asset.scene); }
       }).catch(() => { /* The cafe directory remains available. */ });
   }
@@ -2525,7 +2528,7 @@ export function createWalk(host: HTMLDivElement, initialView: View, autoPlay: bo
         cafeVendor.patrol.dispose();
         disposeModel(cafeVendor.asset.scene);
       }
-      if (takeawayCup) disposeModel(takeawayCup);
+      coffeeService?.dispose();
       for (const { asset, patrol } of sharedActors.values()) {
         patrol.dispose();
         disposeModel(asset.scene);

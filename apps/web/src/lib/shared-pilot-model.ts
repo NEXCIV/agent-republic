@@ -8,18 +8,18 @@ import { SharedPilotError, type SharedPilotStore } from './shared-pilot-store';
 import { availableSurveyIntents, meetingActive, nextSpeaker } from './shared-pilot-social';
 import { surveyActive, SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS } from './shared-pilot-survey';
 import { CITY_PLACES } from './city-movement';
-import { COFFEE_MENU, type CafeTalk, type OrderCoffee } from './shared-pilot-cafe';
+import { COFFEE_MENU, coffeeCanSip, type CafeTalk, type DrinkCoffee, type OrderCoffee } from './shared-pilot-cafe';
 import { WORKS_CHECKS, worksBriefActive, type InspectWorks } from './shared-pilot-works';
 import type { GoFishing } from './shared-pilot-fishing';
 import { explorationTextSchema, type ExplorationAction, type ExplorationActivity, type ExplorationPlace } from './shared-pilot-exploration';
-import { SHARED_AVATARS } from './shared-pilot-profiles';
+import { latestResidentActivity, SHARED_AVATARS } from './shared-pilot-profiles';
 import { noteActivitySchema, resolvePlayerNoteSchema, type NoteActivity, type ResolvePlayerNote } from './shared-pilot-notes';
 import { BENCH_ID, type BenchRest } from './shared-pilot-bench';
 import { theatreActionLabel, type CouncilRead, type SharedTheatreAction } from './shared-pilot-civic';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
 export type ModelObservation = ReturnType<SharedPilotStore['observe']>;
-type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | CafeTalk | InspectWorks | GoFishing
+type Command = SharedPilotMoveRequest | SharedPilotSocialRequest | SharedPilotSurveyRequest | OrderCoffee | DrinkCoffee | CafeTalk | InspectWorks | GoFishing
   | ExplorationAction | BenchRest | CouncilRead | SharedTheatreAction;
 type Speech = Pick<Extract<SharedPilotSocialRequest, { text: string }>, 'text' | 'surveyIntent'>;
 type ExplorationChoice = { action: 'exploreSite'; place: ExplorationPlace } | { action: 'exploreArrival'; activity: ExplorationActivity };
@@ -192,15 +192,17 @@ async function providerResponse(config: ModelConfig, payload: string, signal: Ab
 
 function availableModelChoices(observation: ModelObservation, canAskCafe: boolean): Choice[] {
   const { viewerResidentId: actor, serverTime: at, social, survey, residents, cafe, works, fishing } = observation;
+  const own = residents.find(({ residentId }) => residentId === actor)!;
+  const lastCoffee = latestResidentActivity(cafe.orders, actor);
+  const canSip = own.place === 'cafe' && lastCoffee && coffeeCanSip(lastCoffee, at, own.movement?.arrivesAt);
   const first = observation.firstExploration;
-  if (first?.phase === 'intro') return first.destinations.map(({ place }) => ({
+  if (!canSip && first?.phase === 'intro') return first.destinations.map(({ place }) => ({
     id: `intro:${place}`, label: `前往${CITY_PLACES[place]}`, exploration: { action: 'exploreSite', place },
   }));
-  if (first?.phase === 'onSite') return [
+  if (!canSip && first?.phase === 'onSite') return [
     { id: 'explore:ask', label: `现场问${first.site.contact}一个问题`, exploration: { action: 'exploreArrival', activity: 'ask' } },
     { id: 'explore:look', label: '看看这里正在发生什么', exploration: { action: 'exploreArrival', activity: 'look' } },
   ];
-  const own = residents.find(({ residentId }) => residentId === actor)!;
   const choices: Choice[] = [{ id: 'wait', label: '休息或等待' }];
   const move = (place: typeof SHARED_PILOT_PLACE_IDS[number], label = `前往${CITY_PLACES[place]}`, id = `move:${place}`) =>
     choices.push({ id, label, command: { action: 'moveTo', destination: { place }, requestId: randomUUID() } });
@@ -215,6 +217,7 @@ function availableModelChoices(observation: ModelObservation, canAskCafe: boolea
     askCafe();
     return choices;
   }
+  if (lastCoffee?.sip && at < lastCoffee.sip.endsAt) return choices;
   const activeBriefs = works.briefs.filter(worksBriefActive);
   if (activeBriefs.some(brief => brief.residentId === actor)
     || works.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
@@ -264,7 +267,13 @@ function availableModelChoices(observation: ModelObservation, canAskCafe: boolea
   }
   if (!followUp) askCafe();
   for (const place of SHARED_PILOT_PLACE_IDS) {
-    if (place !== own.place) move(place, followUp ? `结束这次到访，前往${CITY_PLACES[place]}` : undefined, `${prefix}move:${place}`);
+    if (place === own.place) continue;
+    const label = canSip ? `带着咖啡前往${CITY_PLACES[place]}`
+      : followUp ? `结束这次到访，前往${CITY_PLACES[place]}` : undefined;
+    move(place, label, `${prefix}move:${place}`);
+  }
+  if (canSip) {
+    add(`coffee:sip:${lastCoffee.id}`, `喝一口刚取的${COFFEE_MENU[lastCoffee.drink]}`, { action: 'drinkCoffee', orderId: lastCoffee.id });
   }
   const peer = actor === '01' ? '02' : '01';
   const inspections = works.visits.filter(visit => visit.stage !== 'completed');

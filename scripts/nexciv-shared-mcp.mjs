@@ -34,6 +34,7 @@ const noteActivities = [
 ];
 const action = z.union([
   ...noteActivities,
+  z.strictObject({ action: z.literal('drinkCoffee'), orderId: z.string().regex(/^coffee-[1-9][0-9]{0,14}$/).describe('从观察结果取自己的已完成咖啡订单编号') }),
   z.strictObject({ requestId, action: z.literal('respond'), meetingId: z.uuidv4(), decision: z.enum(['accept', 'decline']) }),
   z.strictObject({ requestId, action: z.literal('say'), meetingId: z.uuidv4(),
     text: z.string().trim().min(1).max(120).describe('根据会面和之前实际说过的话现场写一句'),
@@ -69,10 +70,10 @@ serveStdio(() => {
     inputSchema: z.strictObject({}), annotations: { readOnlyHint: true, openWorldHint: false },
   }, () => send({ action: 'observe' }));
   server.registerTool('act_in_shared_city', {
-    description: '以授权居民行动。readCouncilNotice 前往公告栏阅读。respondTheatre 用最新 revision、decision 和场次选项协商或决定是否观演。网页调研使用 pendingWorksGoal 返回的任务。',
+    description: '以授权居民行动。drinkCoffee 喝一口自己刚取走的咖啡，使用 cafe.orders 中的订单编号。readCouncilNotice 前往公告栏阅读。respondTheatre 用最新 revision、decision 和场次选项协商或决定是否观演。网页调研使用 pendingWorksGoal 返回的任务。',
     inputSchema: z.strictObject({ command: action }), annotations: { destructiveHint: false, openWorldHint: false },
   }, ({ command }) => send('requestId' in command ? { ...command, requestId: command.requestId ?? randomUUID() }
-    : command.action.endsWith('WorksGoal') ? command : { ...command, requestId: randomUUID() }));
+    : command.action === 'drinkCoffee' || command.action.endsWith('WorksGoal') ? command : { ...command, requestId: randomUUID() }));
   server.registerTool('resolve_player_note', {
     description: '根据自身处境采纳、调整或略过本居民的一张纸条。采纳或调整时在本次请求里提交一个城市动作。原因只显示给玩家和本居民的 Agent。',
     inputSchema: z.strictObject({ reply: resolution }), annotations: { destructiveHint: false, openWorldHint: false },

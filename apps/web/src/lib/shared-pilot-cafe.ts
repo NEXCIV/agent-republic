@@ -11,6 +11,10 @@ export const orderCoffeeSchema = z.object({
   drink: drinkSchema,
 }).strict();
 export type OrderCoffee = z.infer<typeof orderCoffeeSchema>;
+export const drinkCoffeeSchema = z.object({
+  action: z.literal('drinkCoffee'), orderId: z.string().regex(/^coffee-[1-9][0-9]{0,14}$/),
+}).strict();
+export type DrinkCoffee = z.infer<typeof drinkCoffeeSchema>;
 export const cafeTalkSchema = z.object({
   action: z.literal('cafeTalk'),
   question: z.string().trim().min(1).max(120).refine(text => !/[\p{Cc}\p{Cf}]/u.test(text)),
@@ -20,7 +24,7 @@ type Drink = OrderCoffee['drink'];
 type Resident = SharedPilotResidentId;
 type OrderRow = {
   seq: number; resident_id: Resident; request_id: string; drink: Drink;
-  requested_at: number; arrives_at: number; serves_at: number | null;
+  requested_at: number; arrives_at: number; serves_at: number | null; sipped_at: number | null;
 };
 export type CoffeeStage = 'travelling' | 'queued' | 'approaching' | 'serving' | 'leaving' | 'completed';
 export const CAFE_VENDOR = { kind: 'person', id: 'cafe.vendor' } as const;
@@ -36,26 +40,31 @@ export const CAFE_QUEUE: Record<Resident, CityPoint> = {
 const APPROACH = { '01': 1250, '02': 2200 };
 const PREPARATION_MS = 5600;
 const SERVICE_SLOT_MS = 10000;
+export const COFFEE_HANDOFF_MS = 1250;
+export const COFFEE_RELEASE_MS = 420;
+export const COFFEE_CARRY_MS = 90000;
+const COFFEE_SIP_MS = 2650;
 const source = { provenance: 'AI_SIMULATED', mode: 'DEMO' } as const;
 export const CAFE_ORDERS_TABLE = `CREATE TABLE shared_pilot_cafe_orders (
   seq INTEGER PRIMARY KEY, resident_id TEXT NOT NULL REFERENCES shared_pilot_residents(id),
   request_id TEXT NOT NULL, drink TEXT NOT NULL CHECK(drink IN ('flat-white','americano')),
   requested_at INTEGER NOT NULL, arrives_at INTEGER NOT NULL CHECK(arrives_at>=requested_at),
-  serves_at INTEGER CHECK(serves_at>=arrives_at), UNIQUE(resident_id, request_id)
+  serves_at INTEGER CHECK(serves_at>=arrives_at), sipped_at INTEGER, UNIQUE(resident_id, request_id)
 );`;
 
 export function cafePose(order: { residentId: Resident; servesAt: number | null; finishedAt: number | null }, at: number) {
   const { residentId, servesAt, finishedAt } = order;
   if (servesAt === null || finishedAt === null || at < servesAt || at >= finishedAt) return;
   const untilReady = servesAt + APPROACH[residentId] + PREPARATION_MS;
-  const leaving = at >= untilReady;
+  const departureAt = untilReady + COFFEE_RELEASE_MS;
+  const leaving = at >= departureAt;
   const walking = at < servesAt + APPROACH[residentId] || leaving;
   const start = CAFE_QUEUE[residentId];
   const turn: CityPoint = residentId === '01' ? start : [11.66, start[1], 71.56];
   const distanceToTurn = Math.hypot(turn[0] - start[0], turn[2] - start[2]);
   const distanceToCounter = Math.hypot(CAFE_COUNTER[0] - turn[0], CAFE_COUNTER[2] - turn[2]);
   const length = distanceToTurn + distanceToCounter;
-  const progress = leaving ? 1 - (at - untilReady) / (finishedAt - untilReady) : Math.min(1, (at - servesAt) / APPROACH[residentId]);
+  const progress = leaving ? 1 - (at - departureAt) / (finishedAt - departureAt) : Math.min(1, (at - servesAt) / APPROACH[residentId]);
   const distance = progress * length;
   const position = (metres: number): CityPoint => {
     const d = Math.max(0, Math.min(length, metres));
@@ -66,6 +75,10 @@ export function cafePose(order: { residentId: Resident; servesAt: number | null;
   return { point: position(distance), facing: walking ? position(distance + (leaving ? -0.3 : 0.3)) : CAFE_STALL, walking };
 }
 
+function sipTiming(start: number | null) {
+  return start === null ? null : { startedAt: start, endsAt: start + COFFEE_SIP_MS };
+}
+
 function stateAt(row: OrderRow, at: number) {
   const { serves_at: servesAt, resident_id: residentId } = row;
   const counterAt = servesAt === null ? null : servesAt + APPROACH[residentId];
@@ -73,7 +86,13 @@ function stateAt(row: OrderRow, at: number) {
   const finishedAt = servesAt === null ? null : servesAt + SERVICE_SLOT_MS;
   const stage: CoffeeStage = at < row.arrives_at ? 'travelling' : servesAt === null || at < servesAt ? 'queued'
     : at >= finishedAt! ? 'completed' : at >= readyAt! ? 'leaving' : at < counterAt! ? 'approaching' : 'serving';
-  return { id: `coffee-${row.seq}`, residentId, drink: row.drink, stage, servesAt, counterAt, readyAt, finishedAt, arrivesAt: row.arrives_at };
+  return { id: `coffee-${row.seq}`, residentId, drink: row.drink, stage, servesAt, counterAt, readyAt, finishedAt,
+    arrivesAt: row.arrives_at, sip: sipTiming(row.sipped_at) };
+}
+
+export function coffeeCanSip(order: ReturnType<typeof stateAt>, at: number, lastArrival?: number) {
+  return order.stage === 'completed' && order.finishedAt !== null && !order.sip &&
+    order.arrivesAt === lastArrival && at < order.finishedAt + COFFEE_CARRY_MS;
 }
 
 export class CafeOrders {
@@ -84,7 +103,14 @@ export class CafeOrders {
   }
 
   active(actor: Resident, at: number) {
-    return Boolean(this.db.prepare('SELECT seq FROM shared_pilot_cafe_orders WHERE resident_id=? AND (serves_at IS NULL OR serves_at + ?>?)').get(actor, SERVICE_SLOT_MS, at));
+    return Boolean(this.db.prepare(`SELECT seq FROM shared_pilot_cafe_orders
+      WHERE resident_id=? AND (serves_at IS NULL OR serves_at + ?>? OR sipped_at + ?>?)`)
+      .get(actor, SERVICE_SLOT_MS, at, COFFEE_SIP_MS, at));
+  }
+
+  sipping(actor: Resident, at: number) {
+    return Boolean(this.db.prepare('SELECT seq FROM shared_pilot_cafe_orders WHERE resident_id=? AND sipped_at + ?>?')
+      .get(actor, COFFEE_SIP_MS, at));
   }
 
   hasActiveOrder(at: number) {
@@ -99,6 +125,18 @@ export class CafeOrders {
   receipt(row: OrderRow) {
     return { ...source, action: 'orderCoffee' as const, requestId: row.request_id, residentId: row.resident_id,
       drink: row.drink, acceptedAt: row.requested_at, arrivesAt: row.arrives_at };
+  }
+
+  findSipOrder(actor: Resident, orderId: string, at: number) {
+    const row = this.db.prepare('SELECT * FROM shared_pilot_cafe_orders WHERE resident_id=? AND seq=?')
+      .get(actor, Number(orderId.slice(7))) as OrderRow | undefined;
+    if (row) return { view: stateAt(row, at), requestId: row.request_id };
+  }
+
+  sip(actor: Resident, orderId: string, at: number) {
+    this.db.prepare('UPDATE shared_pilot_cafe_orders SET sipped_at=? WHERE resident_id=? AND seq=? AND sipped_at IS NULL')
+      .run(at, actor, Number(orderId.slice(7)));
+    return this.findSipOrder(actor, orderId, at)!.view.sip!;
   }
 
   settle(at: number) {
@@ -118,7 +156,7 @@ export class CafeOrders {
   view(at: number) {
     const rows = (this.db.prepare('SELECT * FROM shared_pilot_cafe_orders ORDER BY seq DESC LIMIT 24').all() as OrderRow[]).reverse();
     const orders = rows.map(row => stateAt(row, at));
-    type Event = { id: string; kind: 'ORDER_REQUESTED' | 'QUEUED' | 'SERVING' | 'PICKED_UP'; residentId: Resident; happenedAt: number; text: string; provenance: 'AI_SIMULATED' };
+    type Event = { id: string; kind: 'ORDER_REQUESTED' | 'QUEUED' | 'SERVING' | 'PICKED_UP' | 'SIPPED'; residentId: Resident; happenedAt: number; text: string; provenance: 'AI_SIMULATED' };
     const events: Event[] = [];
     for (const [index, order] of orders.entries()) {
       const emit = (kind: Event['kind'], happenedAt: number, text: string) => {
@@ -131,6 +169,7 @@ export class CafeOrders {
         emit('SERVING', order.counterAt, `${order.residentId} 号在柜台点了${drink}，阿棠开始准备。`);
         emit('PICKED_UP', order.readyAt, `${order.residentId} 号取走了${drink}。`);
       }
+      if (order.sip) emit('SIPPED', order.sip.endsAt, `${order.residentId} 号喝了一口${drink}。`);
     }
     const serving = orders.some(({ stage }) => stage === 'approaching' || stage === 'serving' || stage === 'leaving');
     const queued = orders.filter(({ stage }) => stage === 'queued').length;

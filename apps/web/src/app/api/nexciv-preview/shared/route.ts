@@ -6,7 +6,7 @@ import { SharedPilotRuntime, type SharedAgentCommand } from '../../../../lib/sha
 import { SharedPilotError } from '../../../../lib/shared-pilot-store';
 import { SHARED_PILOT_NAME, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, isSharedPilotAvatar } from '../../../../lib/shared-pilot-profiles';
 import { parseModelConfig } from '../../../../lib/shared-pilot-model';
-import { cafeTalkSchema, orderCoffeeSchema } from '../../../../lib/shared-pilot-cafe';
+import { cafeTalkSchema, drinkCoffeeSchema, orderCoffeeSchema } from '../../../../lib/shared-pilot-cafe';
 import { cancelWorksGoalSchema, inspectWorksSchema, surveyWorksSiteSchema, worksGoalActionSchema, worksTalkSchema } from '../../../../lib/shared-pilot-works';
 import { fishingTalkSchema, goFishingSchema } from '../../../../lib/shared-pilot-fishing';
 import { explorationActionSchema } from '../../../../lib/shared-pilot-exploration';
@@ -18,7 +18,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 // Preserve running agents across development route recompilation. Bump when
 // the in-memory runtime contract changes.
-const PILOT_RUNTIME_VERSION = 16;
+const PILOT_RUNTIME_VERSION = 17;
 const state = globalThis as typeof globalThis & { nexcivSharedPilot?: { version: number; file: string; external: string; runtime: SharedPilotRuntime } };
 const loopback = /^(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const profileCookie = 'nexciv_shared_profile';
@@ -120,7 +120,7 @@ function readCommand(body: Record<string, unknown> | undefined): SharedAgentComm
   if (!body) return;
   if (body.action === 'observe' && Object.keys(body).length === 1) return { action: 'observe' };
   for (const schema of [sharedPilotMoveRequestSchema, sharedPilotSocialRequestSchema, sharedPilotSurveyRequestSchema,
-    orderCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema, explorationActionSchema,
+    orderCoffeeSchema, drinkCoffeeSchema, cafeTalkSchema, inspectWorksSchema, worksTalkSchema, worksGoalActionSchema, goFishingSchema, fishingTalkSchema, explorationActionSchema,
     resolvePlayerNoteSchema, benchRestSchema, councilReadSchema, sharedTheatreSchema]) {
     const parsed = schema.safeParse(body);
     if (parsed.success) return parsed.data;
@@ -144,6 +144,8 @@ async function changeProfile(request: NextRequest, file: string, config: NonNull
   if (chat.success) return json(pilot.cafeTalk(chat.data.question));
   const coffee = orderCoffeeSchema.safeParse(body);
   if (coffee.success) return json(pilot.orderCoffee(session, config.profileResidents, coffee.data));
+  const sip = drinkCoffeeSchema.safeParse(body);
+  if (sip.success) return json(pilot.drinkCoffee(session, config.profileResidents, sip.data));
   const worksChat = worksTalkSchema.safeParse(body);
   if (worksChat.success) return json(pilot.worksTalk(worksChat.data.question));
   const inspection = inspectWorksSchema.safeParse(body);
