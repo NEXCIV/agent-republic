@@ -18,15 +18,24 @@ export const inspectWorksSchema = z.object({
   requestId: sharedPilotMoveRequestSchema.shape.requestId,
   checkId: z.enum(SHARED_PILOT_SURVEY_CHECKS),
 }).strict();
+export const surveyWorksSiteSchema = z.object({
+  action: z.literal('surveyWorksSite'),
+  requestId: sharedPilotMoveRequestSchema.shape.requestId,
+}).strict();
 export const worksTalkSchema = z.object({
   action: z.literal('worksTalk'),
   question: sharedPilotSpeechSchema.refine(text => !/[\p{Cc}\p{Cf}]/u.test(text)),
 }).strict();
 export type InspectWorks = z.infer<typeof inspectWorksSchema>;
+export type SurveyWorksSite = z.infer<typeof surveyWorksSiteSchema>;
 export type WorksTalk = z.infer<typeof worksTalkSchema>;
 export type WorksCheck = InspectWorks['checkId'];
+type WorksDecision = { checkId: WorksCheck; decidedAt: number; managerReply: string | null };
+export type WorksBrief = { status: 'pending' } | { status: 'failed'; reason: string }
+  | { status: 'assigned'; decision: WorksDecision; inspectionSeq: number };
 export type InspectionRoute = CityRoute & {
-  worksInspection?: { checkId: WorksCheck; label: string; finding: string; durationMs: number };
+  worksInspection?: { checkId: WorksCheck; label: string; finding: string; durationMs: number; origin?: 'site-brief' };
+  worksBrief?: WorksBrief;
 };
 type InspectionRow = { seq: number; resident_id: SharedPilotResidentId; started_at: number; arrives_at: number;
   completed_at: number | null; route_json: string };
@@ -45,8 +54,23 @@ export function worksVisit(row: InspectionRow, at: number) {
   const stage: Stage = row.completed_at === null ? 'travelling' : at < reportAt ? 'observing' : 'completed';
   const completed = stage === 'completed';
   return { id: `works-visit-${row.seq}`, residentId: row.resident_id, checkId: check.checkId, label: check.label,
-    stage, position, acceptedAt: row.started_at, arrivedAt: row.completed_at, reportAt,
+    stage, position, acceptedAt: row.started_at, arrivedAt: row.completed_at, reportAt, origin: check.origin,
     report: completed ? { ...provenance, text: check.finding, recordedAt: reportAt, position } : null };
+}
+
+export function worksBriefView(row: InspectionRow, inspection: InspectionRow | undefined, at: number) {
+  const brief = (JSON.parse(row.route_json) as InspectionRoute).worksBrief!;
+  const visit = inspection ? worksVisit(inspection, at) : null;
+  return {
+    id: `works-brief-${row.seq}`, residentId: row.resident_id, acceptedAt: row.started_at, arrivedAt: row.completed_at,
+    stage: brief.status === 'failed' ? 'failed' as const : visit?.stage ?? (row.completed_at === null ? 'travelling' : 'deciding'),
+    decision: brief.status === 'assigned' ? brief.decision : null,
+    reason: brief.status === 'failed' ? brief.reason : null, visit,
+  };
+}
+
+export function worksBriefActive(brief: ReturnType<typeof worksBriefView>) {
+  return brief.stage !== 'completed' && brief.stage !== 'failed';
 }
 
 export function worksView(rows: InspectionRow[], at: number) {
@@ -54,7 +78,8 @@ export function worksView(rows: InspectionRow[], at: number) {
   const events = visits.flatMap(visit => {
     const event = (kind: EventKind, happenedAt: number, text: string) => ({ ...provenance, kind, happenedAt,
       id: `${visit.id}-${kind}`, residentId: visit.residentId, text });
-    const first = event('INSPECTION_ASSIGNED', visit.acceptedAt, `现场管理员安排 ${visit.residentId} 号巡查${visit.label}。`);
+    const first = event('INSPECTION_ASSIGNED', visit.acceptedAt, visit.origin === 'site-brief'
+      ? `${visit.residentId} 号选择巡查${visit.label}。` : `现场管理员安排 ${visit.residentId} 号巡查${visit.label}。`);
     if (visit.arrivedAt === null) return [first];
     const second = event('INSPECTION_STARTED', visit.arrivedAt, `${visit.residentId} 号抵达${visit.label}，开始观察。`);
     return visit.report ? [first, second, event('INSPECTION_RECORDED', visit.report.recordedAt,

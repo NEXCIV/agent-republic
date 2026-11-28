@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -13,7 +13,8 @@ import { advanceSocial, emptySocialState, meetingActive, meetingPoint, performSo
 import { advanceSurvey, emptySurveyState, performSurvey, publicSurvey, SURVEY_CHECKPOINTS, surveyActive, SurveyActionError, type SurveyState, type SurveyReceipt } from './shared-pilot-survey';
 import { SHARED_AVATARS, SHARED_PILOT_SECRET, SHARED_PILOT_SESSION_SECONDS, latestResidentActivity, type SharedPilotProfile, type SharedPilotProfileView } from './shared-pilot-profiles';
 import { CAFE_ORDERS_TABLE, CAFE_QUEUE, cafePose, CafeOrders, orderCoffeeSchema } from './shared-pilot-cafe';
-import { inspectWorksSchema, SURVEY_OBSERVATION_MS, WORKS_CHECKS, worksReply, worksView, type InspectionRoute, type WorksCheck } from './shared-pilot-works';
+import { inspectWorksSchema, surveyWorksSiteSchema, SURVEY_OBSERVATION_MS, WORKS_CHECKS, worksBriefView, worksReply, worksView,
+  type InspectionRoute, type WorksBrief, type WorksCheck } from './shared-pilot-works';
 import { FISHING_TABLE, FISHING_WAIT, FishingVisits, fishingOutcome, fishingPose, goFishingSchema } from './shared-pilot-fishing';
 
 // E3-05 isolated local integration pilot. Not the official WorldFrame and never
@@ -457,6 +458,34 @@ export class SharedPilotStore {
     if (advanceSurvey(survey, at, residents)) this.saveSurvey(survey);
     this.coffee.settle(at);
     this.fishing.settle();
+    this.assignWorksBriefs(at);
+  }
+
+  private assignWorksBriefs(at: number) {
+    const pending = this.db.prepare(`SELECT * FROM shared_pilot_moves WHERE destination='works'
+      AND completed_at IS NOT NULL AND json_extract(route_json,'$.worksBrief.status')='pending'
+      ORDER BY arrives_at,seq`).all() as unknown as MovementRow[];
+    if (!pending.length) return;
+    const update = this.db.prepare('UPDATE shared_pilot_moves SET route_json=? WHERE seq=?');
+    for (const row of pending) {
+      const route = JSON.parse(row.route_json) as InspectionRoute;
+      const resident = row.resident_id;
+      const occupied = this.activeInspections(at).map(visit => visit.checkId);
+      const checkId = (Object.keys(WORKS_CHECKS) as WorksCheck[]).find(id => !occupied.includes(id));
+      if (!checkId) continue;
+      const managerReply = occupied.length ? worksReply('现在还有哪里可以巡查？', occupied, false).text : null;
+      const requestId = randomUUID();
+      let brief: WorksBrief;
+      try {
+        this.beginWorksInspection(resident, requestId, at, checkId, 'site-brief');
+        brief = { status: 'assigned', decision: { checkId, managerReply, decidedAt: at },
+          inspectionSeq: this.findReceipt(resident, requestId)!.seq };
+      } catch (error) {
+        if (!(error instanceof SharedPilotError) || !['UNREACHABLE', 'LIMIT_REACHED'].includes(error.code)) throw error;
+        brief = { status: 'failed', reason: '目前无法前往可用的巡查点。' };
+      }
+      update.run(JSON.stringify({ ...route, worksBrief: brief }), row.seq);
+    }
   }
 
   /** Server operator only. Issues a new secret and immediately invalidates the old one. */
@@ -496,6 +525,11 @@ export class SharedPilotStore {
       .all(at) as { residentId: SharedPilotResidentId; checkId: WorksCheck }[];
   }
 
+  private pendingWorksBrief() {
+    return this.db.prepare(`SELECT seq FROM shared_pilot_moves WHERE destination='works'
+      AND json_extract(route_json,'$.worksBrief.status')='pending' LIMIT 1`).get();
+  }
+
   private browserOrAgent(credential: string, at: number, profileResidents?: readonly SharedPilotResidentId[]) {
     if (!profileResidents) return this.authenticate(credential, at);
     const actor = this.browserProfile(credential, at)?.residentId;
@@ -515,7 +549,8 @@ export class SharedPilotStore {
       if (social.requests[actor][requestId] || survey.requests[actor][requestId] || this.coffee.find(actor, requestId)) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different city action.');
       const previous = this.findReceipt(actor, requestId);
       if (previous) {
-        if (previous.destination !== destination.place || this.fishing.find(actor, requestId) || (JSON.parse(previous.route_json) as InspectionRoute).worksInspection) {
+        const route = JSON.parse(previous.route_json) as InspectionRoute;
+        if (previous.destination !== destination.place || this.fishing.find(actor, requestId) || route.worksInspection || route.worksBrief) {
           throw new SharedPilotError('CONFLICT', 'Request ID already identifies a different movement.');
         }
         return toReceipt(previous);
@@ -541,7 +576,8 @@ export class SharedPilotStore {
   }
 
   private beginMove(actor: SharedPilotResidentId, requestId: string, place: SharedPilotPlaceId, at: number,
-    target: Parameters<typeof planCityWalk>[1], name?: string, worksInspection?: InspectionRoute['worksInspection']) {
+    target: Parameters<typeof planCityWalk>[1], name?: string,
+    works?: Pick<InspectionRoute, 'worksInspection' | 'worksBrief'>) {
     if (this.db.prepare('SELECT seq FROM shared_pilot_moves WHERE resident_id=? AND completed_at IS NULL').get(actor)) {
       throw new SharedPilotError('BUSY', 'This resident already has an accepted movement.');
     }
@@ -551,12 +587,58 @@ export class SharedPilotStore {
     const route: InspectionRoute | null = planCityWalk(this.residentPosition(actor, resident.place, at), target);
     if (!route) throw new SharedPilotError('UNREACHABLE', 'No surveyed route to this pilot place.');
     if (name) route.name = name;
-    if (worksInspection) route.worksInspection = worksInspection;
+    if (works?.worksBrief && count >= MAX_MOVES_PER_RESIDENT - 1) {
+      throw new SharedPilotError('LIMIT_REACHED', '此居民的行程记录已接近上限，无法安排完整调研。');
+    }
     const arrivesAt = at + Math.ceil(route.metres / SPEED * 1000);
     const result = this.db.prepare(`INSERT INTO shared_pilot_moves (resident_id,request_id,destination,route_json,started_at,arrives_at)
-      VALUES (?,?,?,?,?,?)`).run(actor, requestId, place, JSON.stringify(route), at, arrivesAt);
+      VALUES (?,?,?,?,?,?)`).run(actor, requestId, place, JSON.stringify({ ...route, ...works }), at, arrivesAt);
     this.db.prepare("INSERT INTO shared_pilot_events (movement_seq,kind,happened_at) VALUES (?,'MOVE_STARTED',?)").run(result.lastInsertRowid, at);
     return arrivesAt;
+  }
+
+  private ensureWorksAvailable(actor: SharedPilotResidentId, at: number) {
+    if (meetingActive(this.readSocial().meeting) || surveyActive(this.readSurvey().task)
+      || this.coffee.active(actor, at) || this.fishing.active(at, actor)) {
+      throw new SharedPilotError('BUSY', '居民已有安排，请完成当前活动后再巡查。');
+    }
+  }
+
+  private beginWorksInspection(actor: SharedPilotResidentId, requestId: string, at: number, checkId: WorksCheck,
+    origin?: NonNullable<InspectionRoute['worksInspection']>['origin']) {
+    const { x, z, label, finding } = WORKS_CHECKS[checkId];
+    // Space two residents along the same surveyed footpath if one stays after a visit.
+    const target = { x, z: z + (actor === '02' ? 0.85 : 0) };
+    return this.beginMove(actor, requestId, 'works', at, target, `现场巡查 · ${label}`,
+      { worksInspection: { checkId, label, finding, durationMs: SURVEY_OBSERVATION_MS, origin } });
+  }
+
+  startWorksBrief(session: string, input: unknown, profileResidents: readonly SharedPilotResidentId[]) {
+    return this.transaction(at => {
+      const actor = this.browserOrAgent(session, at, profileResidents);
+      const parsed = surveyWorksSiteSchema.safeParse(input);
+      if (!parsed.success) throw new SharedPilotError('INVALID_REQUEST', '现场调研请求无效。');
+      const { requestId } = parsed.data;
+      this.settle(at);
+      const previous = this.findReceipt(actor, requestId);
+      const receipt = (acceptedAt: number, arrivesAt: number) => ({ mode: 'DEMO' as const,
+        provenance: SHARED_PILOT_PROVENANCE, action: 'surveyWorksSite' as const, residentId: actor, requestId, acceptedAt, arrivesAt });
+      if (previous) {
+        if (!(JSON.parse(previous.route_json) as InspectionRoute).worksBrief) throw new SharedPilotError('CONFLICT', '该请求编号已用于其他城市行动。');
+        return receipt(previous.started_at, previous.arrives_at);
+      }
+      if (this.readSocial().requests[actor][requestId] || this.readSurvey().requests[actor][requestId]) {
+        throw new SharedPilotError('CONFLICT', '该请求编号已用于其他城市行动。');
+      }
+      this.ensureWorksAvailable(actor, at);
+      if (this.activeInspections(at).some(visit => visit.residentId === actor)) {
+        throw new SharedPilotError('BUSY', '请先完成现场巡查。');
+      }
+      const arrivesAt = this.beginMove(actor, requestId, 'works', at, { place: 'works' }, '前往公共建设中心调研',
+        { worksBrief: { status: 'pending' } });
+      this.settle(at);
+      return receipt(at, arrivesAt);
+    });
   }
 
   orderCoffee(credential: string, input: unknown, profileResidents?: readonly SharedPilotResidentId[]) {
@@ -610,17 +692,12 @@ export class SharedPilotStore {
       const social = this.readSocial();
       const survey = this.readSurvey();
       if (social.requests[actor][requestId] || survey.requests[actor][requestId]) throw new SharedPilotError('CONFLICT', '该请求编号已用于其他城市行动。');
-      if (meetingActive(social.meeting) || surveyActive(survey.task) || this.coffee.active(actor, at) || this.fishing.active(at, actor)) {
-        throw new SharedPilotError('BUSY', '居民已有安排，请完成当前活动后再巡查。');
-      }
+      this.ensureWorksAvailable(actor, at);
       if (this.activeInspections(at).some(visit => visit.residentId === actor || visit.checkId === checkId)) {
         throw new SharedPilotError('BUSY', '居民已有巡查任务，或该点位已安排给另一位居民。');
       }
-      const { x, z, label, finding } = WORKS_CHECKS[checkId];
       const durationMs = SURVEY_OBSERVATION_MS;
-      // Space two residents along the same surveyed footpath if one stays after a visit.
-      const target = { x, z: z + (actor === '02' ? 0.85 : 0) };
-      const arrivesAt = this.beginMove(actor, requestId, 'works', at, target, `现场巡查 · ${label}`, { checkId, label, finding, durationMs });
+      const arrivesAt = this.beginWorksInspection(actor, requestId, at, checkId);
       this.settle(at);
       return report(at, arrivesAt, durationMs);
     });
@@ -705,7 +782,7 @@ export class SharedPilotStore {
       const survey = this.readSurvey();
       if (survey.requests[actor][parsed.data.requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies a survey action.');
       if (!social.requests[actor][parsed.data.requestId] && this.coffee.hasActiveOrder(at)) throw new SharedPilotError('BUSY', '咖啡摊有居民正在点单。');
-      if (!social.requests[actor][parsed.data.requestId] && this.activeInspections(at).length) throw new SharedPilotError('BUSY', '有居民正在执行现场巡查。');
+      if (!social.requests[actor][parsed.data.requestId] && (this.pendingWorksBrief() || this.activeInspections(at).length)) throw new SharedPilotError('BUSY', '有居民正在执行现场调研。');
       if (!social.requests[actor][parsed.data.requestId] && this.fishing.active(at)) throw new SharedPilotError('BUSY', '有居民正在北岸钓鱼。');
       if (surveyActive(survey.task) && !social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('BUSY', 'A shared survey is active.');
       try {
@@ -731,7 +808,7 @@ export class SharedPilotStore {
       if (this.findReceipt(actor, parsed.data.requestId) || social.requests[actor][parsed.data.requestId]) throw new SharedPilotError('CONFLICT', 'Request ID already identifies another city action.');
       const survey = this.readSurvey();
       if (!survey.requests[actor][parsed.data.requestId] && this.coffee.hasActiveOrder(at)) throw new SharedPilotError('BUSY', '咖啡摊有居民正在点单。');
-      if (!survey.requests[actor][parsed.data.requestId] && this.activeInspections(at).length) throw new SharedPilotError('BUSY', '有居民正在执行现场巡查。');
+      if (!survey.requests[actor][parsed.data.requestId] && (this.pendingWorksBrief() || this.activeInspections(at).length)) throw new SharedPilotError('BUSY', '有居民正在执行现场调研。');
       if (!survey.requests[actor][parsed.data.requestId] && this.fishing.active(at)) throw new SharedPilotError('BUSY', '有居民正在北岸钓鱼。');
       try {
         const residents = this.socialResidents(at);
@@ -770,6 +847,16 @@ export class SharedPilotStore {
       const inspections = this.db.prepare(`SELECT * FROM shared_pilot_moves
         WHERE destination='works' AND json_extract(route_json, '$.worksInspection') IS NOT NULL
         ORDER BY seq DESC LIMIT 16`).all() as unknown as MovementRow[];
+      const briefLookup = this.db.prepare(`SELECT * FROM shared_pilot_moves WHERE resident_id=? AND destination='works'
+        AND json_extract(route_json,'$.worksBrief') IS NOT NULL ORDER BY seq DESC LIMIT 1`);
+      const inspectionLookup = this.db.prepare('SELECT * FROM shared_pilot_moves WHERE seq=?');
+      const briefs = rows.flatMap(({ id }) => {
+        const row = briefLookup.get(id) as unknown as MovementRow | undefined;
+        if (!row) return [];
+        const brief = (JSON.parse(row.route_json) as InspectionRoute).worksBrief!;
+        const inspection = brief.status === 'assigned' ? inspectionLookup.get(brief.inspectionSeq) as unknown as MovementRow : undefined;
+        return [worksBriefView(row, inspection, at)];
+      });
       const residents = rows.map(({ id, place }) => {
         const movement = latest.get(id) as unknown as MovementRow | undefined;
         const order = latestResidentActivity(cafe.orders, id);
@@ -796,7 +883,7 @@ export class SharedPilotStore {
         revision: events.at(-1)?.id ?? '0', residents, events,
         cafe,
         fishing,
-        works: worksView(inspections.reverse(), at),
+        works: { ...worksView(inspections.reverse(), at), briefs },
         social: publicSocial(social, this.socialResidents(at)),
         survey: publicSurvey(survey, this.socialResidents(at), social.meeting),
         privateSocial: { memories: social.memories[viewerResidentId], encounters: social.encounters[viewerResidentId] },

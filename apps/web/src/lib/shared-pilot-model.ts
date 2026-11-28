@@ -9,7 +9,7 @@ import { availableSurveyIntents, meetingActive, nextSpeaker } from './shared-pil
 import { surveyActive, SURVEY_CHECKPOINTS, SURVEY_OBSERVATION_MS } from './shared-pilot-survey';
 import { CITY_PLACES } from './city-movement';
 import { COFFEE_MENU, type CafeTalk, type OrderCoffee } from './shared-pilot-cafe';
-import { WORKS_CHECKS, type InspectWorks } from './shared-pilot-works';
+import { WORKS_CHECKS, worksBriefActive, type InspectWorks } from './shared-pilot-works';
 import type { GoFishing } from './shared-pilot-fishing';
 
 export type ModelConfig = { endpoint: URL; model: string; apiKey: string };
@@ -139,7 +139,9 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
     askCafe();
     return choices;
   }
-  if (works.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
+  const activeBriefs = works.briefs.filter(worksBriefActive);
+  if (activeBriefs.some(brief => brief.residentId === actor)
+    || works.visits.some(visit => visit.residentId === actor && visit.stage !== 'completed')) return choices;
   const fishingActive = fishing.visits.filter(visit => visit.stage !== 'completed');
   if (fishingActive.some(visit => visit.residentId === actor)) return choices;
   const task = survey.task;
@@ -174,7 +176,7 @@ export function modelChoices(observation: ModelObservation, canAskCafe = true): 
   for (const place of SHARED_PILOT_PLACE_IDS) if (place !== own.place) move(place);
   const peer = actor === '01' ? '02' : '01';
   const inspections = works.visits.filter(visit => visit.stage !== 'completed');
-  if (!inspections.length && !fishingActive.length && !cafe.orders.some(order => order.stage !== 'completed')) {
+  if (!activeBriefs.length && !inspections.length && !fishingActive.length && !cafe.orders.some(order => order.stage !== 'completed')) {
     add(`invite:${peer}`, '邀请另一位居民到咖啡街见面', { action: 'invite', target: peer, venue: 'cafe', requestId: randomUUID() });
     if (survey.eligibleMeetingId) add(`survey:${survey.eligibleMeetingId}:propose`, '提议共同调研公共建设中心',
       { action: 'proposeSurvey', meetingId: survey.eligibleMeetingId, requestId: randomUUID() });

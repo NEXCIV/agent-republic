@@ -7,7 +7,7 @@ import type { SharedPilotProfile } from './shared-pilot-profiles';
 import { chooseModelAction, SharedPilotModelRun, type ModelConfig } from './shared-pilot-model';
 import { CITY_PLACES } from './city-movement';
 import type { CafeTalk, OrderCoffee } from './shared-pilot-cafe';
-import type { InspectWorks, WorksTalk } from './shared-pilot-works';
+import { worksBriefActive, type InspectWorks, type SurveyWorksSite, type WorksTalk } from './shared-pilot-works';
 import type { FishingTalk, GoFishing } from './shared-pilot-fishing';
 
 type Observation = ReturnType<SharedPilotStore['observe']>;
@@ -92,6 +92,9 @@ export class SharedPilotRuntime {
   }
   requestInspection(session: string, residents: readonly SharedPilotResidentId[], command: InspectWorks) {
     return this.store.requestInspection(session, command, residents);
+  }
+  startWorksBrief(session: string, residents: readonly SharedPilotResidentId[], command: SurveyWorksSite) {
+    return this.store.startWorksBrief(session, command, residents);
   }
   goFishing(session: string, residents: readonly SharedPilotResidentId[], command: GoFishing) {
     return this.store.goFishing(session, command, residents);
@@ -285,6 +288,7 @@ export class SharedPilotRuntime {
       const observation = connection === this.connections[0] ? firstObservation : this.observeConnection(connection);
       if (observation.cafe.orders.some(order => order.stage !== 'completed')) continue;
       if (observation.works.visits.some(visit => visit.stage !== 'completed')) continue;
+      if (observation.works.briefs.some(worksBriefActive)) continue;
       if (observation.fishing.visits.some(visit => visit.stage !== 'completed')) continue;
       if (this.surveyTick(connection, observation)) continue;
       if (this.socialTick(connection, observation, external.size === 0)) continue;
@@ -324,7 +328,7 @@ export class SharedPilotRuntime {
         return { residentId, driver: 'EXTERNAL' as const, connected: lastCall !== undefined && serverTime - lastCall <= 120000 };
       }),
       running: !this.failure && (this.connections.some(({ decisions }) => decisions < MAX_DECISIONS) || meetingActive(social.meeting)
-        || surveyActive(survey.task) || fishing.visits.some(visit => visit.stage !== 'completed')),
+        || surveyActive(survey.task) || works.briefs.some(worksBriefActive) || fishing.visits.some(visit => visit.stage !== 'completed')),
     };
   }
 

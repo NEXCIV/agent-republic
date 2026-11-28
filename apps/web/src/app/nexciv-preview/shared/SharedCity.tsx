@@ -19,6 +19,7 @@ import { CAFE_VENDOR, COFFEE_STATUS } from '../../../lib/shared-pilot-cafe';
 import { WORKS_MANAGER, WORKS_STATUS } from '../../../lib/shared-pilot-works';
 import { FISHING_STATUS, PIER_ANGLER } from '../../../lib/shared-pilot-fishing';
 import { SharedNpcPanel } from './SharedNpcPanel';
+import { WorksBriefRecord, WorksSitePanel } from './WorksSitePanel';
 
 type ResidentId = '01' | '02';
 type CameraView = 'overview' | 'self';
@@ -205,6 +206,8 @@ export function SharedCity({ children }: { children: ReactNode }) {
   const selectedWorksManager = selection?.kind === 'person' && selection.id === WORKS_MANAGER.id;
   const selectedAngler = selection?.kind === 'person' && selection.id === PIER_ANGLER.id;
   const ownResident = snapshot?.ownResidentId ?? null;
+  const ownBrief = snapshot?.works.briefs.find(brief => brief.residentId === ownResident);
+  const canFollowOwn = ownResident && live3d && reports[ownResident] && reports[ownResident]?.status !== 'unavailable';
   return <div className={base.page}>
     <section className={`${base.viewer} ${styles.viewer}`} data-joining={joining} aria-label="共享城市观察">
       {/* The existing original city render provides the loading and 2D fallback. */}
@@ -275,11 +278,15 @@ export function SharedCity({ children }: { children: ReactNode }) {
           onFollow={live3d && ownResident ? followOwn : undefined} />}
         {selectedAngler && <SharedNpcPanel key="fishing" kind="fishing" snapshot={snapshot} connected={status === 'live'}
           onFollow={live3d && ownResident ? followOwn : undefined} />}
-        {selection?.kind === 'building' && selection.id === 'works' && <div className={`${base.explorerActions} ${styles.worksEntry}`}>
-          <button type="button" onClick={() => inspect(WORKS_MANAGER)}>找现场管理员</button>
-        </div>}
+        {selection?.kind === 'building' && selection.id === 'works' && <WorksSitePanel
+          snapshot={snapshot} ownResident={ownResident} connected={status === 'live'}
+          onFollow={canFollowOwn ? () => followOwn(ownResident) : undefined} onManager={() => inspect(WORKS_MANAGER)} />}
       </CityExplorer>
       <aside id="shared-city-activity" className={styles.journal} aria-label="实时城市动态" hidden={panel !== 'activity'}>
+        {snapshot && ownBrief && <section className={styles.meeting} aria-label="我的建设中心调研">
+          <div className={styles.panelHead}><h2>我的建设中心调研</h2></div>
+          <WorksBriefRecord brief={ownBrief} serverTime={snapshot.serverTime} />
+        </section>}
         {task && <section className={styles.meeting} aria-label="公共建设中心共同调研">
           <div className={styles.panelHead}><h2>公共建设中心调研</h2><small>{survey?.completed ?? 0} 次完成</small></div>
           <p className={styles.meetingState} data-survey-status={task.status}><i />{surveyTitle}{task.status === 'accepted' && ` · ${survey?.arrived.length ?? 0}/2 到场`}{task.status === 'surveying' && ` · ${submitted}/2 已记录`}</p>

@@ -68,3 +68,46 @@ it('keeps the resident at the surveyed point until observation has elapsed and r
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+it('accepts only the owner goal, then chooses an available check from the site state on arrival', () => {
+  const folder = mkdtempSync(path.join(tmpdir(), 'nexciv-works-brief-'));
+  const filename = path.join(folder, 'shared.sqlite');
+  let now = 100000;
+  let store = new SharedPilotStore(filename, () => now);
+  try {
+    const a = store.issueCredential('01').token;
+    const b = store.issueCredential('02').token;
+    const { session } = store.claim({ name: '小满', avatar: 'citizen' }, ['01'], '');
+    const goal = { action: 'surveyWorksSite', requestId: randomUUID() };
+    expect(() => store.startWorksBrief('', goal, ['01'])).toThrow(expect.objectContaining({ code: 'AUTH_REQUIRED' }));
+    expect(() => store.startWorksBrief(session, goal, ['02'])).toThrow(expect.objectContaining({ code: 'AUTH_REQUIRED' }));
+    expect(() => store.startWorksBrief(session, { ...goal, checkId: 'entrance-path', residentId: '02' }, ['01']))
+      .toThrow(expect.objectContaining({ code: 'INVALID_REQUEST' }));
+    const receipt = store.startWorksBrief(session, goal, ['01']);
+    expect(store.startWorksBrief(session, goal, ['01'])).toEqual(receipt);
+    expect(() => store.moveTo(a, { ...goal, action: 'moveTo', destination: { place: 'works' } }))
+      .toThrow(expect.objectContaining({ code: 'CONFLICT' }));
+    expect(() => store.startWorksBrief(session, { ...goal, requestId: randomUUID() }, ['01']))
+      .toThrow(expect.objectContaining({ code: 'BUSY' }));
+    expect(store.observe(b).works.briefs[0]).toMatchObject({ residentId: '01', stage: 'travelling', decision: null, visit: null });
+    expect(JSON.stringify(store.observe(b))).not.toContain(goal.requestId);
+    now = receipt.arrivesAt - 1;
+    store.requestInspection(b, { action: 'inspectWorks', requestId: randomUUID(), checkId: 'entrance-path' });
+    expect(store.observe(b).works.briefs[0]?.decision).toBeNull();
+    now++;
+    store.close();
+    store = new SharedPilotStore(filename, () => now);
+    const brief = store.observe(a).works.briefs[0]!;
+    expect(brief.decision).toMatchObject({ checkId: 'pedestrian-passage', managerReply: expect.stringContaining('已安排') });
+    expect(brief.visit).toMatchObject({ checkId: 'pedestrian-passage', report: null });
+    expect(store.startWorksBrief(session, goal, ['01'])).toEqual(receipt);
+    now = brief.visit!.reportAt - 1;
+    expect(store.observe(a).works.briefs[0]!.visit?.report).toBeNull();
+    now++;
+    expect(store.observe(a).works.briefs[0]).toMatchObject({ stage: 'completed', visit: { report: { recordedAt: now } } });
+    expect(store.observe(a).works.visits.filter(visit => visit.residentId === '01')).toHaveLength(1);
+  } finally {
+    store.close();
+    rmSync(folder, { recursive: true, force: true });
+  }
+});

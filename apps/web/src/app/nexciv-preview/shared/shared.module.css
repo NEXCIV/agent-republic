@@ -87,7 +87,14 @@
 .cafeOrder button[type="submit"]:enabled { background: #f0b90b; color: #16130b; font-weight: 650; }
 .cafeOrder button[type="submit"]:enabled:hover { background: #ffd054; }
 .npcFollow { justify-self: start; }
-.worksEntry { margin-top: 8px; }
+.cafeVendor .worksSecondary { justify-self: start; color: #f4d78a; background: #292720; border-color: #6d624a; }
+.cafeVendor .worksSecondary:hover { background: #373021; }
+.worksHeading { margin: 4px 0 0; color: #f3e5be; font-size: 15px; }
+.worksRecord { display: grid; gap: 6px; border-top: 1px solid #514c3f; padding-top: 10px; font-size: 13px; }
+.worksRecord p { margin: 0; color: #f5eddf; font-size: 13px; line-height: 1.5; }
+.worksRecord small { color: #d2c2a2; font-size: 11px; font-variant-numeric: tabular-nums; }
+.worksProgress { width: 100%; height: 8px; accent-color: #f0b90b; }
+.worksFinding { margin-top: 3px; color: #f5eddf; }
 .cafeOrder p, .cafeReply p, .cafeJoin, .cafeError { margin: 0; font-size: 13px; line-height: 1.55; }
 .cafeReply { padding: 8px 10px; background: #25231e; border-radius: 5px; overflow-wrap: anywhere; }
 .cafeReply span, .cafeReply small { color: #d2c2a2; font-size: 11px; }
